@@ -449,9 +449,32 @@ static void contact_and_seth_prompts_differ(void) {
               hu_init_proposer_system_prompt_for(NULL));
 }
 
+/* Whose news (2026-09-30): the memory the proposer sees says "The user is
+ * navigating ... a recent relocation to Florida" — Seth's move — and it texted
+ * his sister and his mother "how are things settling in down in Florida" six
+ * times in eight days. When memory is present the prompt says whose it is. */
+static void compose_memory_is_marked_as_seths_own_news(void) {
+    hu_proactive_compose_inputs_t inputs;
+    memset(&inputs, 0, sizeof(inputs));
+    inputs.memory_context = "The user is navigating a recent relocation to Florida";
+    inputs.memory_context_len = strlen(inputs.memory_context);
+    char buf[2048] = {0};
+    (void)hu_init_proposer_build_propose_user_message_ex(&inputs, 0, 0, buf, sizeof(buf));
+    HU_ASSERT(strstr(buf, "--- whose news ---") != NULL);
+    HU_ASSERT(strstr(buf, "Seth's own life") != NULL);
+
+    memset(&inputs, 0, sizeof(inputs));
+    inputs.situation_context = "quiet for 5 days";
+    inputs.situation_context_len = strlen(inputs.situation_context);
+    memset(buf, 0, sizeof(buf));
+    (void)hu_init_proposer_build_propose_user_message_ex(&inputs, 0, 0, buf, sizeof(buf));
+    HU_ASSERT_NULL(strstr(buf, "--- whose news ---")); /* no memory, no note */
+}
+
 void run_init_proposer_compose_tests(void);
 void run_init_proposer_compose_tests(void) {
     HU_TEST_SUITE("init_proposer_compose");
+    HU_RUN_TEST(compose_memory_is_marked_as_seths_own_news);
     HU_RUN_TEST(compose_empty_inputs_emits_header_and_question);
     HU_RUN_TEST(contact_system_prompt_frames_seth_as_sender);
     HU_RUN_TEST(no_contact_keeps_seth_system_prompt);

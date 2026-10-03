@@ -17,13 +17,19 @@
 #   HU_DEAD_STRIP_STRICT=1 bash scripts/check-dead-strip-ratchet.sh   # pre-push
 #   HU_BUILD_DIR=build2 bash scripts/check-dead-strip-ratchet.sh
 #
-# TWO CALLERS, TWO JOBS
+# THREE CALLERS, THREE JOBS
 #   .githooks/pre-commit  runs it plain, so ratchet_autolock can rewrite and
 #                         STAGE a lowered constant — that only happens from the
 #                         pre-commit hook (HU_RATCHET_FROM_HOOK=1), so this is
 #                         the only place a gain can ever be locked.
 #   .githooks/pre-push    rebuilds build/ first, then runs it with
-#                         HU_DEAD_STRIP_STRICT=1. That is the ENFORCEMENT point.
+#                         HU_DEAD_STRIP_STRICT=1. The LOCAL enforcement point —
+#                         but it skips when the worktree has no build/ at all.
+#   ci.yml dead-strip-    configures --preset dev on macos-latest and runs it
+#   ratchet job           with HU_DEAD_STRIP_STRICT=1. The BACKSTOP for that
+#                         skip, and the only caller that treats RATCHET_SKIP as
+#                         a failure — a runner built for the gate that cannot
+#                         measure is broken, not merely unmeasurable.
 #
 #   HU_DEAD_STRIP_STRICT=1 disables the stale-build demotion below. Without it
 #   (ad-hoc runs, and pre-commit) a build dir older than src/ reports its counts
@@ -31,7 +37,8 @@
 #
 # EXIT CODES
 #   0  A and B are at or below their baselines — or the gate could not measure
-#      (no build dir, non-Darwin, stale build dir outside strict mode) and said
+#      (no build dir, build dir not configured as the dev preset, non-Darwin,
+#      stale build dir outside strict mode) and said
 #      so. An unmeasurable gate must never block a commit or a push
 #      (.claude/rules/no-number-without-a-measurement.md); it prints
 #      `RATCHET_SKIP: <reason>` so scripts/ratchet-debt-report.sh can tell
@@ -42,7 +49,9 @@
 # preset in `build/` (ASan, the full feature set). A differently-configured tree
 # compiles a different set of translation units, so pointing HU_BUILD_DIR at
 # e.g. build-check measures a DIFFERENT universe and its numbers are not
-# comparable to these constants. See .claude/rules/dead-strip-ratchet.md.
+# comparable to these constants. The gate checks this rather than assuming it:
+# any build dir whose CMakeCache.txt disagrees with the dev preset is skipped
+# (RATCHET_SKIP), strict mode or not. See .claude/rules/dead-strip-ratchet.md.
 set -euo pipefail
 
 # Auto-lock any gain so it can never be spent again (scripts/ratchet-config.tsv).
@@ -96,7 +105,7 @@ fi
 # owned by the live style governor hu_daemon_shape_text_inplace) dropped a
 # freshly-built measurement from 33 to 32. Auto-lock still does not fire for
 # the same reason as above — hand-locking again.
-NEVER_LOADED_BASELINE=31   # auto-locked 2026-09-26 (was 32)
+NEVER_LOADED_BASELINE=13   # auto-locked 2026-09-29 (was 14)
 # Composition at the baseline: 40 whole function symbols plus 59 function-local
 # statics (`_hu_fn.CONSTANT`, `_hu_fn.sql`), which the linker emits as separate
 # symbols of the function that owns them. Both are counted, per the plan's
@@ -105,7 +114,7 @@ NEVER_LOADED_BASELINE=31   # auto-locked 2026-09-26 (was 32)
 #
 # Re-measured 2026-09-21 alongside NEVER_LOADED_BASELINE above, same config
 # change and same reason the auto-lock didn't fire.
-DEAD_UNREF_BASELINE=76   # auto-locked 2026-09-26 (was 79)
+DEAD_UNREF_BASELINE=73   # auto-locked 2026-09-28 (was 75)
 
 cd "$_hu_root"
 
@@ -118,6 +127,101 @@ skip() {
     echo "dead-strip ratchet did not run: $1" >&2
     exit 0
 }
+
+# Configuration. The baselines above describe the dev preset's translation-unit
+# universe, so a build/ configured any other way measures a different universe
+# and its A/B are not comparable to them. That is not hypothetical: on
+# 2026-09-26 the main checkout's build/ had been hand-configured with
+# HU_ENABLE_ALL_CHANNELS=ON, compiled 1,026 archive members instead of 991, and
+# reported A=33 / B=96 against ceilings 31 / 76, failing every push. On a real
+# dev-preset build of the same commit (f714418ac) A=31 and B=76.
+#
+# So compare every cache variable the dev preset sets (resolved through
+# `inherits`, the same way scripts/dev/build-options-table.sh does) against
+# $BUILD_DIR/CMakeCache.txt, and SKIP on any mismatch. This applies under
+# HU_DEAD_STRIP_STRICT=1 as well: strict mode turns off stale-tree demotion
+# (a rebuild makes that tree current), but no rebuild can make a
+# differently-configured tree into the dev preset. And because it exits before
+# ratchet_autolock, a mismatched build can never lock a baseline.
+#
+# It runs before the platform check so the fixture test
+# (tests/fixtures/check-dead-strip-config/) exercises it on Linux CI too.
+dev_preset_mismatches() {  # dev_preset_mismatches CACHE_FILE -> "VAR=cached vs preset expected" lines
+    python3 - "$1" CMakePresets.json dev <<'PYEOF'
+import json, re, sys
+
+cache_path, presets_path, preset_name = sys.argv[1:4]
+
+# Cache variables that do not change which translation units compile.
+NOT_FEATURE_SELECTING = {"CMAKE_EXPORT_COMPILE_COMMANDS"}
+
+with open(presets_path) as f:
+    by_name = {p["name"]: p for p in json.load(f).get("configurePresets", [])}
+
+def resolved(name, seen=None):
+    """Merge cacheVariables along the inherits chain; child overrides parent."""
+    seen = seen or set()
+    if name in seen or name not in by_name:
+        return {}
+    seen.add(name)
+    preset, merged = by_name[name], {}
+    parents = preset.get("inherits") or []
+    for parent in parents if isinstance(parents, list) else [parents]:
+        merged.update(resolved(parent, seen))
+    merged.update(preset.get("cacheVariables", {}))
+    return merged
+
+if preset_name not in by_name:
+    sys.exit(f"no '{preset_name}' configurePreset in {presets_path}")
+expected = resolved(preset_name)
+
+cached = {}
+with open(cache_path, errors="replace") as f:
+    for line in f:
+        m = re.match(r"^([A-Za-z0-9_.+-]+):[A-Z_]+=(.*)$", line.rstrip("\n"))
+        if m:
+            cached[m.group(1)] = m.group(2)
+
+# CMake's own truthiness (if(<constant>)), so ON vs TRUE vs 1 is not a mismatch.
+def as_bool(v):
+    u = v.strip().upper()
+    if u in ("ON", "YES", "TRUE", "Y") or re.fullmatch(r"[1-9][0-9]*", u):
+        return True
+    if u in ("OFF", "NO", "FALSE", "N", "0", "IGNORE", "NOTFOUND", "") or u.endswith("-NOTFOUND"):
+        return False
+    return None
+
+for var, want in sorted(expected.items()):
+    if isinstance(want, dict):          # {"type": "BOOL", "value": "ON"}
+        want = want.get("value", "")
+    want = str(want)
+    if var in NOT_FEATURE_SELECTING or "$" in want:   # macros: not comparable
+        continue
+    got = cached.get(var)
+    if got is None:
+        print(f"{var}=<unset> vs preset {want}")
+        continue
+    wb, gb = as_bool(want), as_bool(got)
+    same = (wb == gb) if (wb is not None and gb is not None) else got.lower() == want.lower()
+    if not same:
+        print(f"{var}={got} vs preset {want}")
+PYEOF
+}
+
+[ -f "$BUILD_DIR/CMakeCache.txt" ] || skip "no $BUILD_DIR/CMakeCache.txt (configure first: cmake --preset dev)"
+command -v python3 >/dev/null 2>&1 || \
+    skip "python3 not found; cannot confirm $BUILD_DIR is the dev preset the baselines describe"
+if ! _mismatches=$(dev_preset_mismatches "$BUILD_DIR/CMakeCache.txt"); then
+    skip "could not read the dev preset from CMakePresets.json; cannot confirm $BUILD_DIR matches it"
+fi
+if [ -n "$_mismatches" ]; then
+    # Name at most three: this reason lands in a ratchet-debt-report.sh table
+    # cell, and one mismatch is already enough to void the measurement.
+    _n=$(printf '%s\n' "$_mismatches" | wc -l | tr -d ' ')
+    _shown=$(printf '%s\n' "$_mismatches" | awk 'NR <= 3' | paste -sd ';' - | sed 's/;/; /g')
+    [ "$_n" -gt 3 ] && _shown="$_shown; +$((_n - 3)) more"
+    skip "$BUILD_DIR is not the dev preset ($_shown); reconfigure with: cmake --preset dev"
+fi
 
 # The map parser below is macOS ld's (`# Object files:` / `# Symbols:` /
 # `# Dead Stripped Symbols:`). GNU ld's -Map is a different format; until that
@@ -145,6 +249,18 @@ done
 STALE=0
 for _artifact in human human_tests; do
     if [ -n "$(find src include \( -name '*.[ch]' -o -name '*.m' \) -newer "$BUILD_DIR/$_artifact" -print -quit 2>/dev/null)" ]; then
+        STALE=1
+    fi
+    # A reconfigure without a rebuild is stale too, and src/ mtimes cannot see
+    # it: link.txt is regenerated for the NEW configuration while human_tests'
+    # objects still come from the old one. Measured 2026-09-26 on the main
+    # checkout right after `cmake --preset dev` over an ALL_CHANNELS=ON tree:
+    # the new 995-member link.txt against the old test objects gave B=96.
+    # Anchored on the two link.txt files this gate reads, NOT CMakeCache.txt:
+    # CMake rewrites the cache on every re-run (a comment edit in
+    # CMakeLists.txt would mark the tree stale forever) but writes link.txt
+    # copy-if-different, so its mtime moves only when the link line does.
+    if [ "$HUMAN_LINK" -nt "$BUILD_DIR/$_artifact" ] || [ "$CORE_LINK" -nt "$BUILD_DIR/$_artifact" ]; then
         STALE=1
     fi
 done
@@ -263,7 +379,19 @@ awk -F'\t' -v idxfile="$TMP/core_idx.txt" '
 # when a test object is recompiled — so cache it on the newest test .o mtime.
 TESTREFS=""
 find "$BUILD_DIR/CMakeFiles/human_tests.dir" "$BUILD_DIR/CMakeFiles/human_core_test.dir" \
-     -name '*.o' > "$TMP/testobjs.txt" 2>/dev/null || true
+     -name '*.o' > "$TMP/testobjs.all" 2>/dev/null || true
+# Drop objects whose source no longer exists. CMake never deletes the .o of a
+# removed source, so after a test is deleted its stale object still "references"
+# whatever it used, and those symbols vanish from B locally while CI (a clean
+# build) counts them. Measured 2026-09-28: deleting test_cross_channel_acl.c left
+# hu_persona_load_defaults dead-and-unreferenced; local B read 73, CI read 74,
+# and pre-commit had auto-locked the wrong 73.
+while IFS= read -r o; do
+    rel=${o#"$BUILD_DIR"/CMakeFiles/*.dir/}
+    src=${rel%.o}
+    case "$src" in src/* | tests/*) [ -f "$src" ] || continue ;; esac
+    printf '%s\n' "$o"
+done < "$TMP/testobjs.all" > "$TMP/testobjs.txt"
 if [ -s "$TMP/testobjs.txt" ]; then
     # max via awk, not `sort -rn | head -1`: under `set -o pipefail` head's early
     # exit SIGPIPEs sort as soon as its output outgrows the pipe buffer, and the
@@ -308,8 +436,8 @@ echo "A = never-loaded archive members: $A (ceiling $NEVER_LOADED_BASELINE)"
 echo "B = unreferenced dead symbols: $B (ceiling $DEAD_UNREF_BASELINE)"
 
 if [ "$STALE" = "1" ]; then
-    echo "RATCHET_SKIP: $BUILD_DIR is older than src/ — counts describe an earlier tree"
-    echo "NOTE: $BUILD_DIR predates the current sources, so these counts are advisory" >&2
+    echo "RATCHET_SKIP: $BUILD_DIR is older than src/ or its link.txt — counts describe an earlier tree"
+    echo "NOTE: $BUILD_DIR predates the current sources or configuration, so these counts are advisory" >&2
     echo "      and nothing is locked. Rebuild to enforce (and to let the baselines" >&2
     echo "      ratchet down): cmake --build $BUILD_DIR --target human human_tests" >&2
     echo "      The pre-push hook does that rebuild for you before it enforces." >&2

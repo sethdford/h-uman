@@ -29,7 +29,7 @@ hu_dated_followup_outcome_t hu_daemon_dated_followup_apply(void *memory, hu_allo
     if (pending)
         return HU_DATED_FOLLOWUP_ALREADY_PENDING;
     if (hu_superhuman_delayed_followup_schedule(memory, alloc, contact, contact_len, frame,
-                                                frame_len, send_at_s) != HU_OK) {
+                                                frame_len, send_at_s, NULL, 0) != HU_OK) {
         hu_log_warn("dated_followup", NULL,
                     "could not queue a check-in (situation %zu B); it will not be sent", frame_len);
         return HU_DATED_FOLLOWUP_NONE;

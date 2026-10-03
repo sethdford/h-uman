@@ -394,14 +394,11 @@ void hu_mlx_admin_current_adapter_free(hu_allocator_t *alloc,
     (void)current;
 }
 
-bool hu_mlx_admin_probe_health(hu_allocator_t *alloc, const char *base_url, size_t base_url_len) {
+/* No transport: never healthy (the caller routes elsewhere / holds). */
+static bool probe_transport(hu_allocator_t *alloc, const char *base_url, size_t base_url_len) {
     (void)alloc;
     (void)base_url;
     (void)base_url_len;
-    /* Test override still applies (lets tests force healthy=true even in a
-     * curl-less build); otherwise no transport → never healthy → cloud. */
-    if (g_health_override_set)
-        return g_health_override_val;
     return false;
 }
 
@@ -592,33 +589,72 @@ void hu_mlx_admin_current_adapter_free(hu_allocator_t *alloc,
     }
 }
 
+/* One GET of <base_url>/adapters/current under the probe's short caps.
+ * Reuses the known-good /adapters/current endpoint (the swap infra targets
+ * the same v1 root) rather than assuming a /health route the server may not
+ * expose. HTTP 200 == server up + serving. */
+static bool probe_transport(hu_allocator_t *alloc, const char *base_url, size_t base_url_len) {
+    char *url = join_url(alloc, base_url, base_url_len, "adapters/current");
+    if (!url)
+        return false;
+    hu_http_request_opts_t opts = hu_mlx_admin_probe_request_opts();
+    hu_http_response_t resp = {0};
+    hu_error_t err = hu_http_get_opts(alloc, url, /*auth_header=*/NULL, &opts, &resp);
+    alloc->free(alloc->ctx, url, strlen(url) + 1);
+    bool healthy = (err == HU_OK && resp.status_code == 200);
+    if (resp.owned && resp.body)
+        hu_http_response_free(alloc, &resp);
+    return healthy;
+}
+
+#endif /* HU_ENABLE_CURL */
+
+hu_http_request_opts_t hu_mlx_admin_probe_request_opts(void) {
+    hu_http_request_opts_t o = {.timeout_secs = HU_MLX_ADMIN_PROBE_TIMEOUT_SECS,
+                                .connect_timeout_secs = HU_MLX_ADMIN_PROBE_CONNECT_TIMEOUT_SECS};
+    return o;
+}
+
+#if HU_IS_TEST
+static unsigned g_probe_requests;
+unsigned hu_mlx_admin_test_probe_requests(void) {
+    return g_probe_requests;
+}
+void hu_mlx_admin_seed_health_cache_for_test(bool healthy) {
+    g_health_cache_ms = (int64_t)time(NULL) * 1000;
+    g_health_cache_val = healthy;
+}
+#endif
+
+/* Probe now and cache the answer. The cache is stamped AFTER the request:
+ * a probe that took its whole timeout must not leave an entry that is
+ * already (nearly) stale, or the next caller probes — and waits — again. */
+static bool probe_and_cache(hu_allocator_t *alloc, const char *base_url, size_t base_url_len) {
+#if HU_IS_TEST
+    g_probe_requests++;
+#endif
+    bool healthy = probe_transport(alloc, base_url, base_url_len);
+    g_health_cache_ms = (int64_t)time(NULL) * 1000;
+    g_health_cache_val = healthy;
+    return healthy;
+}
+
 bool hu_mlx_admin_probe_health(hu_allocator_t *alloc, const char *base_url, size_t base_url_len) {
     if (g_health_override_set)
         return g_health_override_val;
     if (!alloc || !base_url || base_url_len == 0)
         return false;
-
     int64_t now_ms = (int64_t)time(NULL) * 1000;
     if (g_health_cache_ms != 0 && now_ms - g_health_cache_ms < 60000)
         return g_health_cache_val;
-
-    /* Reuse the known-good /adapters/current endpoint (the swap infra
-     * targets the same v1 root) rather than assuming a /health route the
-     * server may not expose. HTTP 200 == server up + serving. */
-    char *url = join_url(alloc, base_url, base_url_len, "adapters/current");
-    if (!url)
-        return false; /* transient OOM — don't poison the cache */
-
-    hu_http_response_t resp = {0};
-    hu_error_t err = hu_http_get(alloc, url, /*auth_header=*/NULL, &resp);
-    alloc->free(alloc->ctx, url, strlen(url) + 1);
-    bool healthy = (err == HU_OK && resp.status_code == 200);
-    if (resp.owned && resp.body)
-        hu_http_response_free(alloc, &resp);
-
-    g_health_cache_ms = now_ms;
-    g_health_cache_val = healthy;
-    return healthy;
+    return probe_and_cache(alloc, base_url, base_url_len);
 }
 
-#endif /* HU_ENABLE_CURL */
+bool hu_mlx_admin_probe_health_fresh(hu_allocator_t *alloc, const char *base_url,
+                                     size_t base_url_len) {
+    if (g_health_override_set)
+        return g_health_override_val;
+    if (!alloc || !base_url || base_url_len == 0)
+        return false;
+    return probe_and_cache(alloc, base_url, base_url_len);
+}

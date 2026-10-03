@@ -12,6 +12,8 @@
 #include "human/autoresponder.h"
 #include "human/config.h"
 #include "human/memory.h"
+#include "human/memory/proactive_decisions_repo.h"
+#include "human/provider.h"
 #include "human/reflection.h"
 #include "test_framework.h"
 #include <stdlib.h>
@@ -37,7 +39,10 @@ static void make_enabled_cfg(hu_initiative_config_t *cfg) {
     cfg->enabled = true;
 }
 
-static void test_disabled_config_returns_skip_no_state_change(void) {
+/* Disabled must NOT return SKIP: SKIP means "every gate passed" and both
+ * wrappers proceed to the LLM on it, so the kill switch used to call the
+ * model on every daemon loop. */
+static void test_disabled_config_returns_disabled_no_state_change(void) {
     hu_init_proposer_reset_warn_guards_for_test();
     hu_initiative_config_t cfg;
     make_default_cfg(&cfg);
@@ -47,7 +52,7 @@ static void test_disabled_config_returns_skip_no_state_change(void) {
     HU_ASSERT_EQ(
         hu_init_proposer_tick(&cfg, NULL, 0, NULL, 0, 1779700000, &last_tick, &tick_id, &result),
         HU_OK);
-    HU_ASSERT_EQ((int)result, (int)HU_INIT_RESULT_SKIP);
+    HU_ASSERT_EQ((int)result, (int)HU_INIT_RESULT_DISABLED);
     /* Disabled path MUST NOT advance the watermark — operators rely on
      * last_tick being stale to detect a flipped-off subsystem. */
     HU_ASSERT_EQ(last_tick, (int64_t)0);
@@ -594,6 +599,71 @@ static void test_tick_with_provider_null_provider_behaves_like_t1_tick(void) {
     HU_ASSERT_EQ(last_tick, (int64_t)1779700000);
 }
 
+/* A disabled initiative with a live provider must stop at the governor.
+ * Before 2026-09-30 it returned SKIP ("all gates passed") and the wrapper
+ * went on to assemble context and call the model on every daemon loop. */
+static int disabled_llm_calls;
+static hu_error_t disabled_chat_with_system(void *ctx, hu_allocator_t *alloc, const char *sys,
+                                            size_t sys_len, const char *msg, size_t msg_len,
+                                            const char *model, size_t model_len, double temp,
+                                            char **out, size_t *out_len) {
+    (void)ctx, (void)alloc, (void)sys, (void)sys_len, (void)msg, (void)msg_len, (void)model;
+    (void)model_len, (void)temp, (void)out, (void)out_len;
+    disabled_llm_calls++;
+    return HU_ERR_NOT_SUPPORTED;
+}
+static const hu_provider_vtable_t disabled_vtable = {
+    .chat_with_system = disabled_chat_with_system,
+};
+
+/* The owner-initiative propose-model request (daemon.c calls the non-_ex
+ * entry point) carries a local_only caller tag, not "unknown". */
+static void test_tick_with_provider_tags_the_llm_call_for_local_only(void) {
+    hu_init_proposer_reset_warn_guards_for_test();
+    hu_initiative_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.enabled = true;
+    cfg.tick_interval_sec = 1800;
+    cfg.confidence_threshold = 0.85;
+    cfg.per_contact_min_seconds = 600;
+    hu_provider_t provider = {.ctx = NULL, .vtable = &disabled_vtable};
+    hu_allocator_t alloc = hu_system_allocator();
+    int64_t last_tick = 0;
+    uint64_t tick_id = 0;
+    hu_init_proposer_result_t result = HU_INIT_RESULT_FIRED;
+    hu_init_decision_t decision;
+    memset(&decision, 0, sizeof(decision));
+    HU_ASSERT_EQ(hu_init_proposer_tick_with_provider(&cfg, NULL, 0, NULL, NULL, &provider, &alloc,
+                                                     0, 1779700000, &last_tick, &tick_id, &result,
+                                                     &decision),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(hu_init_proposer_last_llm_caller_for_test());
+    HU_ASSERT_STR_EQ(hu_init_proposer_last_llm_caller_for_test(), "initiative");
+}
+
+static void test_tick_with_provider_disabled_never_reaches_the_llm(void) {
+    hu_init_proposer_reset_warn_guards_for_test();
+    hu_initiative_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.enabled = false;
+    cfg.tick_interval_sec = 1800;
+    hu_provider_t provider = {.ctx = NULL, .vtable = &disabled_vtable};
+    hu_allocator_t alloc = hu_system_allocator();
+    int64_t last_tick = 0;
+    uint64_t tick_id = 0;
+    hu_init_proposer_result_t result = HU_INIT_RESULT_FIRED;
+    hu_init_decision_t decision;
+    memset(&decision, 0, sizeof(decision));
+    disabled_llm_calls = 0;
+    HU_ASSERT_EQ(hu_init_proposer_tick_with_provider(&cfg, NULL, 0, NULL, NULL, &provider, &alloc,
+                                                     0, 1779700000, &last_tick, &tick_id, &result,
+                                                     &decision),
+                 HU_OK);
+    HU_ASSERT_EQ((int)result, (int)HU_INIT_RESULT_DISABLED);
+    HU_ASSERT_EQ(disabled_llm_calls, 0);
+    HU_ASSERT_EQ(tick_id, (uint64_t)0);
+}
+
 /* ── Sprint 41 follow-up #2 — single-source-of-truth arbiter ────────── */
 
 static void arbiter_skip_returns_skip_for_all_null_clear_args(void) {
@@ -650,6 +720,32 @@ static void test_assemble_context_no_persona_leaves_field_empty(void) {
     hu_init_context_bundle_t bundle;
     HU_ASSERT_EQ(hu_init_proposer_assemble_context(&agent, 0, 0, &bundle), HU_OK);
     HU_ASSERT_EQ((int)bundle.bytes[HU_INIT_FIELD_PERSONA], 0);
+}
+
+/* Repeat guard (2026-09-30): the proposer texted Mindy "how are things
+ * settling in down there" on 09-21, 09-23, 09-26 and "how's the Florida
+ * transition going?" on 09-27. A check-in on the same topic as one sent in the
+ * last two weeks is a repeat, however it is worded. */
+static void test_init_proposer_repeat_catches_rewordings(void) {
+    const char recent[3][HU_PROACTIVE_REF_MAX] = {
+        "Hey how are things settling in down in Florida",
+        "Morning Mindy, how are things settling in down there",
+        "How is the Florida house settling in coming along"};
+    const char *d1 = "Hey how's the Florida transition going?";
+    const char *d2 = "Morning! Hope you're settling in okay down there";
+    const char *d3 = "How is the florida settling in going";
+    HU_ASSERT_TRUE(hu_init_proposer_repeats_recent(d1, strlen(d1), recent, 3));
+    HU_ASSERT_TRUE(hu_init_proposer_repeats_recent(d2, strlen(d2), recent, 3));
+    HU_ASSERT_TRUE(hu_init_proposer_repeats_recent(d3, strlen(d3), recent, 3));
+}
+
+static void test_init_proposer_repeat_allows_a_new_topic(void) {
+    const char recent[1][HU_PROACTIVE_REF_MAX] = {"Hey how are things settling in down in Florida"};
+    const char *d = "Did you catch the Jazz game last night?";
+    HU_ASSERT_FALSE(hu_init_proposer_repeats_recent(d, strlen(d), recent, 1));
+    const char *hi = "Hey, thinking of you";
+    HU_ASSERT_FALSE(hu_init_proposer_repeats_recent(hi, strlen(hi), recent, 1));
+    HU_ASSERT_FALSE(hu_init_proposer_repeats_recent(d, strlen(d), NULL, 0));
 }
 
 void run_init_proposer_tests(void);
@@ -729,10 +825,14 @@ static void test_quiet_gate_inside_dnd_window_returns_gated_quiet(void) {
 
 void run_init_proposer_tests(void) {
     HU_TEST_SUITE("init_proposer");
+    HU_RUN_TEST(test_init_proposer_repeat_catches_rewordings);
+    HU_RUN_TEST(test_init_proposer_repeat_allows_a_new_topic);
     HU_RUN_TEST(arbiter_skip_returns_skip_for_all_null_clear_args);
     HU_RUN_TEST(arbiter_skip_returns_gated_recency_when_user_texted_recently);
     HU_RUN_TEST(arbiter_skip_returns_skip_when_user_texted_long_ago);
-    HU_RUN_TEST(test_disabled_config_returns_skip_no_state_change);
+    HU_RUN_TEST(test_disabled_config_returns_disabled_no_state_change);
+    HU_RUN_TEST(test_tick_with_provider_disabled_never_reaches_the_llm);
+    HU_RUN_TEST(test_tick_with_provider_tags_the_llm_call_for_local_only);
     HU_RUN_TEST(test_enabled_all_clear_returns_skip_advances_state);
     HU_RUN_TEST(test_interval_gate_blocks_back_to_back_ticks);
     HU_RUN_TEST(test_per_contact_recency_gates_when_seth_texted_recently);

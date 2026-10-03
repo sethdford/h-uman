@@ -113,6 +113,35 @@ static void update_mode_off_never_selects_apply(void) {
     HU_ASSERT_EQ(hu_update_mode_from_config("aply"), HU_UPDATE_MODE_CHECK);
 }
 
+/* ── hu_update_check_allowed: may an update check contact GitHub? ─────── */
+
+/* The gateway's update.check runs this before any network call. OFF (the
+ * default) may only reach the network when the user explicitly asked (force);
+ * CHECK and APPLY have already opted in. */
+static void update_check_allowed_off_without_force_denies(void) {
+    HU_ASSERT_FALSE(hu_update_check_allowed(HU_UPDATE_MODE_OFF, false));
+}
+
+static void update_check_allowed_off_with_force_allows(void) {
+    HU_ASSERT_TRUE(hu_update_check_allowed(HU_UPDATE_MODE_OFF, true));
+}
+
+static void update_check_allowed_check_mode_allows(void) {
+    HU_ASSERT_TRUE(hu_update_check_allowed(HU_UPDATE_MODE_CHECK, false));
+    HU_ASSERT_TRUE(hu_update_check_allowed(HU_UPDATE_MODE_CHECK, true));
+}
+
+static void update_check_allowed_apply_mode_allows(void) {
+    HU_ASSERT_TRUE(hu_update_check_allowed(HU_UPDATE_MODE_APPLY, false));
+    HU_ASSERT_TRUE(hu_update_check_allowed(HU_UPDATE_MODE_APPLY, true));
+}
+
+/* The default config (auto_update unset / "off") must not phone home. */
+static void update_check_allowed_default_config_denies(void) {
+    HU_ASSERT_FALSE(hu_update_check_allowed(hu_update_mode_from_config(NULL), false));
+    HU_ASSERT_FALSE(hu_update_check_allowed(hu_update_mode_from_config("off"), false));
+}
+
 /* Same contract driven from the on-disk shape of ~/.human/config.json. */
 static void config_auto_update_off_selects_off_mode(void) {
     hu_config_t cfg;
@@ -199,6 +228,11 @@ void run_update_tests(void) {
     HU_RUN_TEST(maybe_check_null_auto_update_returns_ok);
     HU_RUN_TEST(update_mode_off_never_selects_apply);
     HU_RUN_TEST(config_auto_update_off_selects_off_mode);
+    HU_RUN_TEST(update_check_allowed_off_without_force_denies);
+    HU_RUN_TEST(update_check_allowed_off_with_force_allows);
+    HU_RUN_TEST(update_check_allowed_check_mode_allows);
+    HU_RUN_TEST(update_check_allowed_apply_mode_allows);
+    HU_RUN_TEST(update_check_allowed_default_config_denies);
     HU_RUN_TEST(config_parse_auto_update_field);
     HU_RUN_TEST(config_parse_auto_update_apply);
     HU_RUN_TEST(config_defaults_auto_update_off);

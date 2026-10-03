@@ -1,0 +1,49 @@
+#ifndef HU_DAEMON_JOB_HOLD_INTERNAL_H
+#define HU_DAEMON_JOB_HOLD_INTERNAL_H
+
+/* Private to daemon_job_hold.c (the hold side) and daemon_job_release.c
+ * (the release side): the state they share. Public contract:
+ * include/human/daemon/job_hold.h. */
+
+#include "human/daemon/job_hold.h"
+
+struct hu_service_channel;
+
+/* A SHADOW would-hold, remembered in memory only so the release side can
+ * log what it would have released, canceled or expired. Never logged. */
+typedef struct hu_job_hold_shadow_entry {
+    bool used;
+    int64_t rowid;
+    int64_t held_at; /* unix seconds the turn failed */
+    char handle[sizeof(((hu_channel_loop_msg_t *)0)->session_key)];
+    char chat_id[sizeof(((hu_channel_loop_msg_t *)0)->chat_id)];
+} hu_job_hold_shadow_entry_t;
+
+/* Wall-clock seconds, or the test clock when one is set. */
+int64_t hu_job_hold_now(void);
+
+/* hu_mlx_admin_probe_health (2 s cap, 60 s cache) against config's
+ * mlx_local base URL; `fresh` bypasses and refreshes the cache. */
+hu_job_probe_t hu_job_hold_probe(const struct hu_config *config, bool fresh);
+
+/* LIVE release handed this rowid to a turn (see hu_daemon_jobs_on_turn_error). */
+void hu_job_hold_note_released(int64_t rowid);
+
+/* The channel's vtable name is HU_JOB_HOLD_CHANNEL. */
+bool hu_job_hold_is_imessage(const struct hu_service_channel *ch);
+
+/* The HU_JOB_HOLD_SHADOW_SLOTS-entry ring of SHADOW would-holds. */
+hu_job_hold_shadow_entry_t *hu_job_hold_shadow_ring(void);
+
+/* Mutable counters (single daemon thread). */
+hu_daemon_job_hold_metrics_t *hu_job_hold_metrics_mut(void);
+
+/* daemon_job_release.c: forget the release throttle and the test stub. */
+void hu_job_hold_release_reset(void);
+
+#ifdef HU_ENABLE_SQLITE
+/* The jobs handle when the effective mode is LIVE, else NULL. */
+sqlite3 *hu_job_hold_db(void);
+#endif
+
+#endif /* HU_DAEMON_JOB_HOLD_INTERNAL_H */

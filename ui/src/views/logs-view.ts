@@ -643,7 +643,7 @@ export class ScLogsView extends GatewayAwareLitElement {
     const fullLine = `[${entry.event}] ${payloadStr}`.trim();
     const searchParts = highlightText(fullLine, this.filter.trim());
     return html`
-      <div class="log-row" role="listitem">
+      <div class="log-row">
         <span class="level-dot" style="background: ${color}"></span>
         <span class="time">${formatRelativeTime(entry.ts)}</span>
         <span class="content">${searchParts}</span>

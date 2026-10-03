@@ -159,6 +159,8 @@ hu_error_t hu_process_run_sandboxed(hu_allocator_t *alloc, const char *const *ar
 
     size_t out_len = 0, err_len = 0;
     int stdout_eof = 0, stderr_eof = 0;
+    int status = 0;
+    bool reaped = false; /* the WNOHANG poll below may reap the child first */
     fd_set rfds;
     int nfds = (stdout_pipe[0] > stderr_pipe[0]) ? stdout_pipe[0] + 1 : stderr_pipe[0] + 1;
 
@@ -180,9 +182,10 @@ hu_error_t hu_process_run_sandboxed(hu_allocator_t *alloc, const char *const *ar
             break;
         }
         if (r == 0) {
-            int status;
-            if (waitpid(pid, &status, WNOHANG) == pid)
+            if (waitpid(pid, &status, WNOHANG) == pid) {
+                reaped = true;
                 break;
+            }
             continue;
         }
 
@@ -205,8 +208,10 @@ hu_error_t hu_process_run_sandboxed(hu_allocator_t *alloc, const char *const *ar
     close(stdout_pipe[0]);
     close(stderr_pipe[0]);
 
-    int status;
-    waitpid(pid, &status, 0);
+    /* A second waitpid after the WNOHANG reap would fail with ECHILD and
+     * leave status unset; a failed wait is reported as a failed run. */
+    if (!reaped)
+        reaped = waitpid(pid, &status, 0) == pid;
 
     out_buf[out_len] = '\0';
     err_buf[err_len] = '\0';
@@ -217,7 +222,7 @@ hu_error_t hu_process_run_sandboxed(hu_allocator_t *alloc, const char *const *ar
     out->stderr_len = err_len;
     out->stderr_cap = cap;
 
-    if (WIFEXITED(status)) {
+    if (reaped && WIFEXITED(status)) {
         out->exit_code = WEXITSTATUS(status);
         out->success = (out->exit_code == 0);
     } else {

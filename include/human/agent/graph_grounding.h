@@ -3,6 +3,8 @@
 
 #include "human/agent/memory_loader.h"
 #include "human/core/error.h"
+#include "human/core/gate_mode.h"
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -63,5 +65,124 @@ hu_error_t hu_graph_ground_compose(hu_memory_loader_t *loader, const char *conta
                                    size_t contact_id_len, const char *msg, size_t msg_len,
                                    size_t max_chars, char **out, size_t *out_len,
                                    size_t *out_matched_entities);
+
+/* ── Contact-anchored fallback (2026-09-27) ───────────────────────────────
+ * Lexical seeding needs the incoming message to NAME an entity; casual texts
+ * almost never do (0 of 40 real moments, 2026-09-27), so compose returned
+ * nothing even for contacts with a populated graph. With
+ * HU_GG_CONTACT_FALLBACK, a lexical miss seeds instead from the contact's own
+ * top entities (mention count + recency) and renders them the same way.
+ * A lexical hit is unaffected. *out_matched_entities stays 0 on the fallback
+ * path so logs can tell the two apart. */
+#define HU_GG_CONTACT_FALLBACK 0x1u
+
+/* True when an entity name is not a referent and must never seed the
+ * fallback: a pronoun-like placeholder the extractors write as a subject
+ * ("user", "assistant", "you", "me", "i", "we", "they", "someone"; exact,
+ * case-insensitive, whole name only), the contact's own id, or a
+ * phone-number-shaped string. Measured 2026-09-28: for 3 of 4 active
+ * contacts the fallback's #1 seed by mention count was such a row. */
+bool hu_graph_ground_is_placeholder_name(const char *name, size_t name_len, const char *contact_id,
+                                         size_t contact_id_len);
+
+/* Seed an entity only when EVERY scoreable word of its name appears in the
+ * message (coverage 1.0), not on a lone shared word. Used for the owner's
+ * ("self") facts, where topic phrases like "different direction" would
+ * otherwise match any message saying "different". */
+#define HU_GG_REQUIRE_FULL_NAME 0x2u
+
+/* Names-first seeding (HU_GRAPH_NAMES LIVE, spec 2026-09-29 §4.6): seed only
+ * entities hu_name_entity_is_nameable accepts (PERSON/PLACE/ORGANIZATION/
+ * EVENT, or a Capitalized UNKNOWN), add HU_GG_TYPED_NAME_BONUS to typed
+ * names, render one entity line per name (a case-insensitive duplicate keeps
+ * the higher-scored row), and after the entity lines render the contact's
+ * HU_GG_TOPIC_LINE_MAX most recent TOPICs on one "Been talking about: a, b, c"
+ * line (only on a non-empty block). EMOTION never seeds. */
+#define HU_GG_NAMES 0x4u
+/* Never seed an EMOTION entity, even when the message names it ("love you"
+ * must not ground on the contact's "love"). Used with HU_GG_REQUIRE_FULL_NAME
+ * for HU_CONTEXT_RELEVANCE's casual-turn decision. */
+#define HU_GG_NO_EMOTION_SEED  0x8u
+#define HU_GG_TYPED_NAME_BONUS 0.5
+#define HU_GG_TOPIC_LINE_MAX   3
+
+/* Reads HU_GRAPH_GROUNDING_SELF_FACTS per hu_gate_mode_parse, unset -> OFF.
+ * Owner ("self") facts are matched by full name against the incoming
+ * message and, in LIVE, appended under an "About you:" label. */
+hu_gate_mode_t hu_graph_grounding_self_facts_mode(void);
+
+hu_error_t hu_graph_ground_compose_ex(hu_memory_loader_t *loader, const char *contact_id,
+                                      size_t contact_id_len, const char *msg, size_t msg_len,
+                                      size_t max_chars, unsigned flags, char **out, size_t *out_len,
+                                      size_t *out_matched_entities);
+
+typedef enum hu_graph_grounding_fallback_mode {
+    HU_GG_FALLBACK_OFF = 0,
+    HU_GG_FALLBACK_SHADOW,
+    HU_GG_FALLBACK_LIVE,
+} hu_graph_grounding_fallback_mode_t;
+
+/* Reads HU_GRAPH_GROUNDING_CONTACT_FALLBACK per hu_gate_mode_parse:
+ * unset -> OFF (default), "shadow" -> SHADOW, "on"/"live" -> LIVE,
+ * unknown -> OFF. */
+hu_graph_grounding_fallback_mode_t hu_graph_grounding_contact_fallback_mode(void);
+
+/* ── Turn composition (spec 2026-09-29 §4.6) ───────────────────────────────
+ * The lexical -> contact-fallback -> owner-facts composition that
+ * hu_agent_load_graph_grounding injects (before its tier gate), with no agent
+ * dependency, so `human memory ground --full` measures the real path. Gates
+ * arrive as a bitmask (hu_graph_ground_turn_flags_from_env) so tests need no
+ * setenv; SHADOW sub-gates are reported in stats and never injected, and the
+ * caller logs them. */
+#define HU_GG_TURN_FALLBACK_SHADOW 0x01u
+#define HU_GG_TURN_FALLBACK_LIVE   0x02u
+#define HU_GG_TURN_SELF_SHADOW     0x04u
+#define HU_GG_TURN_SELF_LIVE       0x08u
+#define HU_GG_TURN_NAMES_SHADOW    0x10u
+#define HU_GG_TURN_NAMES_LIVE      0x20u
+
+typedef struct hu_graph_ground_turn_stats {
+    size_t matched_entities; /* lexical seeds of the contact block */
+    bool via_fallback;       /* the contact fallback supplied the block */
+    bool via_self;           /* an "About you:" owner block was appended */
+    bool fallback_shadow;    /* fallback composed in SHADOW (not injected) */
+    size_t fallback_shadow_bytes;
+    uint32_t fallback_shadow_fp;
+    bool self_shadow; /* owner facts composed in SHADOW (not injected) */
+    size_t self_shadow_bytes;
+    uint32_t self_shadow_fp;
+    bool names_shadow;       /* HU_GRAPH_NAMES=shadow: LIVE composed, OFF injected */
+    size_t names_off_bytes;  /* the injected (OFF) block */
+    size_t names_live_bytes; /* what LIVE would have injected */
+    size_t names_live_typed; /* typed_names of the block LIVE would have injected */
+    size_t typed_names;      /* typed-name lines in the returned block's contact part,
+                              * i.e. before any "About you:" owner block */
+} hu_graph_ground_turn_stats_t;
+
+/* HU_GRAPH_GROUNDING_CONTACT_FALLBACK, HU_GRAPH_GROUNDING_SELF_FACTS and
+ * HU_GRAPH_NAMES -> HU_GG_TURN_* bits (unset/off/unknown -> no bit). */
+unsigned hu_graph_ground_turn_flags_from_env(void);
+
+/* Reads HU_GRAPH_NAMES per hu_gate_mode_parse; unset -> OFF. */
+hu_gate_mode_t hu_graph_names_mode(void);
+
+/* Entity lines naming a typed entity: "- <name> (person|place|organization|
+ * event)" at line start (relation lines are indented). Pure. */
+size_t hu_graph_ground_count_typed_names(const char *block, size_t len);
+
+/* Fail-open (always HU_OK). *out is NULL/0 when nothing composes; the caller
+ * frees it via loader->alloc (len + 1). `stats` may be NULL. */
+hu_error_t hu_graph_ground_compose_turn(hu_memory_loader_t *loader, const char *contact_id,
+                                        size_t contact_id_len, const char *msg, size_t msg_len,
+                                        unsigned turn_flags, char **out, size_t *out_len,
+                                        hu_graph_ground_turn_stats_t *stats);
+
+/* Post-build half of the "live: injected" log: called by both turn paths
+ * right after hu_prompt_build_system with the graph_ctx length the turn still
+ * holds and the bytes the builder actually rendered for the graph section
+ * (prompt field stats). Logs INFO when rendered, WARN when composed bytes
+ * never reached the prompt, nothing when there was nothing to render.
+ * Returns false only for that drop, so the contract is testable. */
+bool hu_graph_grounding_log_rendered(size_t composed_len, size_t rendered_len);
 
 #endif /* HU_AGENT_GRAPH_GROUNDING_H */

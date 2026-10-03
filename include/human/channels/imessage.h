@@ -157,12 +157,88 @@ int hu_imessage_count_recent_music_tapbacks(const char *contact_id, size_t conta
  * Returns -1 on failure or when SQLite/macOS unavailable. */
 int64_t hu_imessage_get_latest_sent_rowid(const char *handle, size_t handle_len);
 
+/* History queries (?1 = handle id, ?2 = limit; newest first). Public so the
+ * chat.db fixture test runs the exact production SQL. */
+#define HU_IMESSAGE_SQL_HISTORY_COLUMNS                                            \
+    "SELECT m.is_from_me, m.text, "                                                \
+    "  datetime(m.date/1000000000 + 978307200, 'unixepoch', 'localtime') as ts, "  \
+    "  (SELECT COUNT(*) FROM message_attachment_join maj "                         \
+    "   JOIN attachment a ON maj.attachment_id = a.ROWID "                         \
+    "   WHERE maj.message_id = m.ROWID AND a.filename IS NOT NULL "                \
+    "   AND (LOWER(a.filename) LIKE '%.mov' OR LOWER(a.filename) LIKE '%.mp4' "    \
+    "     OR LOWER(a.filename) LIKE '%.m4v')) > 0 AS has_video, "                  \
+    "  (SELECT COUNT(*) FROM message_attachment_join maj2 "                        \
+    "   JOIN attachment a2 ON maj2.attachment_id = a2.ROWID "                      \
+    "   WHERE maj2.message_id = m.ROWID AND a2.filename IS NOT NULL "              \
+    "   AND (LOWER(a2.filename) LIKE '%.jpg' OR LOWER(a2.filename) LIKE '%.jpeg' " \
+    "     OR LOWER(a2.filename) LIKE '%.png' OR LOWER(a2.filename) LIKE '%.heic' " \
+    "     OR LOWER(a2.filename) LIKE '%.gif' OR LOWER(a2.filename) LIKE "          \
+    "'%.webp')) > 0 AS has_image, "                                                \
+    "  (SELECT COUNT(*) FROM message_attachment_join maj3 "                        \
+    "   JOIN attachment a3 ON maj3.attachment_id = a3.ROWID "                      \
+    "   WHERE maj3.message_id = m.ROWID AND a3.filename IS NOT NULL "              \
+    "   AND (LOWER(a3.filename) LIKE '%.caf' OR LOWER(a3.filename) LIKE '%.m4a' "  \
+    "     OR LOWER(a3.filename) LIKE '%.mp3' OR LOWER(a3.filename) LIKE '%.aac' "  \
+    "     OR LOWER(a3.filename) LIKE '%.opus')) > 0 AS has_audio, "                \
+    "  m.attributedBody, "                                                         \
+    "  m.balloon_bundle_id, "                                                      \
+    "  m.expressive_send_style_id "
+
+/* load_conversation_history (every existing consumer): rows whose handle is
+ * ?1, in any chat. Unchanged since before 2026-10-01. */
+#define HU_IMESSAGE_SQL_HANDLE_HISTORY                   \
+    HU_IMESSAGE_SQL_HISTORY_COLUMNS                      \
+    "FROM message m "                                    \
+    "JOIN handle h ON m.handle_id = h.ROWID "            \
+    "WHERE h.id = ?1 AND m.associated_message_type = 0 " \
+    "ORDER BY m.date DESC LIMIT ?2"
+
+/* hu_imessage_load_dm_history (HU_THREAD_CONTEXT only): the 1:1 chat with
+ * ?1, both directions. Mirrors hu_imessage_chat_is_group: chat.style decides
+ * (45 = DM, 43 = group); only an unknown style falls back to "exactly one
+ * other participant". */
+#define HU_IMESSAGE_SQL_DM_HISTORY                                     \
+    HU_IMESSAGE_SQL_HISTORY_COLUMNS                                    \
+    "FROM message m "                                                  \
+    "JOIN chat_message_join cmj ON cmj.message_id = m.ROWID "          \
+    "JOIN chat c ON c.ROWID = cmj.chat_id "                            \
+    "WHERE c.ROWID IN (SELECT chj.chat_id FROM chat_handle_join chj "  \
+    "  JOIN handle h ON h.ROWID = chj.handle_id WHERE h.id = ?1) "     \
+    "AND (c.style = 45 OR (COALESCE(c.style, -1) NOT IN (43, 45) AND " \
+    "  (SELECT COUNT(DISTINCT c2.handle_id) FROM chat_handle_join c2 " \
+    "   WHERE c2.chat_id = c.ROWID) = 1)) "                            \
+    "AND m.associated_message_type = 0 "                               \
+    "ORDER BY m.date DESC LIMIT ?2"
+
+/* The DM-only history for HU_THREAD_CONTEXT's recent-thread block. Same
+ * contract and entry shape as the channel's load_conversation_history.
+ * `ctx` is the iMessage channel ctx (unused today). */
+hu_error_t hu_imessage_load_dm_history(void *ctx, hu_allocator_t *alloc, const char *contact_id,
+                                       size_t contact_id_len, size_t limit,
+                                       hu_channel_history_entry_t **out, size_t *out_count);
+
+/** How many tapbacks of ours (is_from_me, associated_message_type 2000-2005)
+ * chat.db holds on the message with this ROWID ($HU_CHATDB honoured). -1 when
+ * chat.db cannot be read. A tapback path that reports success is believed
+ * only when this count grew. */
+int64_t hu_imessage_my_reaction_count(int64_t message_rowid);
+
 #ifndef HU_IS_TEST
 /** Check if the real user sent a message to `handle` within the last
  * `within_seconds` seconds.  Queries chat.db for is_from_me=1 rows.
  * Returns true if the user responded recently (Human should stay silent). */
 bool hu_imessage_user_responded_recently(void *channel_ctx, const char *handle, size_t handle_len,
                                          int within_seconds);
+
+/** hu_imessage_user_replied_after for each of msgs[0..n) (chat_id,
+ * session_key, message_id) against the live chat.db (HU_CHATDB honoured),
+ * opened ONCE, excluding the channel's own sends via its echo ring. Fills
+ * out_replied. HU_ERR_IO when chat.db cannot be opened: the caller must
+ * then treat every answer as unknown. Used before releasing held inbound
+ * messages (include/human/daemon/job_hold.h). */
+hu_error_t hu_imessage_channel_replied_after_batch(void *channel_ctx,
+                                                   const hu_channel_loop_msg_t *msgs, size_t n,
+                                                   bool *out_replied);
 
 /** Query the attachment path for a given message ROWID from chat.db.
  * Returns the attachment file path or NULL if not found. Caller owns. */
@@ -266,12 +342,18 @@ size_t hu_imessage_imcore_conformance(const hu_imcore_selector_req_t *reqs, size
                                       hu_imcore_selector_resolver_fn resolve,
                                       hu_imcore_selector_missing_fn on_missing, void *ud);
 
-/** Search Tenor for a GIF matching the query and download to a temp file.
+/** Search Klipy (the Tenor-compatible successor; Google shut the Tenor API down
+ * on 2026-06-30) for a GIF matching the query and download it to a temp file.
  * Returns the local path to the downloaded GIF (caller owns, free with alloc).
  * Returns NULL on failure (no API key, network error, no results).
- * Requires HU_ENABLE_CURL. api_key is the Tenor API v2 key. */
+ * Requires HU_ENABLE_CURL. api_key is a Klipy API key (providers.klipy). */
 char *hu_imessage_fetch_gif(hu_allocator_t *alloc, const char *query, size_t query_len,
                             const char *api_key, size_t api_key_len);
+
+/** The Klipy /v2/search URL for one GIF, query URL-encoded. Length written, 0
+ * if it did not fit. */
+size_t hu_imessage_gif_search_url(char *out, size_t cap, const char *query, size_t query_len,
+                                  const char *api_key, size_t api_key_len);
 
 /* ── FDA-aware circuit breaker + poll status ─────────────────────────────
  * The iMessage poller depends on sqlite read access to ~/Library/Messages/chat.db,
@@ -379,6 +461,10 @@ bool hu_imessage_should_courtesy_reply(bool allowlist_has_handle, bool dedup_alr
 /* Replay guards (incident 2026-09-01): declared in imessage_replay_guard.h,
  * compiled on every platform. */
 #include "human/channels/imessage_replay_guard.h"
+
+/* chat.db group classifier (chat.style, handle-count fallback): declared in
+ * imessage_chat_kind.h, compiled on every platform (the daemon observer uses it). */
+#include "human/channels/imessage_chat_kind.h"
 
 /* chat.db query: has a human-authored outbound (is_from_me=1, a real text
  * bubble, not a tapback) landed in the same conversation AFTER `rowid`?
@@ -530,6 +616,26 @@ hu_error_t hu_imessage_test_inject_mock_full(hu_channel_t *ch, const char *sessi
                                              size_t content_len,
                                              const hu_imessage_test_msg_opts_t *opts);
 
+/* chat.db helpers of the send path, on a database the caller opened
+ * (tests pass a fixture). `chat_guid` non-NULL addresses that chat, else the
+ * handle's rows and 1:1 chats. Only plain (associated_message_type 0),
+ * unerrored outbound rows count. */
+int64_t hu_imessage_chatdb_sent_boundary(void *sqlite_db, const char *chat_guid,
+                                         const char *handle);
+bool hu_imessage_chatdb_text_landed(void *sqlite_db, const char *chat_guid, const char *handle,
+                                    int64_t prior, const char *text, size_t text_len);
+/* Route of the contact's latest INBOUND 1:1 message: that row's chat GUID and
+ * service, from the same row (a newer outbound on a stale chat cannot pair an
+ * iMessage chat with an RCS service). */
+bool hu_imessage_chatdb_inbound_route(void *sqlite_db, const char *handle, size_t handle_len,
+                                      char *guid_out, size_t guid_cap, char *service_out,
+                                      size_t service_cap);
+
+/** Test builds: the send route imessage_send looked up for its last send
+ *  (zeroed when none). Proves the send entry point consults the route table. */
+struct hu_imsg_send_route;
+void hu_imessage_test_last_send_route(hu_channel_t *ch, struct hu_imsg_send_route *out);
+
 /** Store a GUID→text mapping for lookup_message_by_guid in test builds (per-channel). */
 void hu_imessage_test_store_guid_text(hu_channel_t *ch, const char *guid, const char *text);
 
@@ -541,6 +647,8 @@ void hu_imessage_test_set_guid_lookup(const char *guid, const char *text);
 void hu_imessage_test_clear_guid_lookups(void);
 
 const char *hu_imessage_test_get_last_message(hu_channel_t *ch, size_t *out_len);
+/* Test-only: is `text` in the outbound echo ring (poll drops such inbound rows)? */
+bool hu_imessage_test_in_echo_ring(hu_channel_t *ch, const char *text, size_t len);
 
 /* Test-only accessor for the courtesy-reply mirror field. After the poll
  * loop emits a courtesy reply, the channel ctx records the same text here
@@ -588,6 +696,14 @@ void hu_imessage_set_test_send_stub(hu_imessage_test_send_stub_fn fn);
 /** Test-only — replaces sub-picker AX with a deterministic stub.
  * Pass NULL to disable the stub and revert to the real AX path (if available). */
 void hu_imessage_set_test_react_emoji_stub(bool (*stub)(const char *emoji_utf8));
+
+/** Test-only — replaces the chat.db boundary read a tapback takes before it
+ * is sent. Without a stub, test builds read only an explicit $HU_CHATDB
+ * fixture (one open, 100 ms busy budget) and otherwise return -1.
+ * Lets tests pin that the boundary is read BEFORE the react runs. NULL
+ * restores the default. */
+void hu_imessage_set_test_tapback_boundary_stub(int64_t (*stub)(const char *handle,
+                                                                size_t handle_len));
 
 /** Test-only: deterministic check of CLASSIC_MAP lookup + fallback. */
 const char *hu_imessage_test_classic_label_for_emoji(const char *emoji_utf8);

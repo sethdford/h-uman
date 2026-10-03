@@ -4,7 +4,6 @@
 
 #include "human/agent/response_verifier.h"
 #include "human/core/allocator.h"
-#include "human/memory/cross_graph.h"
 #include "human/memory/erasure.h"
 #include "human/memory/graph.h"
 #include "human/memory/memory.h"
@@ -185,7 +184,7 @@ static void test_w4_erase_unknown_entity_returns_not_found(void) {
     hu_graph_close(g, A());
 }
 
-/* --- Erasure cascades across relations + cross_edges + quarantine --- */
+/* --- Erasure cascades across relations + quarantine --- */
 static void test_w4_erase_entity_cascades_across_surfaces(void) {
     hu_graph_t *g = NULL;
     open_graph(&g);
@@ -198,26 +197,12 @@ static void test_w4_erase_entity_cascades_across_surfaces(void) {
     HU_ASSERT_EQ(hu_graph_upsert_relation_ex(g, "u1", 2, alice, acme, HU_REL_WORKS_AT, 1.0f,
                                              1735689600000LL, 0, 1.0f, "ctx", 3, "imessage", 8),
                  HU_OK);
-    /* Cross-edge from alice to a synthetic episode 100. */
-    HU_ASSERT_EQ(hu_cross_edge_upsert(g, "u1", 2, "entity", alice, "episode", 100, "ABOUT", 1.0f,
-                                      1735689600000LL, 0, 1.0f),
-                 HU_OK);
 
     hu_erase_report_t r;
     HU_ASSERT_EQ(hu_memory_erase_entity(g, alice, &r), HU_OK);
     HU_ASSERT(r.entity_deleted);
     HU_ASSERT(r.relations_deleted >= 1);
-    HU_ASSERT(r.cross_edges_deleted >= 1);
     HU_ASSERT_EQ(r.entity_id, alice);
-
-    /* The cross_edges table should now have no row for alice. */
-    hu_cross_edge_t *out = NULL;
-    size_t n = 0;
-    HU_ASSERT_EQ(hu_cross_graph_traverse(g, A(), "u1", 2, "entity", alice, 1, 32, 0, 0, &out, &n),
-                 HU_OK);
-    HU_ASSERT_EQ(n, 0);
-    if (out)
-        hu_cross_edges_free(A(), out, n);
     hu_graph_close(g, A());
 }
 

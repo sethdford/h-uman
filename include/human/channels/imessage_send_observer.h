@@ -5,9 +5,10 @@
  * Send-provenance observer for the iMessage channel.
  *
  * Every outbound iMessage the daemon DELIVERS — plain text and media through
- * imessage_send, threaded replies through hu_imessage_reply — is reported
- * here exactly once, after the send succeeded, with the final text as it
- * went to chat.db (after overlay, markdown strip and sanitize). A send that
+ * imessage_send, threaded replies through hu_imessage_reply, tapbacks through
+ * the react / react_emoji vtable entries — is reported here exactly once,
+ * after the send succeeded, with the final text as it went to chat.db (after
+ * overlay, markdown strip and sanitize; tapbacks carry no text). A send that
  * failed or was held reports nothing.
  *
  * Why: h-uman and Seth both send from Seth's account, so chat.db alone can't
@@ -30,9 +31,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define HU_IMESSAGE_SENT_KIND_TEXT  "text"
-#define HU_IMESSAGE_SENT_KIND_MEDIA "media"
-#define HU_IMESSAGE_SENT_KIND_REPLY "reply"
+#define HU_IMESSAGE_SENT_KIND_TEXT    "text"
+#define HU_IMESSAGE_SENT_KIND_MEDIA   "media"
+#define HU_IMESSAGE_SENT_KIND_REPLY   "reply"
+#define HU_IMESSAGE_SENT_KIND_TAPBACK "tapback"
 
 typedef struct hu_imessage_sent_event {
     const char *handle; /* recipient handle; (ptr, len), not NUL-terminated */
@@ -59,6 +61,26 @@ bool hu_imessage_send_observer_active(void);
 /* Report one delivered send. No-op when no observer is set, ev is NULL, or
  * the handle is empty. */
 void hu_imessage_send_observer_notify(const hu_imessage_sent_event_t *ev);
+
+/* ── Final send FAILURE (2026-09-26) ──────────────────────────────────────
+ * A text send whose every path failed is reported here once, so it is never
+ * lost silently: the daemon records a send_failed row the proactive pass can
+ * read and tells the owner. Policy holds (blue_guard, exclusion) are NOT
+ * failures and are not reported. Same process-wide, one-observer shape. */
+typedef struct hu_imessage_send_failed_event {
+    const char *handle; /* (ptr, len), not NUL-terminated */
+    size_t handle_len;
+    const char *chat_service; /* "iMessage" / "SMS" / "RCS" / "unknown" */
+    const char *text;         /* final text that did not go out */
+    size_t text_len;
+} hu_imessage_send_failed_event_t;
+
+typedef void (*hu_imessage_send_failure_fn)(void *user, const hu_imessage_send_failed_event_t *ev);
+
+void hu_imessage_send_failure_observer_set(hu_imessage_send_failure_fn fn, void *user);
+
+/* No-op when no observer is set, ev is NULL, or the handle is empty. */
+void hu_imessage_send_failure_notify(const hu_imessage_send_failed_event_t *ev);
 
 #ifdef __cplusplus
 }

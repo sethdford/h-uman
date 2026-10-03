@@ -9,7 +9,7 @@ _human() {
 
     # Global flags (before or as first argument)
     if [[ $COMP_CWORD -eq 1 ]]; then
-        COMPREPLY=($(compgen -W '--version -v --help -h --mcp agent agents auth autoresponder calibrate capabilities channel config cron ctl demo doctor drafts eval evaluation export-dpo export-kto feed gateway hardware help hula inference-status init initiative mcp memory migrate ml models narrate onboard paperclip persona plugins pwa reply-prompt researchsandbox schedule service service-loop setup skills status update version voice workspace' -- "$cur"))
+        COMPREPLY=($(compgen -W '--version -v --help -h --mcp agent agents auth autoresponder calibrate capabilities channel commitments config cron ctl demo doctor drafts eval evaluation export-dpo export-kto feed gateway hardware help hula inference-status init initiative mcp memory migrate ml models narrate onboard paperclip persona plugins prospective pwa replay reply-prompt research sandbox schedule service service-loop setup skills status update version voice workspace' -- "$cur"))
         return
     fi
 
@@ -40,6 +40,14 @@ _human() {
             if [[ $COMP_CWORD -eq 2 ]]; then
                 COMPREPLY=($(compgen -W 'list info scan flash monitor' -- "$cur"))
             fi
+            ;;
+        prospective)
+            if [[ $COMP_CWORD -eq 2 ]]; then
+                COMPREPLY=($(compgen -W 'probe init backfill' -- "$cur"))
+            fi
+            ;;
+        replay)
+            COMPREPLY=($(compgen -W '--in --out --arm --endpoint --provider --model --temperature --delay-ms --limit --no-director --dump-requests --seed' -- "$cur"))
             ;;
         memory)
             if [[ $COMP_CWORD -eq 2 ]]; then

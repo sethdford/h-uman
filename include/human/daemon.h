@@ -60,6 +60,19 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
  * and routes responses to the specified channel. */
 hu_error_t hu_service_run_agent_cron(hu_allocator_t *alloc, struct hu_agent *agent,
                                      hu_service_channel_t *channels, size_t channel_count);
+/* Undirected cron output (no "channel:contact" target) may only go to an
+ * owner sink — today the cli channel (daemon stdout). Any other channel would
+ * pick the recipient itself, so the unprompted gate denies it (no_recipient). */
+bool hu_daemon_cron_is_owner_sink(const char *channel_name);
+/* Blocking moderation for owner-sink output: false on violence, hate or
+ * sexual content, or when the check cannot run; a self-harm mention alone
+ * passes (the outbound pipeline's policy). */
+bool hu_daemon_cron_owner_text_ok(hu_allocator_t *alloc, const char *text, size_t len);
+
+/* Same, at an injected wall clock (schedule match, quiet hours, cap window). */
+hu_error_t hu_service_run_agent_cron_at(hu_allocator_t *alloc, struct hu_agent *agent,
+                                        hu_service_channel_t *channels, size_t channel_count,
+                                        time_t now);
 
 /* Proactive check-ins: iterate contacts with proactive_checkin=true,
  * check last interaction time, and initiate natural conversations.
@@ -85,19 +98,54 @@ struct hu_channel_daemon_config;
 const struct hu_channel_daemon_config *
 hu_daemon_active_daemon_config(const struct hu_config *config, const char *ch_name);
 
+/* Whether the 2% proactive AI-image send may run: HU_PROACTIVE_IMAGE=live and
+ * OPENAI_API_KEY set. OFF by default: texting a contact a generated picture
+ * unprompted is not something the owner does; it was dead from DALL·E's
+ * 2026-05-12 shutdown until 2026-09-30 and must not return unmeasured. */
+bool hu_daemon_proactive_image_live(void);
+
 /* Carved from hu_service_run (2026-09-12): see src/daemon/daemon_rich_media.c. */
+struct hu_director_result;
 void hu_daemon_rich_media_tick(hu_allocator_t *alloc, struct hu_agent *agent,
                                const struct hu_config *config, hu_service_channel_t *ch,
                                const char *batch_key, size_t key_len, const char *combined,
                                size_t combined_len, hu_channel_history_entry_t *history_entries,
-                               size_t history_count, bool gif_sent_this_turn);
+                               size_t history_count, bool gif_sent_this_turn,
+                               const struct hu_director_result *director);
 
 /* Carved from hu_service_run (2026-09-12): see src/daemon/daemon_voice_reply.c. */
 bool hu_daemon_voice_reply(hu_allocator_t *alloc, struct hu_agent *agent,
                            const struct hu_config *config, hu_service_channel_t *ch,
                            const char *batch_key, size_t key_len, const char *combined,
                            size_t combined_len, const char *response, size_t response_len,
-                           int bth_hour);
+                           const char *unshaped, size_t unshaped_len, int bth_hour,
+                           int voice_first);
+
+/* F1: a copy of the reply taken BEFORE text shaping (typos, texting quirks,
+ * "haha " fillers) — what a voice memo should say. NULL (and *out_len = 0)
+ * unless this channel can send voice. Caller frees with alloc (len + 1). */
+char *hu_daemon_voice_capture_unshaped(hu_allocator_t *alloc, const struct hu_config *config,
+                                       hu_service_channel_t *ch, const char *response,
+                                       size_t response_len, size_t *out_len);
+
+/* True only when the reply passes every outbound gate the text path applies
+ * (moderation, companion safety, claim language) and the inbound message is not
+ * a crisis (SHIELD-005: a person in crisis gets text with tappable resources).
+ * `inbound` may be NULL. Fails closed: invalid reply or a gate error returns
+ * false. `reason_out` receives a static string: "clear", "invalid",
+ * "inbound_crisis", "moderation", "companion_safety" or "claim_language". */
+bool hu_voice_reply_gates_clear(hu_allocator_t *alloc, const char *text, size_t text_len,
+                                const char *inbound, size_t inbound_len, const char **reason_out);
+
+/* True only when the reply passes every outbound gate the text path applies
+ * (moderation, companion safety, claim language) and the inbound message is not
+ * a crisis (SHIELD-005: a person in crisis gets text with tappable resources).
+ * `inbound` may be NULL. The reply-side checks are
+ * hu_daemon_outbound_final_gates_clear (human/daemon_outbound_bus.h). Fails
+ * closed: invalid reply or a gate error returns false. `reason_out` receives a
+ * static string: "inbound_crisis" or any reason that function reports. */
+bool hu_voice_reply_gates_clear(hu_allocator_t *alloc, const char *text, size_t text_len,
+                                const char *inbound, size_t inbound_len, const char **reason_out);
 
 void hu_daemon_followup_sched_tick(struct hu_agent *agent, hu_service_channel_t *channels,
                                    size_t channel_count);
@@ -107,7 +155,7 @@ void hu_daemon_followup_sched_tick(struct hu_agent *agent, hu_service_channel_t 
  * "delivered" over a blue_guard HOLD (2026-07-27), so lost messages read as
  * successes. Failures log 'FAILED — entry dropped' and skip the send-recency
  * record. Implemented in src/daemon/daemon_followup_sched.c. */
-void hu_daemon_sched_send_and_log(struct hu_agent *agent, struct hu_channel *channel,
+bool hu_daemon_sched_send_and_log(struct hu_agent *agent, struct hu_channel *channel,
                                   const char *channel_name, const char *contact, const char *msg,
                                   size_t msg_len);
 

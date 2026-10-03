@@ -87,7 +87,7 @@ Generated from designated initializers in each `src/channels/*.c` vtable. **hist
  *
  * **imap**: `hu_imap_poll` uses libcurl IMAP (SEARCH UNSEEN + FETCH) when `HU_HTTP_CURL`; `send` uses libcurl SMTP when `smtp_host` is configured, else in-memory outbox. `health_check` runs IMAP NOOP (non-test, libcurl builds).
  * **imessage platform capabilities & limitations**:
- *   - Typing indicators: AX-based — type a character via System Events to trigger the real bubble, then clear the draft. Requires Accessibility permission.
+ *   - Typing indicators: the IMCore bridge (`imsg typing`) first, pulsed typing 4-12 s / paused 1.5-4 s like a person composing, topped up before each send to the text's typing time; AX compose-field injection only when the bridge is down. Never keystrokes.
  *   - Sticker/Memoji detection: read-side via balloon_bundle_id in chat.db (poll shows [Sticker], [Memoji], or [iMessage App])
  *   - Message effects detection: read-side via expressive_send_style_id (poll shows [Sent with Slam], [Sent with Confetti], etc.)
  *   - Tapback send: JXA+AX (opt-in HU_IMESSAGE_TAPBACK_ENABLED) OR imsg CLI (auto-detected on $PATH, no AX needed)

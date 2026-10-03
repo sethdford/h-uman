@@ -36,6 +36,9 @@ hu_error_t parse_providers(hu_allocator_t *a, hu_config_t *cfg, const hu_json_va
             providers[n].base_url = hu_strdup(a, base_url);
         providers[n].native_tools = hu_json_get_bool(item, "native_tools", true);
         providers[n].ws_streaming = hu_json_get_bool(item, "ws_streaming", false);
+        const hu_json_value_t *local = hu_json_object_get(item, "local");
+        if (local && local->type == HU_JSON_BOOL)
+            providers[n].local_override = local->data.boolean ? 1 : -1;
 
         if (providers[n].name) {
             n++;

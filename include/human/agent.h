@@ -40,6 +40,7 @@
 #include "human/cost.h"
 #include "human/filler_recency.h"
 #include "human/memory.h"
+#include "human/memory/consolidation.h"
 #include "human/memory/policy.h"
 #include "human/memory/retrieval.h"
 #include "human/ml/m3_frontier_adapter.h"
@@ -294,6 +295,9 @@ struct hu_agent {
     size_t director_history_count;
 
     uint32_t max_response_chars;
+    /* hu_length_tight_t for the RESPONSE LIMIT line, set with
+     * max_response_chars; LEGACY (0) = today's wording. */
+    uint8_t response_limit_tight;
 
     /* Per-turn model override (set by daemon/CLI, not owned; NULL = use default) */
     const char *turn_model;
@@ -600,6 +604,18 @@ struct hu_agent {
     bool style_rules_enabled;
     bool multi_agent_enabled;
     bool lean_prompt; /* strip heavy contexts for fast local-model texting */
+    bool spoken_turn; /* voice turn: implies lean_prompt; see human/agent/spoken_turn.h */
+    /* Voice-first memos (spec 2026-09-28): this turn is written as a voice memo,
+     * so text-length guards (G5 length anomaly) must not shrink it. */
+    bool voice_memo_turn;
+    /* Per turn: keep only the last N prior history messages (0 = all). Owner
+     * self-tests set it so a thread full of test traffic does not confuse the
+     * reply (spec 2026-09-28, Phase 5). */
+    uint8_t history_msg_cap;
+    /* Per turn: an owner self-test (#command from Seth's own number). Such a
+     * turn writes no memories (experiences, facts); set and cleared by the
+     * daemon around the turn (2026-09-30). */
+    bool self_test_turn;
 
 #ifdef HU_ENABLE_SQLITE
     hu_meta_params_t meta_params;
@@ -841,6 +857,13 @@ void hu_agent_m3_record_chat_outcome(hu_agent_t *agent, const char *prompt, size
  * Borrowed pointers inside that struct must outlive the agent. Pass NULL to disable TTS. */
 void hu_agent_set_voice_config(hu_agent_t *agent, hu_voice_config_t *voice_cfg);
 
+/* True when a turn error means the model was never reached or never answered
+ * (HU_ERR_IO, HU_ERR_TIMEOUT, HU_ERR_PROVIDER_UNAVAILABLE), as opposed to an
+ * answer that was unusable. The same classification the tool loop uses to
+ * stop retrying a dead provider; public so the daemon can decide whether a
+ * failed turn's messages are worth holding (include/human/daemon/job_hold.h). */
+bool hu_agent_error_is_transport(hu_error_t err);
+
 /* Run one conversation turn: send to provider, process tool calls, iterate. */
 hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, char **response_out,
                          size_t *response_len_out);
@@ -882,6 +905,14 @@ void hu_agent_apply_relationship_tone(hu_agent_t *agent, char **persona_prompt,
 hu_error_t hu_agent_build_persona_head(hu_agent_t *agent, const char *topic, size_t topic_len,
                                        char **out, size_t *out_len);
 
+/* Same head; `opts` (learned style, persona.h) reaches the compact head only
+ * — the full head ignores it — and *compact_built (may be NULL) reports
+ * which head was ACTUALLY built (false = full, including the compact
+ * fail-safe). opts == NULL is byte-identical to hu_agent_build_persona_head. */
+hu_error_t hu_agent_build_persona_head_ex(hu_agent_t *agent, const char *topic, size_t topic_len,
+                                          hu_persona_style_opts_t *opts, char **out,
+                                          size_t *out_len, bool *compact_built);
+
 /* The lean persona head the llm_decides (production iMessage) path sends:
  * identity, output constraint, communication rules, core anchor, immersive
  * reinforcement, anti-patterns, style rules, channel examples, optional RAG
@@ -892,6 +923,14 @@ hu_error_t hu_agent_build_persona_head(hu_agent_t *agent, const char *topic, siz
  * frees *out_len + 1 bytes. */
 hu_error_t hu_agent_build_lean_persona_head(hu_agent_t *agent, const char *msg, size_t msg_len,
                                             char **out, size_t *out_len);
+
+/* Same head with learned-style options (hu_persona_style_opts_t in
+ * persona.h): length-imposing style_rules / communication_rules / overlay
+ * entries omitted and the learned line appended after the channel style
+ * line. opts == NULL is byte-identical to hu_agent_build_lean_persona_head. */
+hu_error_t hu_agent_build_lean_persona_head_ex(hu_agent_t *agent, const char *msg, size_t msg_len,
+                                               hu_persona_style_opts_t *opts, char **out,
+                                               size_t *out_len);
 
 /* Finish an assembled system prompt the way every turn path must: cap it to
  * HU_PROMPT_TRIM_BUDGET_BYTES (keeping `guard_tail_reserved` bytes of the
@@ -932,12 +971,15 @@ void hu_agent_load_graph_grounding(hu_agent_t *agent, void *loader_v, const char
  * combined humanness context, the imperfect-delivery directive, and the
  * emotional-residue carryover directive. The caller frees each via
  * agent->alloc->free(ctx, p, len + 1). No-op (all outs NULL/0) if inputs are
- * NULL. */
+ * NULL. `retrieval_relevant` is this turn's own retrieval (memory recall that
+ * survived Self-RAG, or graph grounding) — not the core-memory block — and
+ * gates the imperfect-delivery hedge (DEF-4). */
 void hu_agent_build_humanness_context(hu_agent_t *agent, const char *msg, size_t msg_len,
                                       const char *memory_ctx, size_t memory_ctx_len,
-                                      char **humanness_ctx_out, size_t *humanness_ctx_len_out,
-                                      char **imperfect_dir_out, size_t *imperfect_dir_len_out,
-                                      char **residue_dir_out, size_t *residue_dir_len_out);
+                                      bool retrieval_relevant, char **humanness_ctx_out,
+                                      size_t *humanness_ctx_len_out, char **imperfect_dir_out,
+                                      size_t *imperfect_dir_len_out, char **residue_dir_out,
+                                      size_t *residue_dir_len_out);
 
 /* Optional: if non-NULL, called for each streaming token delta (CLI mode).
  * Provider must support streaming. When provided, uses stream_chat when available. */
@@ -1059,7 +1101,14 @@ void hu_agent_self_rag_telemetry(const hu_agent_t *agent, uint64_t *runs, uint64
                                  uint64_t *refusals_rendered, uint64_t *claims_total,
                                  uint64_t *claims_flagged);
 
-/* Run memory consolidation (merge similar entries, decay old). */
+/* Settings for every hu_memory_consolidate caller (daemon tick, topic switch,
+ * per-turn, gateway memory.consolidate): HU_CONSOLIDATION_DEFAULTS with
+ * decay_days / dedup_threshold taken from config->behavior when config is
+ * non-NULL. One builder so the callers cannot drift apart again. */
+hu_consolidation_config_t hu_agent_consolidation_config(const struct hu_config *config);
+
+/* Run memory consolidation (merge similar entries, decay old) with
+ * hu_agent_consolidation_config(agent->config). */
 hu_error_t hu_agent_consolidate_memory(hu_agent_t *agent);
 
 /* Reload configuration from ~/.human/config.json:

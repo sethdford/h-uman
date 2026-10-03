@@ -24,9 +24,9 @@ typedef struct hu_compaction_config {
     uint32_t max_history_messages; /* message count trigger */
 
     /* Structured compaction v2 fields */
-    bool use_structured_summary;       /* emit XML <summary> instead of plain text */
-    uint32_t preserve_recent_count;    /* override keep_recent for structured mode */
-    bool inject_continuation_preamble; /* prepend continuation context after compaction */
+    bool use_structured_summary;              /* emit XML <summary> instead of plain text */
+    uint32_t preserve_recent_count;           /* override keep_recent for structured mode */
+    bool inject_continuation_preamble;        /* prepend continuation context after compaction */
     struct hu_artifact_pin *pinned_artifacts; /* borrowed; messages referencing these are kept */
     size_t pinned_artifacts_count;
 } hu_compaction_config_t;
@@ -42,7 +42,7 @@ typedef struct hu_compaction_config {
  * earlier context. 120 casual messages is ~3-6 KB (well under the 32K history
  * token budget that still governs compaction), so this widens coherence at
  * negligible token cost. */
-#define HU_COMPACTION_DEFAULT_MAX_HISTORY       120
+#define HU_COMPACTION_DEFAULT_MAX_HISTORY 120
 
 /* Initialize config with defaults. */
 void hu_compaction_config_default(hu_compaction_config_t *cfg);
@@ -75,23 +75,13 @@ hu_error_t hu_context_compact_for_pressure(hu_allocator_t *alloc, hu_owned_messa
                                            size_t *history_count, size_t *history_cap,
                                            size_t max_tokens, float target_pressure);
 
-/* Hierarchical summarization: session (~200 words) → chapter (~100 words) → overall (~50 words).
- * Each stage uses the provider's chat_with_system (or fixed mocks when HU_IS_TEST).
- * Caller frees *session_summary, *chapter_summary, *overall_summary. */
-hu_error_t hu_compact_hierarchical(hu_allocator_t *alloc, hu_provider_t *provider,
-                                   const char *model, size_t model_len,
-                                   const char *conversation, size_t conversation_len,
-                                   char **session_summary, size_t *session_len,
-                                   char **chapter_summary, size_t *chapter_len,
-                                   char **overall_summary, size_t *overall_len);
-
 /* Hierarchical compaction: groups messages into chunks, summarizes each chunk,
  * then recursively summarizes summaries until the result fits within limits.
  * chunk_size: messages per chunk (0 = default 10). max_depth: recursion limit (0 = default 3). */
 hu_error_t hu_compact_history_hierarchical(hu_allocator_t *alloc, hu_owned_message_t **history,
                                            size_t *history_count, size_t *history_cap,
                                            const hu_compaction_config_t *config,
-                                           hu_provider_t *provider,
-                                           uint32_t chunk_size, uint32_t max_depth);
+                                           hu_provider_t *provider, uint32_t chunk_size,
+                                           uint32_t max_depth);
 
 #endif /* HU_AGENT_COMPACTION_H */

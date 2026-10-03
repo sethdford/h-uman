@@ -17,6 +17,7 @@
 
 #define _GNU_SOURCE 1
 
+#include "human/core/io_secure.h"
 #include "human/core/paths.h"
 #include "human/persona/crypto.h"
 
@@ -416,28 +417,6 @@ static hu_error_t seal_bytes(const uint8_t *plaintext, size_t pt_len,
     return HU_OK;
 }
 
-/* Sibling-directory fsync (best-effort; not all platforms or fs's honour it,
- * but POSIX requires it for rename durability). */
-static void fsync_parent_dir(const char *path) {
-    char dir[1024];
-    size_t n = strlen(path);
-    if (n >= sizeof(dir))
-        return;
-    memcpy(dir, path, n + 1);
-    char *slash = strrchr(dir, '/');
-    if (!slash)
-        return;
-    if (slash == dir)
-        slash[1] = '\0';
-    else
-        slash[0] = '\0';
-    int fd = open(dir, O_RDONLY | O_CLOEXEC);
-    if (fd < 0)
-        return;
-    (void)fsync(fd);
-    close(fd);
-}
-
 /* Write `bytes` to <path> via the atomic tmp+fsync+rename pattern.
  *
  * If <path>.tmp already exists, returns HU_ERR_IO_BUSY (concurrent migration
@@ -481,7 +460,7 @@ static hu_error_t atomic_write(const char *path, const uint8_t *bytes, size_t le
         (void)unlink(tmp);
         return HU_ERR_IO;
     }
-    fsync_parent_dir(path);
+    hu_io_secure_sync_parent_dir(path);
     return HU_OK;
 }
 

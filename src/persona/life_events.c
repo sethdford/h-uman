@@ -6,6 +6,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 /* ── State vocabulary ─────────────────────────────────────────────────── */
 
@@ -122,6 +123,14 @@ int64_t hu_life_event_parse_date(const char *s, size_t len) {
 
 /* ── The pure predicate ───────────────────────────────────────────────── */
 
+bool hu_life_event_is_stale(const hu_life_event_t *ev, int64_t now_ts) {
+    if (!ev || ev->expected_date > 0 || ev->as_of <= 0)
+        return false;
+    if (ev->state == HU_LIFE_EVENT_STATE_COMPLETED || ev->state == HU_LIFE_EVENT_STATE_CANCELLED)
+        return false;
+    return now_ts - ev->as_of > (int64_t)HU_LIFE_EVENT_STALE_DAYS * 86400;
+}
+
 hu_life_event_state_t hu_life_event_effective_state(const hu_life_event_t *ev, int64_t now_ts) {
     if (!ev)
         return HU_LIFE_EVENT_STATE_UNKNOWN;
@@ -132,9 +141,12 @@ hu_life_event_state_t hu_life_event_effective_state(const hu_life_event_t *ev, i
         return ev->state;
 
     /* Open-ended (no expected_date): there is no resolution point to be past,
-     * so the declared state stands. An open-ended `pending` stays pending. */
+     * so the declared state stands — until nobody has re-confirmed it for
+     * HU_LIFE_EVENT_STALE_DAYS. After that it is not known to be current:
+     * "helping ryan relocate", in_progress as of July, was still answered as
+     * this weekend's plan in late September (2026-09-29). */
     if (ev->expected_date <= 0)
-        return ev->state;
+        return hu_life_event_is_stale(ev, now_ts) ? HU_LIFE_EVENT_STATE_UNKNOWN : ev->state;
 
     /* Still before the expected resolution — the declared state is current. */
     if (now_ts < ev->expected_date)
@@ -249,6 +261,15 @@ hu_error_t hu_life_events_build_directive(const hu_life_event_t *events, size_t 
             !append_str(out, cap, &pos, hu_life_event_state_str(eff)) ||
             !append_str(out, cap, &pos, "]"))
             break;
+        if (hu_life_event_is_stale(ev, now_ts)) {
+            char when[40];
+            time_t t = (time_t)ev->as_of;
+            struct tm tmv;
+            if (gmtime_r(&t, &tmv) &&
+                strftime(when, sizeof(when), " (last heard %Y-%m-%d)", &tmv) > 0 &&
+                !append_str(out, cap, &pos, when))
+                break;
+        }
 
         if (hu_life_event_must_not_assert_completion(ev, now_ts)) {
             hedged++;
@@ -277,6 +298,14 @@ hu_error_t hu_life_events_build_directive(const hu_life_event_t *events, size_t 
                          "Never upgrade one of these to finished just because its date has "
                          "passed. Saying \"i don't know yet\" or asking is always better than "
                          "guessing that it worked out.\n");
+    /* Seth, 2026-09-29: "vague unless known". The list above is everything
+     * known about his life right now; the rest must not be made up. */
+    if (pos > 0)
+        (void)append_str(out, cap, &pos,
+                         "Anything not listed here about your life or your day (what you did, "
+                         "what you're up to, how something went) you don't know: keep it vague "
+                         "and true (\"not much\", \"work stuff\") or ask back. Never invent "
+                         "events, plans, people, or outcomes.\n");
 
     out[pos < cap ? pos : cap - 1] = '\0';
     *out_len = pos < cap ? pos : cap - 1;

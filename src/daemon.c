@@ -14,6 +14,7 @@
 #include "human/config.h"
 #include "human/core/error.h"
 #include "human/core/log.h"
+#include "human/core/log_redact.h"
 #include "human/core/paths.h"
 #include "human/core/process_util.h"
 #include "human/core/rand.h"
@@ -29,6 +30,7 @@
 #include "human/agent/init_outcome.h"
 #include "human/agent/init_proposer.h"
 #include "human/agent/kv_cache.h"
+#include "human/agent/length_policy.h"
 #include "human/agent/lora_runner.h"
 #include "human/agent/model_router_health.h"
 #include "human/agent/multimodal_policy.h"
@@ -38,7 +40,11 @@
 #include "human/behavior/prosocial_moment.h"
 #include "human/behavior/win_detect.h"
 #include "human/core/gate_mode.h"
+#include "human/daemon/commitment_guard.h"
 #include "human/daemon/daemon_shape.h"
+#include "human/daemon/grief_decay.h"
+#include "human/daemon/proposer_context.h"
+#include "human/daemon/spontaneity.h"
 #include "human/memory/celebration_repo.h"
 #include "human/memory/graph_ingest.h"
 #include "human/memory/opinion_challenge.h" /* roadmap #14: stance-hold directive */
@@ -52,7 +58,6 @@
 #include "human/eval/eval_gate.h"
 #include "human/eval/leaderboard.h"
 #endif
-#include "human/agent/action_directives.h"
 #include "human/agent/prompt_budget.h"
 #include "human/agent/training_data_runner.h"
 #include "human/agent/training_runner_shared.h"
@@ -66,27 +71,43 @@
 #include "human/ml/m3_frontier_adapter.h"
 #endif
 #include "human/agent/choreography.h"
+#include "human/agent/local_only_route.h"
+#include "human/channels/imessage_caps.h"
+#include "human/core/local_only_guard.h"
 #include "human/daemon/agent_facade.h"
+#include "human/daemon/briefing.h"
 #include "human/daemon/config_reload.h"
 #include "human/daemon/consecutive_limiter.h"
 #include "human/daemon/context_facade.h"
+#include "human/daemon/crisis.h"
 #include "human/daemon/dated_followup.h"
-#include "human/daemon/director.h"
+#include "human/daemon/director_v2.h" /* includes director.h */
+#include "human/daemon/expressive.h"
 #include "human/daemon/feeds_facade.h"
-#include "human/daemon/hurt_handoff.h"
 #include "human/daemon/identity_graph.h"
 #include "human/daemon/insight_overuse.h"
 #include "human/daemon/intelligence_facade.h"
+#include "human/daemon/job_queue.h"
 #include "human/daemon/memory_facade.h"
 #include "human/daemon/ml_facade.h"
+#include "human/daemon/name_catch.h"
+#include "human/daemon/outbound_sanitize.h"
+#include "human/daemon/person_dates.h"
 #include "human/daemon/persona_facade.h"
 #include "human/daemon/platform_facade.h"
 #include "human/daemon/promise_keeper.h"
+#include "human/daemon/prospective_time.h"
+#include "human/daemon/reactive_calibration.h"
 #include "human/daemon/reactive_gates.h"
 #include "human/daemon/reactive_turn.h"
+#include "human/daemon/reminders.h"
 #include "human/daemon/send_budget.h"
 #include "human/daemon/send_provenance.h"
+#include "human/daemon/share_queue.h"
+#include "human/daemon/unprompted_gate.h"
+#include "human/daemon/unprompted_sends.h"
 #include "human/daemon/voice_facade.h"
+#include "human/daemon/voice_first.h"
 
 /* Channel helpers */
 #include "human/channels/channel_embed.h"
@@ -153,6 +174,7 @@
 #include "human/daemon/peripheral_gov.h"
 #include "human/daemon/proactive_policy.h"
 #include "human/daemon/reply_dedup.h"
+#include "human/daemon/send_failure.h"
 
 /* follow_up.h must be included unconditionally — the read-receipt watcher
  * scheduling block at L~1259 uses hu_followup_dedup_t / hu_followup_decide
@@ -169,6 +191,7 @@
 #include "human/agent/proactive_ext.h"
 #include "human/agent/proactive_throttle.h"
 #include "human/agent/validators/builtin.h"
+#include "human/context/reply_fragment.h"
 #include "human/context/self_awareness.h"
 #include "human/observability/validator_telemetry.h"
 #ifdef HU_HAS_CRON
@@ -349,7 +372,9 @@ hu_proactive_budget_t gov_budget = {
     .daily_max = 6,
     .weekly_max = 15,
     .relationship_multiplier = 1.0,
-    .cool_off_after_unanswered = 2,
+    /* DEF-6: the cool-off is PER CONTACT now (unprompted_gate.c); the global
+     * one was reset by anyone's reply, so it never applied. Global = ceiling. */
+    .cool_off_after_unanswered = UINT8_MAX,
     .cool_off_hours = 72,
 };
 bool gov_budget_inited = true;
@@ -401,6 +426,7 @@ bool gov_budget_inited = true;
 #include "human/channels/imessage_action_facts.h"
 #include "human/core/time.h"
 #include "human/persona/pacing.h"
+#include "human/util/typedstream.h"
 
 /* hu_daemon_dispatch_imessage_reply (iMessage reply-route dispatcher)
  * extracted to src/daemon/daemon_message_router.c — DDD Phase 2.5.
@@ -452,20 +478,6 @@ static hu_proactive_context_t g_proactive_ctx;
  * skeleton don't allocate. */
 static hu_proactive_throttle_t g_proactive_throttle;
 static int g_proactive_throttle_initialized;
-
-/* Persist scheduled.json after a slot changes. A failed save leaves memory and
- * disk disagreeing and the stale file replays on restart (the 2026-07-27
- * sched-send incident class), so the failure is logged rather than dropped. */
-static void daemon_sched_persist(hu_agent_t *agent, const char *what) {
-    char sp[512];
-    int sn = hu_paths_state(sp, sizeof(sp), "scheduled.json");
-    if (sn <= 0 || (size_t)sn >= sizeof(sp))
-        return;
-    hu_error_t se = hu_conversation_sched_save(sp, (size_t)sn);
-    if (se != HU_OK)
-        hu_log_error("human", agent ? agent->observer : NULL,
-                     "scheduled.json not persisted after %s (%d)", what, (int)se);
-}
 
 static hu_proactive_throttle_t *daemon_throttle(hu_allocator_t *alloc) {
     if (!g_proactive_throttle_initialized) {
@@ -520,7 +532,7 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
         hu_proactive_budget_config_t gcfg = {.daily_max = 6,
                                              .weekly_max = 15,
                                              .relationship_multiplier = 1.0,
-                                             .cool_off_after_unanswered = 2,
+                                             .cool_off_after_unanswered = UINT8_MAX,
                                              .cool_off_hours = 72};
         hu_governor_init(&gcfg, &gov_budget);
         gov_budget_inited = true;
@@ -539,6 +551,10 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
         double busy_mult = hu_busyness_budget_multiplier(&bs);
         gov_budget.relationship_multiplier = 1.0 * recip_mult * busy_mult;
     }
+    /* Scheduled-queue delivery runs BEFORE the budget gate: an owner-scheduled
+     * message is explicit owner intent and must not stall because unprompted
+     * sends spent the budget (bumps in the queue still face the full stack). */
+    hu_daemon_sched_deliver_due(alloc, agent, channels, channel_count, (int64_t)now);
     if (!hu_governor_has_budget(&gov_budget, gov_now_ms))
         return;
 
@@ -562,146 +578,10 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
     uint32_t throttle_ymd = (uint32_t)today_ymd;
 
 #ifndef HU_IS_TEST
-    /* F25: Emotional check-ins — due moments from 1–3 days ago */
-    if (agent->memory) {
-        hu_emotional_moment_t *due = NULL;
-        size_t due_count = 0;
-        if (hu_emotional_moment_get_due(alloc, agent->memory, (int64_t)now, &due, &due_count) ==
-                HU_OK &&
-            due && due_count > 0) {
-            for (size_t d = 0; d < due_count; d++) {
-                const hu_emotional_moment_t *m = &due[d];
-                /* Find contact and channel for this contact_id */
-                for (size_t i = 0; i < agent->persona->contacts_count; i++) {
-                    const hu_contact_profile_t *cp = &agent->persona->contacts[i];
-                    if (!cp->proactive_checkin || !cp->proactive_channel || !cp->contact_id)
-                        continue;
-                    /* Strict contact_id equality only.  See 2026-05-16 incident:
-                     * the prior implementation also accepted the moment's
-                     * contact_id matching cp->proactive_channel (whole or
-                     * after-colon), which routed Mindy's emotional moment to
-                     * three contacts whose proactive_channel handles
-                     * collided.  Predicate pinned by tests/test_proactive.c. */
-                    if (!hu_proactive_contact_matches_moment(cp->contact_id, m->contact_id))
-                        continue;
-
-                    char ch_buf[64] = {0};
-                    char target_route_buf[128] = {0};
-                    daemon_proactive_parse_route(cp, ch_buf, target_route_buf);
-                    size_t target_len = strlen(target_route_buf);
-                    daemon_contact_activity_apply_route(cp->contact_id, now, channels,
-                                                        channel_count, ch_buf, target_route_buf,
-                                                        &target_len);
-                    const char *ch_part = ch_buf;
-                    const char *target_part = target_route_buf;
-
-                    for (size_t c = 0; c < channel_count; c++) {
-                        if (!channels[c].channel || !channels[c].channel->vtable ||
-                            !channels[c].channel->vtable->name)
-                            continue;
-                        const char *ch_name =
-                            channels[c].channel->vtable->name(channels[c].channel->ctx);
-                        if (!ch_name || strcmp(ch_name, ch_part) != 0)
-                            continue;
-                        if (!channels[c].channel->vtable->send)
-                            break;
-
-                        /* Outbound safety gate — see 2026-05-16 incident.
-                         * m->topic can contain a raw window of the user's own
-                         * emotional confession or the literal "(last: %lld)"
-                         * recall-format string.  hu_proactive_topic_is_safe is
-                         * the predicate that pins what we refuse to ship; if
-                         * the topic fails, we drop the send and log enough
-                         * context to investigate without leaking the body. */
-                        size_t topic_len = strnlen(m->topic, sizeof(m->topic));
-                        if (!hu_proactive_topic_is_safe(m->topic, topic_len)) {
-                            hu_log_info("human", agent ? agent->observer : NULL,
-                                        "F25 emotional check-in BLOCKED for %s (unsafe topic, "
-                                        "%zu chars)",
-                                        cp->name ? cp->name : cp->contact_id, topic_len);
-                            (void)hu_emotional_moment_mark_followed_up(agent->memory, m->id);
-                            break;
-                        }
-
-                        /* FU-1: defer F25 if reactive turn fired for this contact recently. */
-                        if (hu_daemon_proactive_should_defer(&agent->contact_send_recency,
-                                                             m->contact_id, strlen(m->contact_id),
-                                                             (int64_t)now)) {
-                            hu_log_info("human", agent ? agent->observer : NULL,
-                                        "F25 emotional check-in deferred for %s "
-                                        "(reactive turn within %ds)",
-                                        cp->name ? cp->name : cp->contact_id,
-                                        HU_DAEMON_REACTIVE_GATE_WINDOW_S);
-                            break;
-                        }
-
-                        char msg_buf[384];
-                        int w = snprintf(msg_buf, sizeof(msg_buf), "hey how are you doing with %s?",
-                                         m->topic);
-                        if (w > 0 && (size_t)w < sizeof(msg_buf)) {
-                            /* 2026-05-16 P1-6: channel rate-limiter on outbound. */
-                            hu_proactive_throttle_t *th = daemon_throttle(alloc);
-                            if (!hu_proactive_throttle_channel_try_consume(th, ch_name)) {
-                                hu_log_info("human", agent ? agent->observer : NULL,
-                                            "F25 emotional check-in to %s skipped: rate-limited",
-                                            cp->name ? cp->name : cp->contact_id);
-                                break;
-                            }
-                            /* 2026-05-16 P4-6: per-contact daily/weekly send cap. */
-                            uint64_t now_ms_p46 = (uint64_t)now * 1000ULL;
-                            if (!hu_proactive_throttle_record_send(th, cp->contact_id, "F25",
-                                                                   now_ms_p46)) {
-                                hu_log_info("human", agent ? agent->observer : NULL,
-                                            "F25 emotional check-in to %s skipped: send-cap",
-                                            cp->name ? cp->name : cp->contact_id);
-                                break;
-                            }
-                            /* 2026-05-26 incident fix: sanitize F25 outbound
-                             * before send. The Annie/Mindy/Betty event surfaced
-                             * the F25 check-in sending identical garbled text
-                             * to multiple family contacts (cross-contact bleed
-                             * still under investigation — Bug #2 not yet
-                             * root-caused). Even before that fix lands, the
-                             * sanitizer strips U+FFFC + rejects directive
-                             * echoes so the family-tier failure mode is
-                             * contained. */
-                            size_t msg_sanitized_len = (size_t)w;
-                            const char *sanitize_reason = NULL;
-                            if (!hu_outbound_sanitize(msg_buf, &msg_sanitized_len,
-                                                      &sanitize_reason)) {
-                                hu_log_warn(
-                                    "human", agent ? agent->observer : NULL,
-                                    "F25 emotional check-in to %s REJECTED by sanitizer: %s "
-                                    "(would have sent: %.*s)",
-                                    cp->name ? cp->name : cp->contact_id,
-                                    sanitize_reason ? sanitize_reason : "unknown",
-                                    (int)(msg_sanitized_len > 80 ? 80 : msg_sanitized_len),
-                                    msg_buf);
-                                break;
-                            }
-                            hu_error_t send_err = channels[c].channel->vtable->send(
-                                channels[c].channel->ctx, target_part, target_len, msg_buf,
-                                msg_sanitized_len, NULL, 0);
-                            if (send_err == HU_OK) {
-                                (void)hu_emotional_moment_mark_followed_up(agent->memory, m->id);
-                                hu_contact_send_recency_record(
-                                    &agent->contact_send_recency, m->contact_id,
-                                    strlen(m->contact_id), (int64_t)now, HU_SEND_PATH_PROACTIVE);
-                                (void)hu_daemon_proactive_outcome_record_send(
-                                    agent->memory, ch_name, target_part, target_len);
-                                hu_log_info("human", agent ? agent->observer : NULL,
-                                            "F25 emotional check-in sent to %s: %s",
-                                            cp->name ? cp->name : cp->contact_id, msg_buf);
-                            }
-                        }
-                        break;
-                    }
-                    break;
-                }
-            }
-            alloc->free(alloc->ctx, due, due_count * sizeof(hu_emotional_moment_t));
-        }
-    }
+    /* F25 emotional check-ins — carved to daemon_unprompted_sends.c, gated by
+     * the unprompted stack (DEF-14). */
+    hu_daemon_f25_checkins_tick(alloc, agent, channels, channel_count, &g_proactive_ctx,
+                                (int64_t)now);
 #endif
 
 #ifdef HU_ENABLE_SQLITE
@@ -718,84 +598,9 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
     }
 #endif
 
-    /* Scheduled message delivery: once per channel, independent of contacts */
-    {
-        /* Re-sync from disk when the file changed — `human schedule add`
-         * writes from a separate process, and the previous once-per-process
-         * load left those entries invisible until the next daemon restart
-         * (2026-07-27). Cheap: one stat() per pass, load only on change. */
-        {
-            char sp[512];
-            int sn = hu_paths_state(sp, sizeof(sp), "scheduled.json");
-            if (sn > 0 && (size_t)sn < sizeof(sp))
-                hu_conversation_sched_reload_if_changed(sp, (size_t)sn);
-        }
-        uint64_t sched_now = (uint64_t)time(NULL) * 1000ULL;
-        for (size_t sc = 0; sc < channel_count; sc++) {
-            if (!channels[sc].channel || !channels[sc].channel->vtable ||
-                !channels[sc].channel->vtable->send || !channels[sc].channel->vtable->name)
-                continue;
-            const char *sched_ch = channels[sc].channel->vtable->name(channels[sc].channel->ctx);
-            if (!sched_ch)
-                continue;
-            char sched_contact[128], sched_channel[32], sched_msg[512];
-            size_t sched_len = hu_conversation_flush_scheduled_for(
-                sched_now, sched_ch, strlen(sched_ch), sched_contact, sizeof(sched_contact),
-                sched_channel, sizeof(sched_channel), sched_msg, sizeof(sched_msg));
-            if (sched_len > 0) {
-                /* FU-1: defer scheduled delivery if the reactive turn fired recently. */
-                if (agent &&
-                    hu_daemon_proactive_should_defer(&agent->contact_send_recency, sched_contact,
-                                                     strlen(sched_contact), (int64_t)time(NULL))) {
-                    hu_log_info("human", agent ? agent->observer : NULL,
-                                "scheduled message deferred for %s (reactive turn within %ds)",
-                                sched_contact, HU_DAEMON_REACTIVE_GATE_WINDOW_S);
-                    continue;
-                }
-                hu_validator_chain_apply_default_in_place(alloc, agent ? agent->observer : NULL,
-                                                          NULL, 0, "scheduled send", sched_msg,
-                                                          &sched_len, sizeof(sched_msg));
-                if (sched_len == 0)
-                    continue;
-                sched_len =
-                    hu_conversation_vary_complexity(sched_msg, sched_len, (uint32_t)time(NULL));
-                if (sched_len > 1 && sched_msg[0] >= 'A' && sched_msg[0] <= 'Z' &&
-                    sched_msg[1] >= 'a' && sched_msg[1] <= 'z' && sched_msg[0] != 'I') {
-                    sched_msg[0] = (char)(sched_msg[0] + 32);
-                }
-                if (sched_len > 1 && sched_msg[sched_len - 1] == '.') {
-                    sched_msg[sched_len - 1] = '\0';
-                    sched_len--;
-                }
-                /* Sprint 59 outbound safety — scheduled sends bypass the
-                 * proactive/F25 sanitizer call sites, so cross-contact bleed
-                 * and metadata-leak would slip through here. The Annie/Mindy/
-                 * Betty incident's verbatim string COULD have come out via a
-                 * scheduled send. Route every scheduled send through the
-                 * pipeline (currently configured the same as proactive). */
-                {
-                    size_t sched_san_len = sched_len;
-                    const char *sched_san_reason = NULL;
-                    if (!hu_outbound_sanitize(sched_msg, &sched_san_len, &sched_san_reason)) {
-                        hu_log_warn("human", agent ? agent->observer : NULL,
-                                    "scheduled send to %s REJECTED by outbound pipeline: %s "
-                                    "(would have sent: %.*s)",
-                                    sched_contact, sched_san_reason ? sched_san_reason : "unknown",
-                                    (int)(sched_len > 80 ? 80 : sched_len), sched_msg);
-                        continue;
-                    }
-                    sched_len = sched_san_len;
-                }
-                hu_daemon_sched_send_and_log(agent, channels[sc].channel, sched_ch, sched_contact,
-                                             sched_msg, sched_len);
-                daemon_sched_persist(agent, "send");
-            }
-        }
-    }
-
     /* Follow-up watcher (S2.1b) — carved to src/daemon/daemon_followup_sched.c
      * (file-size-ceiling ratchet). msg-id dedup + per-contact cooldown live
-     * there; scheduling flows through hu_conversation_schedule_message_on. */
+     * there; scheduling flows through hu_conversation_schedule_message_kind. */
     hu_daemon_followup_sched_tick(agent, channels, channel_count);
 
     for (size_t i = 0; i < agent->persona->contacts_count; i++) {
@@ -832,7 +637,7 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                     p9_db, cp->contact_id, 0.3f, 7200, 43200, (int64_t)now);
                 if (needs_recovery > 0) {
                     hu_log_info("human", agent ? agent->observer : NULL,
-                                "Phase 9: recovery needed for %s", cp->contact_id);
+                                "Phase 9: recovery needed for %s", HU_LOG_WHO_CSTR(cp->contact_id));
                     hu_interaction_quality_mark_recovered(p9_db, cp->contact_id, (int64_t)now);
                 }
                 int thread_followups =
@@ -840,7 +645,7 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                 if (thread_followups > 0)
                     hu_log_info("human", agent ? agent->observer : NULL,
                                 "Phase 9: %d thread follow-ups for %s", thread_followups,
-                                cp->contact_id);
+                                HU_LOG_WHO_CSTR(cp->contact_id));
             }
         }
 #endif
@@ -867,8 +672,8 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                 &entry_count);
             if (hist_err != HU_OK)
                 hu_log_error("daemon", agent ? agent->observer : NULL,
-                             "proactive: history load failed for %s: %s", cp->contact_id,
-                             hu_error_string(hist_err));
+                             "proactive: history load failed for %s: %s",
+                             HU_LOG_WHO_CSTR(cp->contact_id), hu_error_string(hist_err));
 
             uint64_t last_contact_ms = 0;
             bool should_checkin = true;
@@ -896,12 +701,9 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
             /* Build combined text from user messages for event extraction */
             char combined[4096];
             size_t combined_len = 0;
-            /* P6-3: also capture the MOST RECENT inbound text for the
-             * emotional-tone gate below. Entries are id-ascending, so
-             * the last !from_me entry is the latest. */
-            char last_inbound_buf[1024];
-            size_t last_inbound_len = 0;
-            last_inbound_buf[0] = '\0';
+            /* P6-3: the MOST RECENT inbound (entries are id-ascending) and
+             * its time, for the emotional-tone gate below. */
+            hu_grief_decay_inbound_t last_inbound = {0};
             if (entries && entry_count > 0) {
                 for (size_t e = 0; e < entry_count; e++) {
                     if (entries[e].from_me)
@@ -915,15 +717,13 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                         memcpy(combined + combined_len, entries[e].text, tlen);
                         combined_len += tlen;
                     }
-                    size_t copy = tlen;
-                    if (copy >= sizeof(last_inbound_buf))
-                        copy = sizeof(last_inbound_buf) - 1;
-                    memcpy(last_inbound_buf, entries[e].text, copy);
-                    last_inbound_buf[copy] = '\0';
-                    last_inbound_len = copy;
+                    hu_grief_decay_note_inbound(&last_inbound, entries[e].text, tlen,
+                                                entries[e].timestamp);
                 }
                 combined[combined_len] = '\0';
             }
+            hu_proposer_context_t pctx; /* HU_PROPOSER_CONTEXT: thread kept only for local */
+            hu_proposer_context_begin(&pctx, &agent->provider, entries, entry_count, (int64_t)now);
             if (entries)
                 alloc->free(alloc->ctx, entries, entry_count * sizeof(*entries));
 
@@ -1039,17 +839,14 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
              * detector via hu_daemon_dated_followup_apply (after the event, with
              * the situation as context, marked sent only on delivery). */
 
-            /* P6-3: emotional-tone gate. If the contact's most-recent
-             * inbound message was heavy/grief, skip the generic
-             * proactive check-in — the next reactive turn will
-             * respond. Generic "hey what's up" on top of a vulnerable
-             * message reads as oblivious. */
-            if (should_checkin &&
-                hu_proactive_should_suppress_for_emotion(last_inbound_buf, last_inbound_len)) {
+            /* P6-3 + HU_GRIEF_DECAY (DEF-10, src/daemon/daemon_grief_decay.c). */
+            hu_grief_decay_verdict_t gd =
+                should_checkin ? hu_grief_decay_decide(&last_inbound, (int64_t)now, &pctx) : 0;
+            if (gd == HU_GRIEF_DECAY_SUPPRESS) {
                 hu_log_info(
                     "daemon", agent ? agent->observer : NULL,
                     "proactive: suppressing check-in for %s — last inbound emotionally heavy",
-                    cp->contact_id);
+                    HU_LOG_WHO_CSTR(cp->contact_id));
                 should_checkin = false;
             }
 
@@ -1057,45 +854,16 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                 break;
 
 #ifdef HU_ENABLE_SQLITE
-            /* F20: Commitment follow-up — add due commitments for this contact */
+            /* F20: Commitment follow-up — this contact's due commitments
+             * (src/daemon/daemon_prospective_time.c). */
             char *commitment_ctx = NULL;
             size_t commitment_ctx_len = 0;
             int64_t commitment_ids[3];
             size_t commitment_ids_count = 0;
-            if (agent && agent->memory && cp->contact_id) {
-                hu_superhuman_commitment_t *due = NULL;
-                size_t due_count = 0;
-                if (hu_superhuman_commitment_list_due(agent->memory, alloc, (int64_t)now, 3, &due,
-                                                      &due_count) == HU_OK &&
-                    due && due_count > 0) {
-                    size_t cid_len = strlen(cp->contact_id);
-                    char ctx_buf[1024];
-                    size_t ctx_pos = 0;
-                    for (size_t di = 0; di < due_count && ctx_pos < sizeof(ctx_buf) - 200; di++) {
-                        if (cid_len != strlen(due[di].contact_id) ||
-                            memcmp(due[di].contact_id, cp->contact_id, cid_len) != 0)
-                            continue;
-                        int n = snprintf(ctx_buf + ctx_pos, sizeof(ctx_buf) - ctx_pos,
-                                         "COMMITMENT FOLLOW-UP: %s was due. Ask if it happened: "
-                                         "'hey did you ever %s?'\n",
-                                         due[di].description, due[di].description);
-                        if (n > 0 && ctx_pos + (size_t)n < sizeof(ctx_buf)) {
-                            ctx_pos += (size_t)n;
-                            if (commitment_ids_count < 3)
-                                commitment_ids[commitment_ids_count++] = due[di].id;
-                        }
-                    }
-                    if (ctx_pos > 0) {
-                        commitment_ctx = (char *)alloc->alloc(alloc->ctx, ctx_pos + 1);
-                        if (commitment_ctx) {
-                            memcpy(commitment_ctx, ctx_buf, ctx_pos);
-                            commitment_ctx[ctx_pos] = '\0';
-                            commitment_ctx_len = ctx_pos;
-                        }
-                    }
-                    hu_superhuman_commitment_free(alloc, due, due_count);
-                }
-            }
+            if (agent && agent->memory && cp->contact_id)
+                hu_daemon_prospective_commitment_ctx(alloc, agent, cp->contact_id, (int64_t)now,
+                                                     &commitment_ctx, &commitment_ctx_len,
+                                                     commitment_ids, &commitment_ids_count);
 #endif
 
             /* F53: Birthday/holiday awareness — important_dates from persona */
@@ -1115,7 +883,7 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                     }
                 }
             }
-            if (!important_date_sent_today &&
+            if (!important_date_sent_today && !hu_grief_decay_skip_extras(gd) &&
                 hu_proactive_check_important_dates(
                     agent->persona, cp->contact_id, strlen(cp->contact_id), tm_now.tm_mon + 1,
                     tm_now.tm_mday, important_date_msg, sizeof(important_date_msg),
@@ -1145,7 +913,7 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
             /* F12: Bookend messages — morning/evening greetings for close contacts */
             char *bookend_ctx = NULL;
             size_t bookend_ctx_len = 0;
-            if (!had_important_date && agent->persona) {
+            if (!had_important_date && agent->persona && !hu_grief_decay_skip_extras(gd)) {
                 bool contact_is_close = (cp->dunbar_layer && atoi(cp->dunbar_layer) <= 2);
                 bool bookend_sent_today = hu_proactive_throttle_dedup_already_today(
                     &g_proactive_throttle, "important_date", cp->contact_id, throttle_ymd);
@@ -1471,15 +1239,16 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                  * docs/plans/2026-05-26-m3-dispatch-unification/. */
                 char *unified_mem_ctx = NULL;
                 size_t unified_mem_ctx_len = 0;
-                /* Reachability pre-filter (2026-09-20, HU_PROACTIVE_REACHABILITY):
-                 * skip the proposer for a contact blue_guard would HOLD anyway.
-                 * OFF/SHADOW never take this branch; see daemon_proactive.h. */
-                if (hu_daemon_contact_optout_should_skip(agent, cp->contact_id)) {
-                    /* Contact asked us to stop (O5): no proposer fire, no send,
-                     * nothing recorded — consent is not a candidate. */
-                } else if (hu_daemon_proactive_reach_should_skip(
-                               agent, alloc, ch_part, cp->contact_id, target_part, target_len)) {
-                    /* LIVE: no proposer fire, no send, nothing recorded. */
+                /* Unprompted gate stack, pre-LLM (DEF-9): opt-out, governor +
+                 * per-contact cool-off, persisted cap, quiet hours, circuit,
+                 * reachability. A denied contact costs no proposer call and
+                 * records nothing — it is not a candidate. */
+                hu_unprompted_gate_t pre_gate;
+                hu_daemon_unprompted_gate_init(&pre_gate, alloc, agent, ch_part, target_part,
+                                               target_len, (int64_t)now);
+                if (hu_unprompted_send_check(&pre_gate, cp->contact_id, HU_UNPROMPTED_PROACTIVE,
+                                             (int64_t)now, NULL, NULL,
+                                             false) != HU_UNPROMPTED_ALLOW) {
                 } else if (config && agent && agent->provider.vtable) {
                     if (agent->memory) {
                         unified_mem_ctx = hu_daemon_build_callback_context(
@@ -1503,55 +1272,27 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                     inputs.situation_context_len = prompt_len;
                     inputs.content_is_safe = hu_daemon_callback_content_is_safe;
 
-                    /* Producer for the due_followups field: surface THIS
-                     * contact's due delayed follow-ups (scheduled when a
-                     * commitment with a deadline was stored) as a labeled
-                     * context section, so the proposer has a CONCRETE
-                     * trigger to fire on instead of generic pondering.
-                     * Items are listed (not marked sent) — mark-sent stays
-                     * tied to an actual send (the F31 path at the send
-                     * site), so an unsent item correctly reappears. */
+                    /* Producer for the due_followups field: this contact's due
+                     * delayed follow-up as a labeled section, so the proposer has
+                     * a concrete trigger. Listed, not marked sent — mark-sent
+                     * stays tied to an actual send (the F31 path at the send
+                     * site). src/daemon/daemon_prospective_time.c. */
                     char due_fu_buf[640];
-                    due_fu_buf[0] = '\0';
-                    if (agent->memory) {
-                        hu_delayed_followup_t *due_arr = NULL;
-                        size_t due_n = 0;
-                        if (hu_superhuman_delayed_followup_list_due(
-                                agent->memory, alloc, (int64_t)now, &due_arr, &due_n) == HU_OK &&
-                            due_arr && due_n > 0) {
-                            size_t pos = 0;
-                            size_t listed = 0;
-                            for (size_t fi = 0; fi < due_n && listed < 1; fi++) {
-                                if (strcmp(due_arr[fi].contact_id, cp->contact_id) != 0)
-                                    continue;
-                                due_followup_id_listed = due_arr[fi].id;
-                                int w =
-                                    snprintf(due_fu_buf + pos, sizeof(due_fu_buf) - pos,
-                                             "- %s (due %llds ago)\n", due_arr[fi].topic,
-                                             (long long)((int64_t)now - due_arr[fi].scheduled_at));
-                                if (w <= 0 || (size_t)w >= sizeof(due_fu_buf) - pos)
-                                    break;
-                                pos += (size_t)w;
-                                listed++;
-                            }
-                            if (pos > 0) {
-                                inputs.due_followups_context = due_fu_buf;
-                                inputs.due_followups_context_len = pos;
-                            }
-                            hu_superhuman_delayed_followup_free(alloc, due_arr, due_n);
-                        }
+                    size_t due_fu_len = hu_daemon_prospective_due_followups(
+                        alloc, agent, channels[c].channel, target_part, target_len, cp->contact_id,
+                        (int64_t)now, due_fu_buf, sizeof(due_fu_buf), &due_followup_id_listed);
+                    if (due_fu_len > 0) {
+                        inputs.due_followups_context = due_fu_buf;
+                        inputs.due_followups_context_len = due_fu_len;
                     }
 
-                    int64_t unified_last_tick = 0;
-                    uint64_t unified_tick_id = 0;
                     hu_init_proposer_result_t unified_result = HU_INIT_RESULT_SKIP;
-                    hu_init_decision_t unified_decision;
-                    memset(&unified_decision, 0, sizeof(unified_decision));
-                    (void)hu_init_proposer_tick_with_provider_ex(
-                        &config->initiative, daemon_autoresponder_config(),
+                    hu_init_decision_t unified_decision = {0};
+                    hu_proposer_context_decide(
+                        &pctx, &config->initiative, daemon_autoresponder_config(),
                         daemon_local_tz_offset_seconds((int64_t)now), &gov_budget, agent,
-                        &agent->provider, alloc, &inputs, /*last_inbound_unix=*/0, (int64_t)now,
-                        &unified_last_tick, &unified_tick_id, &unified_result, &unified_decision);
+                        &agent->provider, alloc, cp, &inputs, (int64_t)now, &unified_result,
+                        &unified_decision);
 
                     if (unified_result == HU_INIT_RESULT_FIRED && unified_decision.draft_len > 0) {
                         response = (char *)alloc->alloc(alloc->ctx, unified_decision.draft_len + 1);
@@ -1566,7 +1307,7 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                         hu_log_info(
                             "human", agent ? agent->observer : NULL,
                             "proactive (unified) to %s: result=%d — skipping send this tick",
-                            cp->name ? cp->name : cp->contact_id, (int)unified_result);
+                            HU_LOG_WHO_CSTR(cp->contact_id), (int)unified_result);
                     }
                     if (unified_mem_ctx)
                         alloc->free(alloc->ctx, unified_mem_ctx, unified_mem_ctx_len + 1);
@@ -1576,7 +1317,7 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                      * legacy hu_agent_turn path. */
                     hu_log_warn("human", agent ? agent->observer : NULL,
                                 "proactive to %s skipped: config/agent/provider not ready",
-                                cp->name ? cp->name : cp->contact_id);
+                                HU_LOG_WHO_CSTR(cp->contact_id));
                 }
                 agent->proactive_turn = false;
 
@@ -1612,6 +1353,8 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                             (void)hu_superhuman_inside_joke_reference(agent->memory,
                                                                       joke_id_to_reference);
 #ifdef HU_ENABLE_SQLITE
+                        hu_daemon_prospective_time_after_send(agent, cp->contact_id, response,
+                                                              response_len, (int64_t)now);
                         for (size_t mi = 0; mi < commitment_ids_count; mi++)
                             (void)hu_superhuman_commitment_mark_followed_up(agent->memory,
                                                                             commitment_ids[mi]);
@@ -1635,201 +1378,13 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
 
                 /* Clear proactive session scope so the next inbound message
                  * doesn't inherit a stale contact_id. */
-                agent->memory_session_id = NULL;
-                agent->memory_session_id_len = 0;
-                if (agent->memory && agent->memory->vtable) {
-                    agent->memory->current_session_id = NULL;
-                    agent->memory->current_session_id_len = 0;
-                }
+                hu_daemon_agent_clear_session_scope(agent);
             }
 
-            /* Proactive "good morning" scheduler: per-contact, once per day
-             * during the 6-9am window. Uses LLM to generate personalized
-             * greetings when the agent is available. Ring buffer with day
-             * rollover to avoid stale entries blocking new contacts. */
-            {
-                static struct {
-                    char contact_id[64];
-                    uint32_t day;
-                } gm_sent[8];
-                static size_t gm_sent_count;
-                static uint32_t gm_last_day;
-                time_t gm_now = time(NULL);
-                struct tm gm_tm;
-                struct tm *gm_p = localtime_r(&gm_now, &gm_tm);
-                uint32_t gm_day = gm_p ? (uint32_t)(gm_p->tm_yday + gm_p->tm_year * 366) : 0;
-                int gm_hour = gm_p ? gm_p->tm_hour : 12;
-                /* Day rollover: clear tracker when calendar day changes */
-                if (gm_day != gm_last_day) {
-                    gm_sent_count = 0;
-                    gm_last_day = gm_day;
-                }
-                if (gm_hour >= 6 && gm_hour < 9 && cp && cp->relationship_type) {
-                    bool is_close = (strcmp(cp->relationship_type, "partner") == 0 ||
-                                     strcmp(cp->relationship_type, "close_friend") == 0 ||
-                                     strcmp(cp->relationship_type, "family") == 0);
-                    /* 2026-05-16 P1-7: authoritative heap-backed dedup.
-                     * Replaces the [8] ring buffer above which overflowed
-                     * silently with 9+ close contacts. The legacy ring is
-                     * kept in lockstep until we delete it. */
-                    hu_proactive_throttle_t *gm_th = daemon_throttle(alloc);
-                    bool already_sent = hu_proactive_throttle_dedup_already_today(
-                        gm_th, "gm", cp->contact_id, gm_day);
-                    size_t cid_len = strlen(cp->contact_id);
-                    if (!already_sent) {
-                        for (size_t gi = 0; gi < gm_sent_count && !already_sent; gi++) {
-                            if (gm_sent[gi].day == gm_day &&
-                                strcmp(gm_sent[gi].contact_id, cp->contact_id) == 0)
-                                already_sent = true;
-                        }
-                    }
-                    if (is_close && !already_sent) {
-                        /* Mark in heap-backed dedup; scales to 256 contacts. */
-                        (void)hu_proactive_throttle_dedup_first_today(gm_th, "gm", cp->contact_id,
-                                                                      gm_day);
-                        /* Legacy [8] ring kept for backward compat. */
-                        if (gm_sent_count < 8) {
-                            size_t cn = cid_len < 63 ? cid_len : 63;
-                            memcpy(gm_sent[gm_sent_count].contact_id, cp->contact_id, cn);
-                            gm_sent[gm_sent_count].contact_id[cn] = '\0';
-                            gm_sent[gm_sent_count].day = gm_day;
-                            gm_sent_count++;
-                        }
-
-                        const char *greeting = "good morning :)";
-                        size_t greeting_len = 15;
-                        char gm_resp[256];
-                        if (agent && agent->provider.vtable && agent->provider.vtable->chat) {
-                            const char *gm_prompt =
-                                "Generate a very brief, warm morning greeting for a "
-                                "close friend/family member. One short sentence max. "
-                                "Natural and casual, like a real text. No emojis unless "
-                                "it fits your personality. Examples: 'morning!', "
-                                "'hey good morning', 'rise and shine :)'";
-                            hu_agent_clear_history(agent);
-                            agent->proactive_turn = true;
-                            char *gm_out = NULL;
-                            size_t gm_out_len = 0;
-                            hu_error_t gm_err = hu_agent_turn(agent, gm_prompt, strlen(gm_prompt),
-                                                              &gm_out, &gm_out_len);
-                            agent->proactive_turn = false;
-                            if (gm_err == HU_OK && gm_out && gm_out_len > 0 &&
-                                gm_out_len < sizeof(gm_resp)) {
-                                memcpy(gm_resp, gm_out, gm_out_len);
-                                gm_resp[gm_out_len] = '\0';
-                                greeting = gm_resp;
-                                greeting_len = gm_out_len;
-                            }
-                            if (gm_out)
-                                agent->alloc->free(agent->alloc->ctx, gm_out, gm_out_len + 1);
-                            hu_agent_clear_history(agent);
-                        }
-                        uint32_t gm_seed = (uint32_t)(gm_now * 48271u) + (uint32_t)(uintptr_t)cp;
-                        uint32_t offset_min = 450 + (gm_seed % 90);
-                        struct tm tomorrow_tm = gm_tm;
-                        tomorrow_tm.tm_mday += 1;
-                        tomorrow_tm.tm_hour = (int)(offset_min / 60);
-                        tomorrow_tm.tm_min = (int)(offset_min % 60);
-                        tomorrow_tm.tm_sec = 0;
-                        tomorrow_tm.tm_isdst = -1;
-                        time_t deliver_t = mktime(&tomorrow_tm);
-                        uint64_t deliver_ms = (uint64_t)deliver_t * 1000ULL;
-                        const char *gm_ch =
-                            channels[c].channel->vtable->name
-                                ? channels[c].channel->vtable->name(channels[c].channel->ctx)
-                                : "";
-                        hu_conversation_schedule_message_on(cp->contact_id, cid_len, gm_ch,
-                                                            strlen(gm_ch), greeting, greeting_len,
-                                                            deliver_ms);
-                        hu_log_info("human", agent ? agent->observer : NULL,
-                                    "scheduled morning message for %s: %.*s",
-                                    cp->name ? cp->name : cp->contact_id, (int)greeting_len,
-                                    greeting);
-                        daemon_sched_persist(agent, "scheduling morning message");
-                    }
-                }
-            }
-
-#ifdef HU_ENABLE_SQLITE
-            /* Proactive photo sharing: scan Apple Photos for shareable content */
-            if (channels[c].channel->vtable->send && combined_len > 0) {
-                static uint64_t last_photo_scan_ms;
-                uint64_t pnow_ms = (uint64_t)time(NULL) * 1000ULL;
-                if (pnow_ms - last_photo_scan_ms > 3600000) { /* max once per hour */
-                    last_photo_scan_ms = pnow_ms;
-                    char photos_db[512];
-                    size_t pdb_len = hu_visual_apple_photos_db_path(photos_db, sizeof(photos_db));
-                    if (pdb_len > 0) {
-                        hu_visual_entry_t *photos = NULL;
-                        size_t photo_count = 0;
-                        if (hu_visual_scan_apple_photos(alloc, photos_db, 3, &photos, &photo_count,
-                                                        5) == HU_OK &&
-                            photos && photo_count > 0) {
-                            /* Collect top N shareable photos (album mode: up to 3) */
-                            typedef struct {
-                                size_t idx;
-                                double conf;
-                            } photo_candidate_t;
-                            photo_candidate_t candidates[3];
-                            size_t cand_count = 0;
-                            for (size_t pi = 0; pi < photo_count; pi++) {
-                                bool should_share = false;
-                                double conf = 0.0;
-                                hu_visual_should_share(&photos[pi], combined, combined_len,
-                                                       &should_share, &conf);
-                                if (!should_share || conf < 0.3)
-                                    continue;
-                                if (cand_count < 3) {
-                                    candidates[cand_count].idx = pi;
-                                    candidates[cand_count].conf = conf;
-                                    cand_count++;
-                                } else {
-                                    size_t worst = 0;
-                                    for (size_t ci = 1; ci < 3; ci++) {
-                                        if (candidates[ci].conf < candidates[worst].conf)
-                                            worst = ci;
-                                    }
-                                    if (conf > candidates[worst].conf) {
-                                        candidates[worst].idx = pi;
-                                        candidates[worst].conf = conf;
-                                    }
-                                }
-                            }
-                            if (cand_count > 0) {
-                                const char *media[3];
-                                size_t media_count = 0;
-                                for (size_t ci = 0; ci < cand_count; ci++) {
-                                    if (photos[candidates[ci].idx].path[0])
-                                        media[media_count++] = photos[candidates[ci].idx].path;
-                                }
-                                /* FU-1: defer photo album if reactive turn fired recently. */
-                                bool photo_defer = hu_daemon_proactive_should_defer(
-                                    &agent->contact_send_recency, cp->contact_id,
-                                    strlen(cp->contact_id), (int64_t)now);
-                                if (photo_defer) {
-                                    hu_log_info("human", agent ? agent->observer : NULL,
-                                                "proactive photo album deferred for %s "
-                                                "(reactive turn within %ds)",
-                                                cp->name ? cp->name : cp->contact_id,
-                                                HU_DAEMON_REACTIVE_GATE_WINDOW_S);
-                                } else if (media_count > 0) {
-                                    channels[c].channel->vtable->send(channels[c].channel->ctx,
-                                                                      target_part, target_len, "",
-                                                                      0, media, media_count);
-                                    hu_contact_send_recency_record(
-                                        &agent->contact_send_recency, cp->contact_id,
-                                        strlen(cp->contact_id), (int64_t)now, HU_SEND_PATH_PHOTO);
-                                    hu_log_info("human", agent ? agent->observer : NULL,
-                                                "proactive photo album: %zu photos shared",
-                                                media_count);
-                                }
-                            }
-                            hu_visual_entries_free(alloc, photos, photo_count);
-                        }
-                    }
-                }
-            }
-#endif
+            /* Proactive photo share — carved to daemon_unprompted_sends.c and
+             * gated by the unprompted stack (DEF-14; it had no guard at all). */
+            hu_daemon_photo_share_tick(alloc, agent, channels[c].channel, cp, target_part,
+                                       target_len, combined, combined_len, (int64_t)now);
             if (event_ctx)
                 alloc->free(alloc->ctx, event_ctx, event_ctx_len + 1);
             if (silence_ctx)
@@ -1840,6 +1395,28 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
 }
 
 #endif
+
+#ifdef HU_IS_TEST
+static hu_proactive_budget_t *s_test_budget;
+void hu_daemon_unprompted_set_budget_for_test(hu_proactive_budget_t *budget) {
+    s_test_budget = budget;
+}
+#endif
+
+/* The daemon's half of the unprompted gate stack (human/daemon/unprompted_gate.h):
+ * this file owns the governor budget, channel throttle, DND and tz it reads. */
+void hu_daemon_unprompted_gate_init(hu_unprompted_gate_t *g, hu_allocator_t *alloc,
+                                    hu_agent_t *agent, const char *channel_name, const char *target,
+                                    size_t target_len, int64_t now) {
+#ifndef HU_IS_TEST
+    hu_unprompted_gate_init(g, alloc, agent, &gov_budget, daemon_throttle(alloc),
+                            daemon_autoresponder_config(), daemon_local_tz_offset_seconds(now),
+                            channel_name, target, target_len);
+#else
+    hu_unprompted_gate_init(g, alloc, agent, s_test_budget, NULL, daemon_autoresponder_config(),
+                            daemon_local_tz_offset_seconds(now), channel_name, target, target_len);
+#endif
+}
 
 /* Tapback, delays, missed-message acknowledgment moved to daemon_routing.c */
 
@@ -1870,6 +1447,24 @@ static void service_signal_handler(int sig) {
  * (e.g. MLX HTTP 52 after response_guard retry). Only the non-test loop uses it. */
 #ifndef HU_IS_TEST
 static unsigned g_empty_agent_response_streak;
+#endif
+
+#ifndef HU_IS_TEST /* capture, the director call and the send run only in production */
+/* Saved shares (spec 2026-09-28, Phase 5.4): <state>/share_queue.tsv. */
+static bool share_queue_path(char *buf, size_t cap) {
+    int n = hu_paths_state(buf, cap, "share_queue.tsv");
+    return n > 0 && (size_t)n < cap;
+}
+
+/* Is there a saved link waiting for this contact (tagged, or for anyone)? */
+static bool share_saved_waiting(const char *key, size_t key_len) {
+    char path[512], handle[128], url[512];
+    if (!key || key_len == 0 || key_len >= sizeof(handle) || !share_queue_path(path, sizeof(path)))
+        return false;
+    memcpy(handle, key, key_len);
+    handle[key_len] = '\0';
+    return hu_share_queue_next(path, handle, url, sizeof(url));
+}
 #endif
 
 hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
@@ -1920,10 +1515,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
      * sink works regardless of whether the DPO collector is wired. */
     if (agent) {
         hu_reaction_handler_set_personal_model(&agent->personal_model);
-        /* Phase 3 completion: route audio transcripts, edit history,
-         * group events, and balloon-plugin payloads through the same
-         * personal-model sink. */
+        /* Phase 3 completion: route audio transcripts, edit history, group events, and
+         * balloon-plugin payloads through the same personal-model sink. */
         hu_daemon_imessage_observer_wire_personal_model(&agent->personal_model);
+        hu_daemon_confidence_owner_wire(agent); /* self-chat is the owner, not a stranger */
     }
 
 #ifdef HU_ENABLE_SQLITE
@@ -1942,10 +1537,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
          * reflection patterns that shaped the thumbed-down turn. Cleared
          * with the personal-model teardown below. */
         hu_reaction_handler_set_reflection_db(crosstalk_db);
-        /* Send provenance: record every delivered iMessage into
-         * outbound_sends so offline measurement can tell h-uman's chat.db
-         * rows from Seth's own. Logging only; uninstalled with the crosstalk
-         * teardown below, before the SQLite memory closes. */
+        /* Durable job queue start recovery (HU_JOB_QUEUE; OFF touches nothing), then send
+         * provenance (outbound_sends; uninstalled with the crosstalk teardown below). */
+        (void)hu_daemon_job_queue_start(crosstalk_db, agent->observer); /* logs failures */
         if (crosstalk_db && hu_daemon_send_provenance_install(crosstalk_db) != HU_OK)
             hu_log_warn("human", agent->observer,
                         "send provenance: install failed; outbound_sends will not be recorded");
@@ -2003,8 +1597,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
         }
     }
 
-    /* Hybrid routing: create a lightweight cloud provider for classification/scoring
-     * when the primary provider is a slow local model (llm_decides mode). */
+    /* Classify provider for the director / emotion / double-text (llm_decides). */
     {
         bool any_llm_decides = false;
         if (config) {
@@ -2019,23 +1612,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 }
             }
         }
-        if (any_llm_decides && !g_classify_provider_ok) {
-            const char *gemini_url =
-                config ? hu_config_get_provider_base_url(config, "gemini") : NULL;
-            size_t gemini_url_len = gemini_url ? strlen(gemini_url) : 0;
-            hu_error_t cp_err = hu_provider_create(alloc, "gemini", 6, NULL, 0, gemini_url,
-                                                   gemini_url_len, &g_classify_provider);
-            if (cp_err == HU_OK) {
-                g_classify_provider_ok = true;
-                hu_log_info("human", NULL,
-                            "hybrid routing: classify provider ready (gemini flash-lite)");
-            } else {
-                hu_log_error("human", NULL,
-                             "hybrid routing: classify provider failed (%s), "
-                             "classifications will be skipped",
-                             hu_error_string(cp_err));
-            }
-        }
+        hu_daemon_classify_provider_init(alloc, config, agent, any_llm_decides);
     }
 
 #ifdef HU_HAS_CRON
@@ -2810,7 +2387,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
             hu_channel_loop_msg_t msgs[16];
             memset(msgs, 0, sizeof(msgs));
             size_t count = 0;
-            hu_error_t poll_err = ch->poll_fn(ch->channel_ctx, alloc, msgs, 16, &count);
+            hu_error_t poll_err = hu_daemon_jobs_poll(ch, alloc, agent, config, msgs, 16, &count);
             ch->last_poll_ms = tick_now;
             time_t poll_receive_time = 0;
             if (count > 0) {
@@ -2830,9 +2407,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                               : "?";
                     for (size_t m = 0; m < count; m++) {
                         size_t clen = strlen(msgs[m].content);
-                        hu_log_info(ch_name, agent ? agent->observer : NULL,
-                                    "ingest: %.60s%s (from %s)", msgs[m].content,
-                                    clen > 60 ? "..." : "", msgs[m].session_key);
+                        hu_log_info(ch_name, agent ? agent->observer : NULL, "ingest: %s (from %s)",
+                                    HU_LOG_TEXT(msgs[m].content, clen, 60),
+                                    HU_LOG_WHO_CSTR(msgs[m].session_key));
                     }
                 }
                 continue;
@@ -2870,17 +2447,12 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 while (m < count && strcmp(msgs[m].session_key, batch_key) == 0) {
                     const char *content_to_add = msgs[m].content;
                     size_t mlen = strlen(content_to_add);
-                    /* 2026-05-24 ASan fix: hoist the attachment-augmentation
-                     * buffer to the same scope as content_to_add. Previously
-                     * each augmentation branch (has_audio/has_video via
-                     * vision, has_image via vision, has_video fallback)
-                     * declared its own char[4096] INSIDE the nested if-block;
-                     * those buffers went out of scope before the memcpy at
-                     * line ~4965 read from content_to_add, causing
-                     * stack-use-after-scope (the ASan abort that took down
-                     * service-loop PID 59064 on 2026-05-24). Hoisting to one
-                     * buffer at this scope matches content_to_add's
-                     * lifetime exactly. */
+                    /* 2026-05-24 ASan fix: one augmentation buffer at
+                     * content_to_add's scope. Each branch used to declare its
+                     * own char[4096] in a nested block, out of scope before
+                     * the memcpy below read content_to_add: the
+                     * stack-use-after-scope that took down service-loop PID
+                     * 59064. Hoisted here, its lifetime matches exactly. */
                     char augmented[4096];
 #ifndef HU_IS_TEST
                     /* Per-message attachment: images via vision; local audio/video via multimodal
@@ -2909,6 +2481,11 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 ext && (strcmp(ext, ".mp4") == 0 || strcmp(ext, ".mov") == 0 ||
                                         strcmp(ext, ".webm") == 0);
 
+                            /* Final review #4: the poll already put iOS's transcript in
+                             * the text — never route that audio again (cloud STT would
+                             * upload the memo and append a second transcript). */
+                            if (is_audio && hu_text_has_audio_transcription(content_to_add, mlen))
+                                is_audio = false;
                             if (is_audio || is_video) {
                                 char *media_desc = NULL;
                                 size_t media_desc_len = 0;
@@ -2954,6 +2531,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 } else if (media_desc) {
                                     alloc->free(alloc->ctx, media_desc, media_desc_len + 1);
                                 }
+                            } else if (hu_local_only_enforced()) { /* loopback vision, or a note */
+                                content_to_add = hu_daemon_local_photo(
+                                    path, content_to_add, &mlen, augmented, sizeof(augmented));
                             } else if (agent->provider.vtable->supports_vision &&
                                        agent->provider.vtable->supports_vision(
                                            agent->provider.ctx)) {
@@ -2962,7 +2542,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 char *desc = NULL;
                                 size_t desc_len = 0;
                                 hu_error_t verr =
-                                    hu_vision_describe_image(alloc, &agent->provider, path, plen,
+                                    hu_daemon_describe_image(alloc, agent, config, path, plen,
                                                              model, model_len, &desc, &desc_len);
                                 hu_log_info("human", agent ? agent->observer : NULL,
                                             "vision: result=%s desc_len=%zu", hu_error_string(verr),
@@ -3009,6 +2589,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         }
                     }
 #endif
+                    /* A picture vision could not describe: say so, never a bare U+FFFC. */
+                    content_to_add =
+                        hu_daemon_unseen_photo(content_to_add, &mlen, augmented, sizeof(augmented));
                     if (mlen == 0) {
                         m++;
                         continue;
@@ -3027,37 +2610,26 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 if (combined_len == 0)
                     continue;
 
-                /* SHIELD-005: Inbound moderation — catch crisis signals early */
-                bool inbound_crisis = false;
-                {
-                    hu_moderation_result_t inbound_mod;
-                    memset(&inbound_mod, 0, sizeof(inbound_mod));
-                    if (hu_moderation_check(alloc, combined, combined_len, &inbound_mod) == HU_OK &&
-                        inbound_mod.self_harm) {
-                        hu_log_error("human", agent ? agent->observer : NULL,
-                                     "INBOUND crisis detected from %.*s (score=%.2f)",
-                                     (int)(key_len > 20 ? 20 : key_len), batch_key,
-                                     inbound_mod.self_harm_score);
-                        inbound_crisis = true;
-                    }
-                }
+                /* SHIELD-005: inbound crisis tier from the one self-harm detector. */
+                hu_self_harm_tier_t crisis_tier =
+                    hu_daemon_inbound_crisis_tier(alloc, combined, combined_len, batch_key, key_len,
+                                                  agent ? agent->observer : NULL);
+                bool inbound_crisis = crisis_tier != HU_SELF_HARM_NONE;
 
                 /* Clear STM before each contact batch to avoid cross-contact emotion contamination
                  */
                 hu_stm_clear(&agent->stm);
+                if (hu_daemon_tool_traffic(agent->persona, batch_key, key_len, combined,
+                                           combined_len, agent->observer))
+                    continue; /* before any bookkeeping: nothing learned */
 
 #ifndef HU_IS_TEST
-                /* F119: Contact replied — reset governor cool-off so proactive
-                 * outreach can resume after silence. */
-                (void)hu_governor_record_response(&gov_budget);
+                /* F119/DEF-6: THIS contact replied — reset only their cool-off. */
+                hu_unprompted_record_inbound(agent, &gov_budget, batch_key, key_len,
+                                             (int64_t)time(NULL));
 
-                /* Reciprocity tracking: record their initiation for balanced outreach.
-                 * Gated on HU_ENABLE_SQLITE because the helper's declaration lives
-                 * inside that guard in include/human/context/self_awareness.h.
-                 * The other three call sites are already gated; this one was
-                 * missed when reciprocity was wired in, so the no-sqlite /
-                 * cross-arm64 / minimal builds tripped
-                 * -Werror=implicit-function-declaration. */
+                /* Reciprocity: record their initiation for balanced outreach. The
+                 * helper is declared only under HU_ENABLE_SQLITE (self_awareness.h). */
 #ifdef HU_ENABLE_SQLITE
                 if (agent->memory) {
                     bool they_asked = (memchr(combined, '?', combined_len) != NULL);
@@ -3073,17 +2645,17 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         hu_persona_find_contact(agent->persona, batch_key, key_len);
                     if (!cp_gate) {
                         if (getenv("HU_DEBUG"))
-                            hu_log_error("human", agent ? agent->observer : NULL,
-                                         "ignoring message from unknown contact: %.*s",
-                                         (int)(key_len > 20 ? 20 : key_len), batch_key);
+                            hu_log_info("human", agent ? agent->observer : NULL,
+                                        "ignoring message from unknown contact: %s",
+                                        HU_LOG_WHO(batch_key, key_len));
                         continue;
                     }
                     /* Never respond to messages from the persona owner's own number */
                     if (cp_gate->relationship && strcmp(cp_gate->relationship, "self") == 0) {
                         if (getenv("HU_DEBUG"))
                             hu_log_error("human", agent ? agent->observer : NULL,
-                                         "ignoring message from self: %.*s",
-                                         (int)(key_len > 20 ? 20 : key_len), batch_key);
+                                         "ignoring message from self: %s",
+                                         HU_LOG_WHO(batch_key, key_len));
                         continue;
                     }
                 }
@@ -3105,9 +2677,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             batch_key, key_len, (int64_t)msgs[batch_end].message_id)) {
                         hu_log_info(
                             "human", agent ? agent->observer : NULL,
-                            "reply-dedup: already replied to %.*s rowid=%lld — skip (crash replay)",
-                            (int)(key_len > 20 ? 20 : key_len), batch_key,
-                            (long long)msgs[batch_end].message_id);
+                            "reply-dedup: already replied to %s rowid=%lld — skip (crash replay)",
+                            HU_LOG_WHO(batch_key, key_len), (long long)msgs[batch_end].message_id);
                         continue;
                     }
                 }
@@ -3117,32 +2688,20 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 if (!hu_send_budget_check(batch_key, key_len, (int64_t)time(NULL), NULL, &sb_used,
                                           &sb_cap)) {
                     hu_log_warn("human", agent ? agent->observer : NULL,
-                                "reply budget exhausted for %.*s (%u/%u in last hour) — silent",
-                                (int)(key_len > 20 ? 20 : key_len), batch_key, (unsigned)sb_used,
+                                "reply budget exhausted for %s (%u/%u in last hour) — silent",
+                                HU_LOG_WHO(batch_key, key_len), (unsigned)sb_used,
                                 (unsigned)sb_cap);
                     continue;
                 }
 
-                /* Hurt-signal hand-off: "u mad at me?", "why are you being short"
-                 * is a repair moment the owner must answer himself. Before any
-                 * LLM call, typing indicator or send; messages are already
-                 * consumed upstream, so a skip is never replayed.
-                 * HU_HURT_HANDOFF activation gated on a shadow fire-rate review
-                 * (share of 1:1 batches, false positives read by the owner): do
-                 * not flip to default-ON without that measurement. */
-                if (!msgs[batch_start].is_group) {
-                    const hu_contact_profile_t *cp_hurt =
-                        agent->persona ? hu_persona_find_contact(agent->persona, batch_key, key_len)
-                                       : NULL;
-                    if (hu_hurt_handoff_apply(hu_hurt_handoff_mode(), combined, combined_len,
-                                              cp_hurt ? cp_hurt->name : NULL))
-                        continue;
-                }
+                /* Hurt-signal hand-off (hurt_handoff.h). */
+                if (hu_daemon_hurt_withheld(agent->persona, batch_key, key_len, combined,
+                                            combined_len, msgs[batch_start].is_group))
+                    continue;
 
                 hu_log_info("human", agent ? agent->observer : NULL,
-                            "processing batch for %.*s: \"%.*s\" (group=%d)",
-                            (int)(key_len > 20 ? 20 : key_len), batch_key,
-                            (int)(combined_len > 60 ? 60 : combined_len), combined,
+                            "processing batch for %s: \"%s\" (group=%d)",
+                            HU_LOG_WHO(batch_key, key_len), HU_LOG_TEXT(combined, combined_len, 60),
                             (int)msgs[batch_start].is_group);
 
 #ifdef HU_ENABLE_SQLITE
@@ -3200,6 +2759,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 
                 /* Director meta-behavior result — persists through batch scope */
                 hu_director_result_t director_result;
+                hu_selftest_t selftest; /* #command from Seth's own number */
+                memset(&selftest, 0, sizeof(selftest));
+                bool selftest_on = false;
                 memset(&director_result, 0, sizeof(director_result));
                 bool director_result_valid = false;
                 if (ch->channel->vtable->load_conversation_history) {
@@ -3222,8 +2784,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                        early_history, early_history_count);
                     if (gr == HU_GROUP_SKIP) {
                         hu_log_info("human", agent ? agent->observer : NULL,
-                                    "group: skipping (not addressed): %.*s",
-                                    (int)(combined_len > 40 ? 40 : combined_len), combined);
+                                    "group: skipping (not addressed): %s",
+                                    HU_LOG_TEXT(combined, combined_len, 40));
                         if (early_history)
                             alloc->free(alloc->ctx, early_history,
                                         early_history_count * sizeof(hu_channel_history_entry_t));
@@ -3257,8 +2819,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     if (agent)
                         agent->lean_prompt = true;
                     hu_log_info("human", agent ? agent->observer : NULL,
-                                "llm_decides: forwarding to LLM (lean prompt) for %.*s",
-                                (int)(key_len > 20 ? 20 : key_len), batch_key);
+                                "llm_decides: forwarding to LLM (lean prompt) for %s",
+                                HU_LOG_WHO(batch_key, key_len));
                 }
 
                 /* Apply response_mode override from active channel's daemon config.
@@ -3298,16 +2860,15 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         ((dropoff_seed >> 16u) % 100u) < (uint32_t)dropoff_prob) {
                         action = HU_RESPONSE_SKIP;
                         hu_log_info("human", agent ? agent->observer : NULL,
-                                    "drop-off skip (prob=%d%%): %.*s", dropoff_prob,
-                                    (int)(combined_len > 40 ? 40 : combined_len), combined);
+                                    "drop-off skip (prob=%d%%): %s", dropoff_prob,
+                                    HU_LOG_TEXT(combined, combined_len, 40));
                     }
                 }
 #endif
 
                 hu_log_info("human", agent ? agent->observer : NULL,
-                            "classify result: action=%d delay=%u for %.*s", (int)action,
-                            (unsigned)extra_delay_ms, (int)(key_len > 20 ? 20 : key_len),
-                            batch_key);
+                            "classify result: action=%d delay=%u for %s", (int)action,
+                            (unsigned)extra_delay_ms, HU_LOG_WHO(batch_key, key_len));
 
                 /* Contestability (2026-09-20, HU_CONTACT_OPTOUT): "stop texting me"
                  * writes a per-contact suppression the proactive loop honours from
@@ -3327,9 +2888,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             (config ? config->behavior.consecutive_reset_minutes : 30u) * 60u,
                             (int64_t)time(NULL), &consec_seen)) {
                         hu_log_warn("human", agent ? agent->observer : NULL,
-                                    "consecutive limit (%u) reached for %.*s — staying silent%s",
-                                    (unsigned)consec_seen, (int)(key_len > 20 ? 20 : key_len),
-                                    batch_key,
+                                    "consecutive limit (%u) reached for %s — staying silent%s",
+                                    (unsigned)consec_seen, HU_LOG_WHO(batch_key, key_len),
                                     hu_reactive_message_is_question(combined, combined_len)
                                         ? " — UNANSWERED QUESTION; the real user must reply"
                                         : "");
@@ -3407,8 +2967,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     if (decision == HU_LOR_ALREADY_IN_PERIOD) {
                         leave_on_read_skip = true;
                         hu_log_info("human", agent ? agent->observer : NULL,
-                                    "leave-on-read: still in period for %.*s",
-                                    (int)(key_len > 20 ? 20 : key_len), batch_key);
+                                    "leave-on-read: still in period for %s",
+                                    HU_LOG_WHO(batch_key, key_len));
                     } else if (decision == HU_LOR_TRIGGER_NEW) {
                         leave_on_read_skip = true;
                         uint32_t hrs = 7200u + ((lor_seed >> 16u) % (86400u - 7200u + 1u));
@@ -3428,8 +2988,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             leave_on_read_entries[lor_slot].key[key_len] = '\0';
                             leave_on_read_entries[lor_slot].until = until;
                             hu_log_info("human", agent ? agent->observer : NULL,
-                                        "leave-on-read: skipping for %.*s until %ld",
-                                        (int)(key_len > 20 ? 20 : key_len), batch_key, (long)until);
+                                        "leave-on-read: skipping for %s until %ld",
+                                        HU_LOG_WHO(batch_key, key_len), (long)until);
                         }
                     }
                 }
@@ -3438,12 +2998,12 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 if (action == HU_RESPONSE_SKIP || tapback_skip || leave_on_read_skip) {
                     if (tapback_skip)
                         hu_log_info("human", agent ? agent->observer : NULL,
-                                    "tapback-skip (no response): %.*s",
-                                    (int)(combined_len > 40 ? 40 : combined_len), combined);
+                                    "tapback-skip (no response): %s",
+                                    HU_LOG_TEXT(combined, combined_len, 40));
                     else
                         hu_log_info("human", agent ? agent->observer : NULL,
-                                    "skipping message (no response needed): %.*s",
-                                    (int)(combined_len > 40 ? 40 : combined_len), combined);
+                                    "skipping message (no response needed): %s",
+                                    HU_LOG_TEXT(combined, combined_len, 40));
                     if (agent->session_store && agent->session_store->vtable &&
                         agent->session_store->vtable->save_message) {
                         for (size_t b = batch_start; b <= batch_end; b++) {
@@ -3513,7 +3073,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     if (night_lt)
                         bth_hour = night_lt->tm_hour;
                 }
-                if (bth_hour >= 0) {
+                /* A #command from Seth's own number is answered at any hour. */
+                if (bth_hour >= 0 &&
+                    !hu_selftest_from_owner(agent ? agent->persona : NULL, batch_key, key_len,
+                                            combined, combined_len)) {
                     if (bth_hour >= 2 && bth_hour < 6) {
                         /* 2AM-6AM: very high SKIP chance (sleeping) */
                         uint32_t night_r = (uint32_t)time(NULL) * 1103515245u + 12345u;
@@ -3579,7 +3142,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 if (llm_decides) {
                     director_result_valid =
                         hu_daemon_director_call(alloc, combined, combined_len, early_history,
-                                                early_history_count, &director_result);
+                                                early_history_count, NULL, &director_result);
                     if (early_history) {
                         alloc->free(alloc->ctx, early_history,
                                     early_history_count * sizeof(hu_channel_history_entry_t));
@@ -3610,21 +3173,70 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     if (trace_on) {
                         size_t cl = combined_len > 240 ? 240 : combined_len;
                         hu_log_info("director_trace", NULL,
-                                    "INPUT contact=%.*s entries=%zu combined=\"%.*s\"%s",
-                                    (int)key_len, batch_key, early_history_count, (int)cl, combined,
+                                    "INPUT contact=%s entries=%zu combined=\"%s\"%s",
+                                    HU_LOG_WHO(batch_key, key_len), early_history_count,
+                                    HU_LOG_TEXT(combined, cl, 120),
                                     combined_len > 240 ? "..." : "");
                     }
                     /* Call director early for meta-behavior (delay, tapback, silence) */
+                    /* Expressive forms (spec 2026-09-28): tell the director what is
+                     * possible this turn, then log its full choice and the guards'
+                     * verdict. HU_DIRECTOR_FORMS=off|shadow|live, default off; LIVE is
+                     * gated on a day of shadow choices Seth has read. */
+                    bool forms_on =
+                        hu_gate_mode_from_env("HU_DIRECTOR_FORMS", HU_GATE_OFF) != HU_GATE_OFF;
+                    char situation[160] = "";
+                    if (forms_on)
+                        (void)hu_expressive_situation(
+                            situation, sizeof(situation),
+                            hu_daemon_voice_first_available(agent, batch_key, key_len,
+                                                            msgs[batch_start].is_group),
+                            hu_imessage_caps_cached(alloc)->advanced, msgs[batch_start].is_group,
+                            share_saved_waiting(batch_key, key_len));
                     if (g_classify_provider_ok) {
-                        director_result_valid =
-                            hu_daemon_director_call(alloc, combined, combined_len, early_history,
-                                                    early_history_count, &director_result);
+                        director_result_valid = hu_daemon_director_decide(
+                            alloc, agent, ch->channel, batch_key, key_len, combined, combined_len,
+                            early_history, early_history_count, situation, &director_result);
                     }
+                    if (forms_on && director_result_valid) {
+                        const hu_contact_profile_t *fcp =
+                            agent->persona
+                                ? hu_persona_find_contact(agent->persona, batch_key, key_len)
+                                : NULL;
+                        char fline[256];
+                        if (hu_expressive_shadow_line(&director_result, combined, combined_len,
+                                                      msgs[batch_start].is_group,
+                                                      fcp ? fcp->relationship : NULL, fline,
+                                                      sizeof(fline)) > 0)
+                            hu_log_info("director", NULL, "forms shadow: %s", fline);
+                    }
+                    /* Self-test commands (Seth, 2026-09-29): from his own number, a
+                     * leading #voice / #share / #effect / #tapback / #gif forces that one
+                     * behavior so he can validate it on his phone; the command is stripped
+                     * and the rest is the message. */
+                    if (agent->persona && hu_share_is_owner(agent->persona, batch_key, key_len) &&
+                        hu_selftest_parse(combined, combined_len, &selftest)) {
+                        selftest_on = true;
+                        hu_expressive_selftest_apply(&selftest, &director_result);
+                        director_result_valid = true;
+                        size_t keep = combined_len - selftest.consumed;
+                        memmove(combined, combined + selftest.consumed, keep);
+                        combined[keep] = '\0';
+                        combined_len = keep;
+                        hu_log_info("director", NULL, "self-test: form=%s effect=%s",
+                                    hu_director_form_name(selftest.form),
+                                    selftest.effect[0] ? selftest.effect : "none");
+                    }
+                    /* Unknown-event guard (2026-09-30): never an invented outcome. */
+                    if (director_result_valid)
+                        hu_expressive_unknown_event_guard(&director_result, combined, combined_len,
+                                                          early_history, early_history_count);
                     if (trace_on && director_result_valid) {
                         hu_log_info("director_trace", NULL,
-                                    "OUTPUT contact=%.*s action=%d delay_s=%u direction=\"%s\"",
-                                    (int)key_len, batch_key, (int)director_result.action,
-                                    director_result.delay_s, director_result.direction);
+                                    "OUTPUT contact=%s action=%d delay_s=%u direction=\"%s\"",
+                                    HU_LOG_WHO(batch_key, key_len), (int)director_result.action,
+                                    director_result.delay_s,
+                                    HU_LOG_TEXT_CSTR(director_result.direction, 120));
                     }
                     if (early_history) {
                         alloc->free(alloc->ctx, early_history,
@@ -3640,9 +3252,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         delay_ms += (delay_seed & 1) ? jitter : 0;
                         if (delay_ms > 120000)
                             delay_ms = 120000;
-                        /* Seen-then-reply choreography: mark as read early,
-                         * then pause before typing — like a real human who
-                         * picks up their phone, reads, thinks, then replies. */
+                        /* Seen-then-reply: mark read early; the rest follows below. */
                         uint32_t read_wait;
                         if (delay_ms <= 5000) {
                             /* Quick reply: read fast (200-800ms) */
@@ -3662,8 +3272,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         if (ch->channel->vtable->mark_read)
                             ch->channel->vtable->mark_read(ch->channel->ctx, batch_key, key_len);
                         uint32_t remaining = delay_ms > read_wait ? delay_ms - read_wait : 0;
-                        if (remaining > 0)
+                        if (remaining > 15000) /* busy: stay away; typing would show too long */
                             usleep(remaining * 1000u);
+                        else /* the work runs inside the delay; the send waits */
+                            hu_daemon_reply_hold_for(batch_key, key_len, remaining);
                     }
                     goto llm_decides_skip_delays;
                 }
@@ -3899,6 +3511,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     hu_channel_loop_msg_t burst[16];
                     size_t burst_count = 0;
                     ch->poll_fn(ch->channel_ctx, alloc, burst, 16, &burst_count);
+                    (void)hu_daemon_burst_carry(msgs, &count, 16, burst, burst_count, batch_key);
                     for (size_t bi = 0; bi < burst_count; bi++) {
                         if (strcmp(burst[bi].session_key, batch_key) != 0)
                             continue;
@@ -3920,28 +3533,15 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     combined[combined_len] = '\0';
                 }
 
-                /* ── Contextual (context-driven) proactive outreach ───────────
-                 * The schedule-driven proactive path checks in "because it's
-                 * 10am Tuesday". This closes the gap to context-driven outreach:
-                 * detect a future-dated event in the inbound message ("interview
-                 * is Friday") and schedule a post-event "how'd it go?" through the
-                 * EXISTING governed scheduled-send path. The scheduled-delivery
-                 * loop runs inside hu_service_run_proactive_checkins, behind the
-                 * master_enabled gate + backoff governor + outbound sanitizer +
-                 * validator chain — so contextual proactives inherit ALL of that
-                 * governance; we never bypass it here.
-                 *
-                 * The message text is FROZEN here from the detected topic and is
-                 * never regenerated at send time — the no-invented-FACTS guard
-                 * against cross-contact bleed (the specific always comes from the
-                 * stored obligation).
-                 *
-                 * Gated OFF -> SHADOW -> ON via HU_PROACTIVE_CONTEXTUAL, default
-                 * OFF. Promotion to ON is gated on a blind A/B measurement that
-                 * unprompted contextual outreach reads as more human, not less —
-                 * do NOT flip the default without it (unprompted texting as the
-                 * user is the highest-stakes behavior in the system).
-                 * See .claude/rules/feature-gate-requires-measurement.md. */
+                /* ── Contextual proactive outreach: a future-dated event in the
+                 * inbound ("interview is Friday") schedules a post-event "how'd it
+                 * go?" through the EXISTING governed scheduled-send path (master
+                 * gate, backoff governor, sanitizer, validator chain — never
+                 * bypassed). The text is FROZEN from the detected topic, never
+                 * regenerated at send time (no invented facts, no cross-contact
+                 * bleed). HU_PROACTIVE_CONTEXTUAL OFF -> SHADOW -> ON, default OFF;
+                 * ON is gated on a blind A/B showing it reads as more human — do
+                 * NOT flip without it (feature-gate-requires-measurement.md). */
                 {
                     hu_contextual_proactive_mode_t cp_mode = hu_contextual_proactive_mode();
                     const char *cp_channel =
@@ -4023,7 +3623,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         if (deadline > 0) {
                             (void)hu_superhuman_delayed_followup_schedule(
                                 agent->memory, alloc, batch_key, key_len, desc_buf,
-                                (size_t)strlen(desc_buf), deadline);
+                                (size_t)strlen(desc_buf), deadline, who_buf, strlen(who_buf));
                         }
                     }
                     /* F24: Growth celebration — detect positive outcomes, store for later reference
@@ -4077,13 +3677,15 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     int window = 120;
                     if (dcfg_hu && dcfg_hu->user_response_window_sec > 0)
                         window = dcfg_hu->user_response_window_sec;
-                    if (ch->channel->vtable->human_active_recently &&
+                    /* A self-test's own "sent by me" copy is the command, not Seth
+                     * replying by hand (live #voice test, 2026-09-29 05:22). */
+                    if (!selftest_on && ch->channel->vtable->human_active_recently &&
                         ch->channel->vtable->human_active_recently(ch->channel->ctx, batch_key,
                                                                    key_len, window)) {
                         hu_log_info("human", agent ? agent->observer : NULL,
-                                    "real user responded to %.*s within %ds — "
+                                    "real user responded to %s within %ds — "
                                     "staying silent",
-                                    (int)(key_len > 20 ? 20 : key_len), batch_key, window);
+                                    HU_LOG_WHO(batch_key, key_len), window);
                         /* Reset consecutive counter — real user is active */
                         hu_consec_limiter_reset(&consec_limiter, batch_key, key_len);
                         if (agent)
@@ -4108,6 +3710,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 rt.combined = combined;
                 rt.combined_len = combined_len;
                 rt.llm_decides = llm_decides;
+                rt.is_group = msgs[batch_start].is_group;
                 rt.comfort_pending = comfort_pending;
                 rt.proactive_ctx = &g_proactive_ctx;
                 hu_daemon_reactive_context_load(alloc, agent, config, channels, channel_count, &rt);
@@ -4145,43 +3748,24 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 convo_ctx = rt.convo_ctx;
                 convo_ctx_len = rt.convo_ctx_len;
 
-                /* 2c. Length calibration fallback for channels without history.
-                 * When history exists, calibration runs inside build_awareness.
-                 * When it doesn't, we still want message-type guidance. */
-                if ((!convo_ctx || llm_decides) && combined_len > 0) {
-                    /* In llm_decides mode build_awareness is skipped, so the only
-                     * context the prompt builder can return is the prospective
-                     * directive; calibration must still be appended after it. */
-                    char cal_buf[1024];
-                    const hu_contact_profile_t *cp_cal =
-                        (agent->persona && batch_key && key_len > 0)
-                            ? hu_persona_find_contact(agent->persona, batch_key, key_len)
-                            : NULL;
-                    size_t cal_len = hu_conversation_calibrate_length_for_contact(
-                        combined, combined_len, NULL, 0, msgs[batch_start].is_group, cp_cal,
-                        agent->relationship.stage, cal_buf, sizeof(cal_buf));
-                    if (cal_len > 0 && !convo_ctx) {
-                        convo_ctx = (char *)alloc->alloc(alloc->ctx, cal_len + 1);
-                        if (convo_ctx) {
-                            memcpy(convo_ctx, cal_buf, cal_len);
-                            convo_ctx[cal_len] = '\0';
-                            convo_ctx_len = cal_len;
-                        }
-                    } else if (cal_len > 0) {
-                        size_t total = convo_ctx_len + cal_len + 2;
-                        char *merged = (char *)alloc->alloc(alloc->ctx, total + 1);
-                        if (merged) {
-                            memcpy(merged, convo_ctx, convo_ctx_len);
-                            merged[convo_ctx_len] = '\n';
-                            merged[convo_ctx_len + 1] = '\n';
-                            memcpy(merged + convo_ctx_len + 2, cal_buf, cal_len);
-                            merged[total] = '\0';
-                            alloc->free(alloc->ctx, convo_ctx, convo_ctx_len + 1);
-                            convo_ctx = merged;
-                            convo_ctx_len = total;
-                        }
-                    }
-                }
+                /* 4. Response budget: channel cap, F15 calibration + brief cap, then
+                 * HU_LENGTH_POLICY (daemon/reactive_calibration.h; the replay harness calls the
+                 * same seam). Before 2c so its Target matches. */
+                bool voice_first_memo = false; /* spec 2026-09-28 */
+                hu_length_turn_result_t len_turn;
+                hu_daemon_reply_budget(agent, ch->channel, batch_key, key_len, combined,
+                                       combined_len, msgs[batch_start].is_group, brief_mode,
+                                       &len_turn);
+                uint32_t max_chars = len_turn.cap;
+
+                /* 2c. Length calibration fallback (daemon/reactive_calibration.h). In llm_decides
+                 * mode build_awareness is skipped, so calibration is appended after whatever
+                 * the prompt builder returned. */
+                if ((!convo_ctx || llm_decides) && combined_len > 0)
+                    hu_daemon_append_length_calibration(alloc, agent, batch_key, key_len, combined,
+                                                        combined_len, msgs[batch_start].is_group,
+                                                        len_turn.tight ? len_turn.cap : 0,
+                                                        &convo_ctx, &convo_ctx_len);
 
 #if defined(HU_ENABLE_SQLITE) && !defined(HU_IS_TEST)
                 /* Prepend cross-channel snippets before other conversation context for the LLM. */
@@ -4636,8 +4220,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             }
                             hu_log_info("human", agent ? agent->observer : NULL,
                                         "TRUST-001: trap question detected, no matching "
-                                        "episode for %.*s",
-                                        (int)(key_len > 20 ? 20 : key_len), batch_key);
+                                        "episode for %s",
+                                        HU_LOG_WHO(batch_key, key_len));
                         }
                     }
                 }
@@ -4927,9 +4511,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             const char *model = agent->model_name ? agent->model_name : "gpt-4o";
                             size_t model_len =
                                 agent->model_name_len > 0 ? agent->model_name_len : strlen(model);
-                            hu_error_t verr = hu_vision_describe_image(
-                                alloc, &agent->provider, img_path, strlen(img_path), model,
-                                model_len, &desc, &desc_len);
+                            hu_error_t verr = hu_daemon_describe_image(
+                                alloc, agent, config, img_path, strlen(img_path), model, model_len,
+                                &desc, &desc_len);
                             alloc->free(alloc->ctx, img_path, strlen(img_path) + 1);
                             if (verr == HU_OK && desc && desc_len > 0) {
                                 size_t vision_ctx_len = 0;
@@ -5046,9 +4630,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 size_t episodic_ctx_len = 0;
                 char *avoidance_json = NULL;
                 size_t avoidance_len = 0;
-                if (agent->memory && !llm_decides) {
-                    hu_episodic_load(agent->memory, alloc, &episodic_ctx, &episodic_ctx_len);
-                }
+                if (agent->memory && !llm_decides) /* scoped: HU_CONFIDENCE_BOUNDARY */
+                    hu_episodic_load_for_contact(agent->memory, alloc, batch_key, key_len,
+                                                 &episodic_ctx, &episodic_ctx_len);
                 /* F19: Inside jokes — inject for natural callback opportunities.
                  * Skip in llm_decides mode — prompt inflation. */
                 hu_inside_joke_t *jokes_ctx = NULL;
@@ -5383,42 +4967,6 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     }
                 }
 #endif
-
-                /* 4. Response constraints via channel vtable */
-                uint32_t max_chars = 0;
-                if (ch->channel->vtable->get_response_constraints) {
-                    hu_channel_response_constraints_t constraints = {0};
-                    if (ch->channel->vtable->get_response_constraints(ch->channel->ctx,
-                                                                      &constraints) == HU_OK) {
-                        max_chars = constraints.max_chars;
-                    }
-                }
-
-                /* F15: Apply ratio-based length calibration */
-                {
-                    const hu_contact_profile_t *cp_lim =
-                        (!msgs[batch_start].is_group && agent->persona && batch_key && key_len > 0)
-                            ? hu_persona_find_contact(agent->persona, batch_key, key_len)
-                            : NULL;
-                    int calibrated = msgs[batch_start].is_group
-                                         ? hu_conversation_max_response_chars(combined_len)
-                                         : hu_conversation_max_response_chars_relational(
-                                               combined_len, cp_lim, agent->relationship.stage);
-                    if (calibrated > 0 && (max_chars == 0 || (uint32_t)calibrated < max_chars))
-                        max_chars = (uint32_t)calibrated;
-                }
-
-                /* Brief mode: cap length (tight in groups; headroom for trusted 1:1). */
-                if (brief_mode) {
-                    const hu_contact_profile_t *cp_brief =
-                        (!msgs[batch_start].is_group && agent->persona && batch_key && key_len > 0)
-                            ? hu_persona_find_contact(agent->persona, batch_key, key_len)
-                            : NULL;
-                    uint32_t brief_cap = hu_conversation_brief_char_cap(
-                        msgs[batch_start].is_group, cp_brief, agent->relationship.stage);
-                    if (max_chars > brief_cap)
-                        max_chars = brief_cap;
-                }
 
                 /* Honesty guardrail: inject if they asked "did you do X?" */
                 {
@@ -5831,54 +5379,6 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 alloc->free(alloc->ctx, tom_ctx, tom_ctx_len + 1);
                         }
                     }
-#ifdef HU_ENABLE_ACTION_LAYERS
-                    /* Spec 2026-05-24-action-layers: append drift + clarify
-                     * directives to convo_ctx when their conditions are met.
-                     * Both functions are no-ops when their source tables are
-                     * empty or thresholds unmet — costs ~2 SQLite SELECTs
-                     * per turn at the worst. */
-                    {
-                        struct sqlite3 *al_db = hu_sqlite_memory_get_db(agent->memory);
-                        char al_drift[HU_ACTION_DIRECTIVE_MAX_LEN];
-                        char al_clarify[HU_ACTION_DIRECTIVE_MAX_LEN];
-                        size_t al_drift_n =
-                            hu_action_directive_drift(al_db, al_drift, sizeof(al_drift));
-                        struct timespec al_ts;
-                        clock_gettime(CLOCK_REALTIME, &al_ts);
-                        int64_t al_now_ms =
-                            (int64_t)al_ts.tv_sec * 1000 + (int64_t)al_ts.tv_nsec / 1000000;
-                        size_t al_clarify_n = hu_action_directive_clarify(
-                            al_db, batch_key, key_len, batch_key, key_len, al_now_ms, al_clarify,
-                            sizeof(al_clarify));
-                        size_t al_total = al_drift_n + al_clarify_n;
-                        if (al_total > 0) {
-                            size_t new_total = convo_ctx_len + al_total + 4;
-                            char *new_buf = (char *)alloc->alloc(alloc->ctx, new_total);
-                            if (new_buf) {
-                                size_t off = 0;
-                                if (convo_ctx) {
-                                    memcpy(new_buf, convo_ctx, convo_ctx_len);
-                                    off = convo_ctx_len;
-                                    new_buf[off++] = '\n';
-                                }
-                                if (al_drift_n > 0) {
-                                    memcpy(new_buf + off, al_drift, al_drift_n);
-                                    off += al_drift_n;
-                                    new_buf[off++] = '\n';
-                                }
-                                if (al_clarify_n > 0) {
-                                    memcpy(new_buf + off, al_clarify, al_clarify_n);
-                                    off += al_clarify_n;
-                                }
-                                new_buf[off] = '\0';
-                                if (convo_ctx)
-                                    alloc->free(alloc->ctx, convo_ctx, convo_ctx_len + 1);
-                                convo_ctx = new_buf;
-                                convo_ctx_len = off;
-                            }
-                        }
-                    }
-#endif
 #ifdef HU_ENABLE_SQLITE
                     if (unmet_exps)
                         hu_tom_persisted_expectations_free(alloc, unmet_exps, unmet_count);
@@ -6383,29 +5883,20 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 }
 #endif
 
-                /* SHIELD-005: Inbound crisis — force response and inject supportive context */
-                if (inbound_crisis) {
+                /* SHIELD-005: force a reply and prepend the tier's directive (crisis,
+                 * check-in, or support for a helper). */
+                if (hu_daemon_crisis_prepend(alloc, crisis_tier, &convo_ctx, &convo_ctx_len))
                     action = HU_RESPONSE_FULL;
-                    static const char crisis_directive[] =
-                        "[CRISIS SUPPORT]: The user may be in distress. "
-                        "Respond with empathy and care. Include crisis resources: "
-                        "988 Suicide & Crisis Lifeline (call/text 988), "
-                        "Crisis Text Line (text HOME to 741741). "
-                        "Do not dismiss their feelings. Do not give advice. "
-                        "Listen and validate.\n";
-                    size_t cd_len = sizeof(crisis_directive) - 1;
-                    size_t new_len = cd_len + convo_ctx_len;
-                    char *merged = (char *)alloc->alloc(alloc->ctx, new_len + 1);
-                    if (merged) {
-                        memcpy(merged, crisis_directive, cd_len);
-                        if (convo_ctx && convo_ctx_len > 0)
-                            memcpy(merged + cd_len, convo_ctx, convo_ctx_len);
-                        merged[new_len] = '\0';
-                        if (convo_ctx)
-                            alloc->free(alloc->ctx, convo_ctx, convo_ctx_len + 1);
-                        convo_ctx = merged;
-                        convo_ctx_len = new_len;
-                    }
+
+                /* Voice-first memos: decide voice from what arrived and, LIVE for
+                 * family, have this turn write the memo. Never for a crisis turn. */
+                if (!inbound_crisis) {
+                    hu_daemon_voice_first_t vfirst;
+                    hu_daemon_voice_first_prepare(
+                        alloc, agent, batch_key, key_len, msgs[batch_start].is_group,
+                        selftest_on && selftest.form == HU_DIR_FORM_VOICE, combined, combined_len,
+                        &convo_ctx, &convo_ctx_len, &max_chars, &rt, &vfirst);
+                    voice_first_memo = vfirst.memo;
                 }
 
                 /* Set agent per-turn context fields (prompt builder reads these) */
@@ -6416,6 +5907,12 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 agent->ab_history_entries = history_entries;
                 agent->ab_history_count = history_count;
                 agent->max_response_chars = max_chars;
+                agent->response_limit_tight = voice_first_memo ? 0 : (uint8_t)len_turn.tight;
+                agent->voice_memo_turn = voice_first_memo;
+                /* Owner self-test: a clean slate — only the last few messages, so a
+                 * thread full of test traffic doesn't confuse the reply. */
+                agent->history_msg_cap = selftest_on ? 4 : 0;
+                agent->self_test_turn = selftest_on; /* no memories from test traffic */
 
                 /* T4 (AC-2): hoisted out of the routing block below so the post-turn
                  * local->cloud fallback (further down, outside the HU_IS_TEST guard)
@@ -6437,6 +5934,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 }
                 {
                     mr_cfg = hu_model_router_default_config();
+                    hu_local_only_router_defaults(&mr_cfg, agent->model_name,
+                                                  agent->model_name_len);
                     if (config && config->agent.mr_reflexive_model) {
                         mr_cfg.reflexive_model = config->agent.mr_reflexive_model;
                         mr_cfg.reflexive_model_len = strlen(config->agent.mr_reflexive_model);
@@ -6527,11 +6026,11 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     static const char *tier_names[] = {"reflexive", "conversational", "analytical",
                                                        "deep"};
                     hu_log_info("human", agent ? agent->observer : NULL,
-                                "model route: %.*s (tier=%s, src=%s, thinking=%d) for %.*s",
+                                "model route: %.*s (tier=%s, src=%s, thinking=%d) for %s",
                                 (int)sel.model_len, sel.model,
                                 tier_names[sel.tier < 4 ? sel.tier : 0],
                                 hu_route_source_str(sel.source), sel.thinking_budget,
-                                (int)(key_len > 20 ? 20 : key_len), batch_key);
+                                HU_LOG_WHO(batch_key, key_len));
                 }
 #endif
 
@@ -6543,12 +6042,61 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     agent->memory->current_session_id_len = key_len;
                 }
 
+                /* Saved shares (Phase 5.4): Seth texting "save <link>" or "for <name>
+                 * <link>" from his own number files it for later and gets a short ack
+                 * instead of a reply. Anything else from him stays a test chat. */
+                {
+                    char sq_path[512], sq_ack[192];
+                    if (agent->persona && share_queue_path(sq_path, sizeof(sq_path)) &&
+                        hu_share_capture_handle(agent->persona, batch_key, key_len, combined,
+                                                combined_len, sq_path, (int64_t)time(NULL), sq_ack,
+                                                sizeof(sq_ack)) &&
+                        ch->channel->vtable->send) {
+                        hu_error_t sq_err = ch->channel->vtable->send(ch->channel->ctx, send_target,
+                                                                      send_target_len, sq_ack,
+                                                                      strlen(sq_ack), NULL, 0);
+                        /* The link is filed either way; only the ack can fail. */
+                        hu_log_info("daemon", NULL, "share saved: %s (ack %s)", sq_ack,
+                                    sq_err == HU_OK ? "sent" : "failed");
+                        goto skip_llm_this_batch;
+                    }
+                }
+
+                /* Owner reminders (life-admin slice 1): "remind me to … at 5",
+                 * "reminders", "done", "snooze" and dates ("mom's birthday is
+                 * march 3", slice 4) from the owner's own number in a DM are
+                 * answered here with a one-line ack. Everything else, and
+                 * everything while HU_REMINDERS / HU_DATES are not live, falls
+                 * through. */
+                if (send_target == batch_key && ch->channel->vtable->send) {
+                    char rm_reply[1024];
+                    const char *rm_ch = ch->channel->vtable->name
+                                            ? ch->channel->vtable->name(ch->channel->ctx)
+                                            : "";
+                    int64_t rm_now = (int64_t)time(NULL);
+                    if ((hu_reminders_handle_owner_message(agent, batch_key, key_len, rm_ch,
+                                                           combined, combined_len, rm_now, rm_reply,
+                                                           sizeof(rm_reply)) ||
+                         hu_person_dates_handle_owner_message(agent, batch_key, key_len, combined,
+                                                              combined_len, rm_now, rm_reply,
+                                                              sizeof(rm_reply))) &&
+                        rm_reply[0]) {
+                        hu_error_t rm_err = ch->channel->vtable->send(ch->channel->ctx, send_target,
+                                                                      send_target_len, rm_reply,
+                                                                      strlen(rm_reply), NULL, 0);
+                        hu_log_info("reminders", agent->observer, "owner command handled (ack %s)",
+                                    rm_err == HU_OK ? "sent" : "failed");
+                        goto skip_llm_this_batch;
+                    }
+                }
+
                 /* F29: Backchannel — send brief cue and skip LLM when narrative detected.
                  * Flash typing briefly so the recipient sees "..." before the short
                  * reply appears, matching how a human types "mhm" or "haha". */
                 if (use_backchannel && backchannel_len > 0 && ch->channel->vtable->send) {
                     if (ch->channel->vtable->start_typing) {
-                        ch->channel->vtable->start_typing(ch->channel->ctx, batch_key, key_len);
+                        ch->channel->vtable->start_typing(ch->channel->ctx, send_target,
+                                                          send_target_len);
                         unsigned int bc_delay_ms = 300 + (unsigned int)(rand() % 501);
                         struct timespec bc_ts = {.tv_sec = 0,
                                                  .tv_nsec = (long)bc_delay_ms * 1000000L};
@@ -6576,7 +6124,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 
                 /* Start typing indicator before LLM call */
                 if (ch->channel->vtable->start_typing) {
-                    ch->channel->vtable->start_typing(ch->channel->ctx, batch_key, key_len);
+                    ch->channel->vtable->start_typing(ch->channel->ctx, send_target,
+                                                      send_target_len);
                 }
                 turn_out_state.typing_started = (ch->channel->vtable->start_typing != NULL);
 
@@ -6632,15 +6181,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 /* Tapback-vs-text decision: gate reaction and/or LLM flow */
                 if (llm_decides) {
                     if (director_result_valid && director_result.action == DIR_SILENCE) {
-                        bool has_question = memchr(combined, '?', combined_len) != NULL;
-                        bool looks_like_greeting =
-                            (combined_len < 30 &&
-                             (strstr(combined, "hey") || strstr(combined, "Hey") ||
-                              strstr(combined, "hi") || strstr(combined, "Hi") ||
-                              strstr(combined, "yo") || strstr(combined, "Yo") ||
-                              strstr(combined, "sup") || strstr(combined, "hello") ||
-                              strstr(combined, "Hello") || strstr(combined, "what")));
-                        if (has_question || looks_like_greeting) {
+                        if (hu_daemon_director_silence_overridden(combined, combined_len)) {
                             hu_log_info(
                                 "human", agent ? agent->observer : NULL,
                                 "director: silence overridden (greeting/question detected)");
@@ -6697,8 +6238,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 
                     if (tapback_decision == HU_NO_RESPONSE) {
                         hu_log_info("human", agent ? agent->observer : NULL,
-                                    "tapback decision: no response for %.*s",
-                                    (int)(combined_len > 40 ? 40 : combined_len), combined);
+                                    "tapback decision: no response for %s",
+                                    HU_LOG_TEXT(combined, combined_len, 40));
                         goto skip_llm_this_batch;
                     }
 
@@ -6740,8 +6281,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         }
                         if (tapback_sent) {
                             hu_log_info("human", agent ? agent->observer : NULL,
-                                        "tapback only (no text) for %.*s",
-                                        (int)(combined_len > 40 ? 40 : combined_len), combined);
+                                        "tapback only (no text) for %s",
+                                        HU_LOG_TEXT(combined, combined_len, 40));
                             goto skip_llm_this_batch;
                         }
                     }
@@ -6782,7 +6323,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
             /* F45: Burst messaging — 3–4 rapid-fire thoughts for urgent/exciting context.
              * Skip in llm_decides mode — burst is an extra LLM call. */
 #ifndef HU_IS_TEST
-                if (!llm_decides) {
+                if (!llm_decides && !voice_first_memo) { /* a memo is one message */
                     float burst_prob = 0.03f;
                     if (agent && agent->persona)
                         burst_prob = agent->persona->humanization.burst_message_probability;
@@ -6809,13 +6350,15 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             }
                         }
                         if (ch->channel->vtable->start_typing)
-                            ch->channel->vtable->start_typing(ch->channel->ctx, batch_key, key_len);
+                            ch->channel->vtable->start_typing(ch->channel->ctx, send_target,
+                                                              send_target_len);
                         char *burst_response = NULL;
                         size_t burst_response_len = 0;
                         hu_error_t burst_err = hu_agent_turn(agent, combined, combined_len,
                                                              &burst_response, &burst_response_len);
                         if (ch->channel->vtable->stop_typing)
-                            ch->channel->vtable->stop_typing(ch->channel->ctx, batch_key, key_len);
+                            ch->channel->vtable->stop_typing(ch->channel->ctx, send_target,
+                                                             send_target_len);
                         if (burst_err == HU_OK && burst_response && burst_response_len > 0 &&
                             ch->channel->vtable->send) {
                             char burst_msgs[4][256];
@@ -6891,8 +6434,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 }
                             }
                             hu_log_info("human", agent ? agent->observer : NULL,
-                                        "burst: %d messages for %.*s", n,
-                                        (int)(key_len > 20 ? 20 : key_len), batch_key);
+                                        "burst: %d messages for %s", n,
+                                        HU_LOG_WHO(batch_key, key_len));
                         }
                         if (burst_response)
                             agent->alloc->free(agent->alloc->ctx, burst_response,
@@ -6924,8 +6467,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                           (uint32_t)agent->history_count, s_has_question);
                     if (s_resp == HU_SILENCE_ACTUAL_SILENCE) {
                         hu_log_info("human", agent ? agent->observer : NULL,
-                                    "silence intuition: actual silence for %.*s",
-                                    (int)(key_len > 20 ? 20 : key_len), batch_key);
+                                    "silence intuition: actual silence for %s",
+                                    HU_LOG_WHO(batch_key, key_len));
                         goto skip_llm_this_batch;
                     }
                     if (s_resp == HU_SILENCE_PRESENCE_ONLY ||
@@ -6934,8 +6477,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         char *ack = hu_silence_build_acknowledgment(alloc, s_resp, &ack_len);
                         if (ack && ack_len > 0 && ch->channel->vtable->send) {
                             hu_log_info("human", agent ? agent->observer : NULL,
-                                        "silence intuition: \"%.*s\" for %.*s", (int)ack_len, ack,
-                                        (int)(key_len > 20 ? 20 : key_len), batch_key);
+                                        "silence intuition: \"%s\" for %s",
+                                        HU_LOG_TEXT(ack, ack_len, 120),
+                                        HU_LOG_WHO(batch_key, key_len));
                             ch->channel->vtable->send(ch->channel->ctx, send_target,
                                                       send_target_len, ack, ack_len, NULL, 0);
                             alloc->free(alloc->ctx, ack, ack_len + 1);
@@ -7001,9 +6545,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                               ar_reply_len, NULL, 0);
                                     hu_send_budget_record_send(batch_key, key_len, now_unix_ar);
                                     hu_log_info("human", agent ? agent->observer : NULL,
-                                                "autoresponder fired for %.*s (DND + allowlisted, "
+                                                "autoresponder fired for %s (DND + allowlisted, "
                                                 "human inactive %ds+); skipped agent_turn",
-                                                (int)(key_len > 20 ? 20 : key_len), batch_key, 120);
+                                                HU_LOG_WHO(batch_key, key_len), 120);
                                     goto skip_llm_this_batch;
                                 }
                                 /* Generate failed (provider down etc.) — fall through to
@@ -7017,15 +6561,18 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 bool local_fallback_done = false; /* T4 (AC-2): one local→cloud retry per turn */
                 char *turing_rejected_resp = NULL;
                 size_t turing_rejected_len = 0;
-                hu_log_info("human", agent ? agent->observer : NULL,
-                            "calling agent turn for %.*s...", (int)(key_len > 20 ? 20 : key_len),
-                            batch_key);
+                hu_log_info("human", agent ? agent->observer : NULL, "calling agent turn for %s...",
+                            HU_LOG_WHO(batch_key, key_len));
+                hu_post_send_defer_begin(); /* HU_POST_SEND_DEFER; flushed after skip_send */
 
-                /* Inject the director's scene direction and arm G6 against a
-                 * verbatim echo. ONCE PER TURN, outside the retry loop:
-                 * convo_ctx is built once above and never rebuilt between
-                 * iterations, so arming per iteration appended a second "this
-                 * message only" block. Contract: daemon/director.h. */
+                /* Inject the director's direction and arm G6 against a verbatim echo ONCE per
+                 * turn, outside the retry loop: convo_ctx is built once, so arming per
+                 * iteration appended a second "this message only" block. See director.h. */
+                /* On a memo turn the director's texting length cue would win over
+                 * the memo directive (live #voice test, 2026-09-29 06:09). */
+                if (voice_first_memo && director_result_valid)
+                    hu_daemon_voice_first_direction(director_result.direction,
+                                                    sizeof(director_result.direction));
                 if (llm_decides && director_result_valid)
                     hu_daemon_director_arm_guard(alloc, agent, &director_result, &convo_ctx,
                                                  &convo_ctx_len);
@@ -7129,9 +6676,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     }
                     daemon_out_bus_bridge.active_turn = NULL;
                     hu_log_info("human", agent ? agent->observer : NULL,
-                                "agent turn result: err=%s response_len=%zu for %.*s",
-                                hu_error_string(err), response_len,
-                                (int)(key_len > 20 ? 20 : key_len), batch_key);
+                                "agent turn result: err=%s response_len=%zu for %s",
+                                hu_error_string(err), response_len, HU_LOG_WHO(batch_key, key_len));
                     /* T4 (AC-2): if the local-voice model errored or returned empty,
                      * fall back to the tier's cloud model exactly once so a downed or
                      * slow MLX server never silences the turn. Uses its own flag (not
@@ -7142,7 +6688,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                           agent->turn_model_len == mr_cfg.mlx_local_model_len &&
                                           strncmp(agent->turn_model, mr_cfg.mlx_local_model,
                                                   mr_cfg.mlx_local_model_len) == 0;
-                        if (!local_fallback_done && used_local &&
+                        if (!local_fallback_done && used_local && !hu_local_only_enforced() &&
                             (err != HU_OK || !response || response_len == 0)) {
                             local_fallback_done = true;
                             size_t fb_len = 0;
@@ -7151,10 +6697,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             if (fb && fb_len > 0) {
                                 hu_log_warn(
                                     "human", agent ? agent->observer : NULL,
-                                    "local-voice path failed (err=%s len=%zu) for %.*s — falling "
+                                    "local-voice path failed (err=%s len=%zu) for %s — falling "
                                     "back to cloud model %.*s",
                                     hu_error_string(err), response_len,
-                                    (int)(key_len > 20 ? 20 : key_len), batch_key, (int)fb_len, fb);
+                                    HU_LOG_WHO(batch_key, key_len), (int)fb_len, fb);
                                 agent->turn_model = fb;
                                 agent->turn_model_len = fb_len;
                                 if (response) {
@@ -7167,19 +6713,12 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             }
                         }
                     }
-                    /* L4 multimodal shadow-logging (2026-05-19).
-                     *
-                     * Run the predicate against the inbound message; log
-                     * the decision but DO NOT change routing. This collects
-                     * production data on tapback-vs-text-vs-voice routing
-                     * so we can calibrate confidence thresholds before
-                     * flipping live. Next round (per
-                     * docs/plans/2026-05-19-sota-round-3-findings.md):
-                     * route on the decision when conf >= 0.85 and channel
-                     * has react vtable.
-                     *
-                     * Scoped to iMessage channel only — other channels
-                     * have different tapback semantics. */
+                    /* L4 multimodal shadow-logging (2026-05-19): log the
+                     * inbound's tapback/text/voice routing decision, DO NOT
+                     * change routing, to calibrate thresholds before going
+                     * live (docs/plans/2026-05-19-sota-round-3-findings.md:
+                     * route when conf >= 0.85 and the channel can react).
+                     * iMessage only; other channels' tapbacks differ. */
                     if (err == HU_OK && response && response_len > 0 && ch && ch->channel &&
                         ch->channel->vtable && ch->channel->vtable->name) {
                         const char *ch_name = ch->channel->vtable->name(ch->channel->ctx);
@@ -7192,20 +6731,22 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             if (mm.modality != HU_MM_MODALITY_TEXT) {
                                 hu_log_info("human", agent ? agent->observer : NULL,
                                             "L4-shadow: would route to %s (kind=%s conf=%.2f "
-                                            "reason=%s) for incoming '%.*s' — sending text anyway",
+                                            "reason=%s) for incoming '%s' — sending text anyway",
                                             mod_names[mm.modality], tb_names[mm.tapback_kind],
                                             (double)mm.confidence, mm.reason ? mm.reason : "?",
-                                            (int)(combined_len > 60 ? 60 : combined_len), combined);
+                                            HU_LOG_TEXT(combined, combined_len, 60));
                             }
                         }
                     }
-                    if (err == HU_OK && (!response || response_len == 0)) {
+                    /* Settle a stashed quality-retry draft: restored if the retry is empty. */
+                    if (err == HU_OK &&
+                        !hu_daemon_quality_draft_settle(agent->alloc, batch_key, key_len, &response,
+                                                        &response_len)) {
                         g_empty_agent_response_streak++;
-                        hu_log_error(
-                            "human", agent ? agent->observer : NULL,
-                            "empty assistant response (consecutive=%u) for %.*s — check MLX "
-                            "server, response_guard retry, and cloud fallback logs",
-                            g_empty_agent_response_streak, (int)key_len, batch_key);
+                        hu_log_error("human", agent ? agent->observer : NULL,
+                                     "empty assistant response (consecutive=%u) for %s — check MLX "
+                                     "server, response_guard retry, and cloud fallback logs",
+                                     g_empty_agent_response_streak, HU_LOG_WHO(batch_key, key_len));
                         if (g_empty_agent_response_streak >= 3U)
                             hu_log_error(
                                 "human", agent ? agent->observer : NULL,
@@ -7219,8 +6760,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                          * ungoverned and may yet be retried, aborted or sent as
                          * a tapback (2026-09-12). */
                     }
-                    /* Hex dump first 80 bytes of response for encoding diagnostics */
-                    if (err == HU_OK && response && response_len > 0) {
+                    /* Hex dump first 80 bytes of response for encoding diagnostics.
+                     * The bytes ARE the reply: HU_LOG_CONTENT=1 only. */
+                    if (err == HU_OK && response && response_len > 0 && hu_log_content_enabled()) {
                         char hex[256];
                         size_t hlen = 0;
                         size_t dump_n = response_len < 80 ? response_len : 80;
@@ -7235,10 +6777,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         hu_log_info("human", agent ? agent->observer : NULL,
                                     "response hex[0..%zu]: %s", dump_n, hex);
                     }
+                    /* Logs the failure; HU_JOB_HOLD may hold the batch while the model is down. */
                     if (err != HU_OK)
-                        hu_log_error("human", agent ? agent->observer : NULL,
-                                     "agent turn failed for %.*s: %s", (int)key_len, batch_key,
-                                     hu_error_string(err));
+                        hu_daemon_jobs_on_turn_error(agent, config, ch, msgs, batch_start,
+                                                     batch_end, batch_key, key_len, err);
 
                     /* W14 counterfactual rehearsal — enqueue at most once
                      * per hour for the active contact after a successful
@@ -7262,8 +6804,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             if (cf_err == HU_OK) {
                                 last_cf_enqueue_ms = now_ms;
                                 hu_log_info("human", agent->observer,
-                                            "w14: enqueued counterfactual rehearsal for %.*s",
-                                            (int)(key_len > 32 ? 32 : key_len), batch_key);
+                                            "w14: enqueued counterfactual rehearsal for %s",
+                                            HU_LOG_WHO(batch_key, key_len));
                             }
                             /* enqueue failures are silent — the next
                              * eligible turn will retry naturally */
@@ -7272,7 +6814,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 
                     /* Best-of-N: generate additional candidates, score with Turing heuristic */
                     if (err == HU_OK && response && response_len > 0 && !retried && config &&
-                        config->agent.best_of_n >= 2 && !llm_decides) {
+                        config->agent.best_of_n >= 2 && !llm_decides && !voice_first_memo) {
                         uint32_t n_extra = config->agent.best_of_n - 1;
                         if (n_extra > 4)
                             n_extra = 4;
@@ -7350,12 +6892,14 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 #ifndef HU_IS_TEST
                     if (err != HU_OK) {
                         if (ch->channel->vtable->stop_typing) {
-                            ch->channel->vtable->stop_typing(ch->channel->ctx, batch_key, key_len);
+                            ch->channel->vtable->stop_typing(ch->channel->ctx, send_target,
+                                                             send_target_len);
                         }
                     }
                     if (err == HU_OK && (!response || response_len == 0)) {
                         if (ch->channel->vtable->stop_typing) {
-                            ch->channel->vtable->stop_typing(ch->channel->ctx, batch_key, key_len);
+                            ch->channel->vtable->stop_typing(ch->channel->ctx, send_target,
+                                                             send_target_len);
                         }
                     }
 
@@ -7371,10 +6915,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         if (ce == HU_OK && cr.verdict == HU_CRITIQUE_REWRITE &&
                             cr.revised_response && cr.revised_response_len > 0) {
                             hu_log_info("human", agent ? agent->observer : NULL,
-                                        "constitutional rewrite (principle=%d): %.*s",
+                                        "constitutional rewrite (principle=%d): %s",
                                         cr.principle_index,
-                                        (int)(cr.reasoning_len > 80 ? 80 : cr.reasoning_len),
-                                        cr.reasoning ? cr.reasoning : "");
+                                        HU_LOG_TEXT(cr.reasoning ? cr.reasoning : "",
+                                                    cr.reasoning_len, 80));
                             hu_dpo_record_from_retry(&agent->sota.dpo_collector, combined,
                                                      combined_len, response, response_len,
                                                      cr.revised_response, cr.revised_response_len);
@@ -7419,13 +6963,12 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 agent->conversation_context = convo_ctx;
                                 agent->conversation_context_len = convo_ctx_len;
                             }
+                            /* Keep typing through the regeneration: a start
+                             * followed at once by a stop left the dots off for
+                             * the whole retry (~30 s, live 2026-09-29 06:51). */
                             if (ch->channel->vtable->start_typing)
-                                ch->channel->vtable->start_typing(ch->channel->ctx, batch_key,
-                                                                  key_len);
-                            if (ch->channel->vtable->stop_typing) {
-                                ch->channel->vtable->stop_typing(ch->channel->ctx, batch_key,
-                                                                 key_len);
-                            }
+                                ch->channel->vtable->start_typing(ch->channel->ctx, send_target,
+                                                                  send_target_len);
                             continue;
                         }
                     }
@@ -7433,19 +6976,25 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     /* Quality gate: check response for unnatural patterns.
                      * If needs_revision, retry once with hint.
                      * Skip retry in llm_decides mode (director handles quality). */
+                    /* A memo is long on purpose; the texting-length retry would shrink
+                     * it back to a text (review I1). */
                     if (err == HU_OK && response && response_len > 0 && history_entries &&
+                        !voice_first_memo &&
                         hu_reactive_gate_active(HU_REACTIVE_GATE_QUALITY_RETRY, llm_decides)) {
-                        hu_quality_score_t qscore = hu_conversation_evaluate_quality(
-                            response, response_len, history_entries, history_count, max_chars);
+                        hu_quality_score_t qscore = hu_conversation_evaluate_quality_capped(
+                            response, response_len, history_entries, history_count, max_chars,
+                            len_turn.tight != HU_LENGTH_TIGHT_LEGACY && !voice_first_memo);
                         if (qscore.needs_revision && !retried) {
                             retried = true;
                             hu_log_info("human", agent ? agent->observer : NULL,
                                         "quality retry: score=%d (b=%d v=%d w=%d n=%d) "
-                                        "for %.40s...\n",
+                                        "for %s\n",
                                         qscore.total, qscore.brevity, qscore.validation,
                                         qscore.warmth, qscore.naturalness,
-                                        response_len > 40 ? response : response);
-                            agent->alloc->free(agent->alloc->ctx, response, response_len + 1);
+                                        HU_LOG_TEXT(response, response_len, 40));
+                            /* Kept, not freed: an empty retry falls back to it. */
+                            hu_daemon_quality_draft_keep(agent->alloc, batch_key, key_len, response,
+                                                         response_len);
                             response = NULL;
                             response_len = 0;
                             /* Prepend data-driven retry hint from quality score */
@@ -7475,27 +7024,24 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                     agent->conversation_context_len = convo_ctx_len;
                                 }
                             }
-                            if (ch->channel->vtable->start_typing)
-                                ch->channel->vtable->start_typing(ch->channel->ctx, batch_key,
-                                                                  key_len);
-                            if (ch->channel->vtable->stop_typing) {
-                                ch->channel->vtable->stop_typing(ch->channel->ctx, batch_key,
-                                                                 key_len);
-                            }
+                            if (ch->channel->vtable->start_typing) /* typing through the retry */
+                                ch->channel->vtable->start_typing(ch->channel->ctx, send_target,
+                                                                  send_target_len);
                             continue;
                         } else if (qscore.needs_revision) {
                             hu_log_info("human", agent ? agent->observer : NULL,
                                         "quality warning: score=%d (b=%d v=%d w=%d n=%d) "
-                                        "for %.40s...\n",
+                                        "for %s\n",
                                         qscore.total, qscore.brevity, qscore.validation,
                                         qscore.warmth, qscore.naturalness,
-                                        response_len > 40 ? response : response);
+                                        HU_LOG_TEXT(response, response_len, 40));
                         }
                     }
 
                     /* Turing score gate: retry if heuristic score is too low.
                      * Only fires once (shares retried flag with quality gate). */
-                    if (err == HU_OK && response && response_len > 0 && !retried && !llm_decides) {
+                    if (err == HU_OK && response && response_len > 0 && !retried && !llm_decides &&
+                        !voice_first_memo) {
                         hu_turing_score_t pre_tscore;
                         hu_error_t pre_ts_err = hu_turing_score_heuristic(
                             response, response_len, combined, combined_len, max_chars, &pre_tscore);
@@ -7515,9 +7061,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         if (pre_ts_err == HU_OK && pre_tscore.overall < 6) {
                             retried = true;
                             hu_log_info("human", agent ? agent->observer : NULL,
-                                        "turing retry: %d/10 [%s] for %.40s...", pre_tscore.overall,
+                                        "turing retry: %d/10 [%s] for %s", pre_tscore.overall,
                                         hu_turing_verdict_name(pre_tscore.verdict),
-                                        response_len > 40 ? response : response);
+                                        HU_LOG_TEXT(response, response_len, 40));
                             /* Build targeted hint from weakest dimensions */
                             const char *turing_hint =
                                 (pre_tscore.dimensions[HU_TURING_NON_ROBOTIC] < 5)
@@ -7560,8 +7106,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 }
                             }
                             if (ch->channel->vtable->start_typing)
-                                ch->channel->vtable->start_typing(ch->channel->ctx, batch_key,
-                                                                  key_len);
+                                ch->channel->vtable->start_typing(ch->channel->ctx, send_target,
+                                                                  send_target_len);
                             continue;
                         }
                     }
@@ -7601,9 +7147,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                     if (llm_terr == HU_OK && llm_tscore.overall < 6) {
                                         retried = true;
                                         hu_log_info("human", agent ? agent->observer : NULL,
-                                                    "llm judge retry: %d/10 for %.*s",
+                                                    "llm judge retry: %d/10 for %s",
                                                     llm_tscore.overall,
-                                                    (int)(key_len > 20 ? 20 : key_len), batch_key);
+                                                    HU_LOG_WHO(batch_key, key_len));
                                         hu_dpo_record_from_feedback(&agent->sota.dpo_collector,
                                                                     combined, combined_len,
                                                                     response, response_len, false);
@@ -7633,10 +7179,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                 agent->conversation_context_len = convo_ctx_len;
                                             }
                                         }
-                                        if (ch->channel->vtable->stop_typing) {
-                                            ch->channel->vtable->stop_typing(ch->channel->ctx,
-                                                                             batch_key, key_len);
-                                        }
+                                        if (ch->channel->vtable
+                                                ->start_typing) /* through the retry */
+                                            ch->channel->vtable->start_typing(
+                                                ch->channel->ctx, send_target, send_target_len);
                                         continue;
                                     }
                                 }
@@ -7648,12 +7194,13 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     break;
                 } while (1);
 
-                /* G6 end-of-turn: push the going-stale director into the
-                 * agent's heap-owned ring and drop the borrowed pointer into
-                 * `director_result`, which dies with this batch iteration.
-                 * MUST stay after the retry loop — every retry is
-                 * still guarded against the current director. */
+                /* G6 end-of-turn: push the going-stale director into the agent's heap-owned
+                 * ring (`director_result` dies with this batch iteration). MUST stay after the
+                 * retry loop — every retry is still guarded against the current director. */
                 hu_daemon_director_end_turn(agent);
+                /* Commitment guard (commitment_guard.h): never commit Seth. */
+                (void)hu_daemon_commitment_guard_apply(agent, batch_key, key_len, combined,
+                                                       combined_len, &response, &response_len);
 
                 /* DPO: pair rejected response from Turing retry with chosen retry result */
                 if (turing_rejected_resp && turing_rejected_len > 0 && response &&
@@ -8123,27 +7670,11 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 
             skip_llm_this_batch:
                 if (turn_out_state.typing_started && ch->channel->vtable->stop_typing)
-                    ch->channel->vtable->stop_typing(ch->channel->ctx, batch_key, key_len);
+                    ch->channel->vtable->stop_typing(ch->channel->ctx, send_target,
+                                                     send_target_len);
                 /* Clear per-turn context and free */
 #ifndef HU_IS_TEST
-                agent->contact_context = NULL;
-                agent->contact_context_len = 0;
-                agent->conversation_context = NULL;
-                agent->conversation_context_len = 0;
-                agent->ab_history_entries = NULL;
-                agent->ab_history_count = 0;
-                agent->turn_model = NULL;
-                agent->turn_model_len = 0;
-                agent->lean_prompt = false;
-                agent->turn_temperature = 0.0;
-                agent->turn_thinking_budget = 0;
-                agent->max_response_chars = 0;
-                agent->memory_session_id = NULL;
-                agent->memory_session_id_len = 0;
-                if (agent->memory && agent->memory->vtable) {
-                    agent->memory->current_session_id = NULL;
-                    agent->memory->current_session_id_len = 0;
-                }
+                hu_daemon_reactive_turn_end(agent);
                 if (contact_ctx)
                     alloc->free(alloc->ctx, contact_ctx, contact_ctx_len + 1);
                 if (convo_ctx)
@@ -8205,7 +7736,6 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                          batch_key, key_len, combined, combined_len,
                                                          response, response_len);
                 }
-
 #ifdef HU_ENABLE_SQLITE
                 /* Task 18: Extraction pipeline — post-turn storage */
                 if (err == HU_OK && response && response_len > 0 && agent->memory) {
@@ -8369,6 +7899,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 #endif
 
 #ifndef HU_IS_TEST
+                if (err == HU_OK && response && response_len > 0 && graph) /* names, §4.2 */
+                    hu_daemon_name_catch_batch(alloc, graph, msgs, batch_start, batch_end, config);
                 /* F27: If we responded to negative emotion, set pending to record engagement
                  * when we get their next reply.
                  * Skip in llm_decides: avoids post-response emotion LLM call. */
@@ -8480,6 +8012,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 uint32_t typo_seed = 0;
                 char *original_response = NULL;
                 size_t original_len = 0;
+                char *unshaped = NULL; /* F1: what a voice memo should say */
+                size_t unshaped_len = 0;
                 if (err == HU_OK && response && response_len > 0) {
                     const char *proactive_vis_m[1] = {NULL};
                     size_t proactive_vis_n = 0;
@@ -8552,6 +8086,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                      * here under #ifndef HU_IS_TEST, so the suite never exercised the
                      * production shaping ORDER (2026-07-12 egress audit). The overlay
                      * is resolved here because the typo block below also consults it. */
+                    unshaped = hu_daemon_voice_capture_unshaped(alloc, config, ch, response,
+                                                                response_len, &unshaped_len);
                     const hu_persona_overlay_t *overlay =
                         (agent->persona && agent->active_channel)
                             ? hu_persona_find_overlay(agent->persona, agent->active_channel,
@@ -8623,13 +8159,11 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         }
                     }
 
-                    /* F40 (inline "> {quoted}" reply fallback) was REMOVED here
-                     * 2026-07-25: native threading owns reply semantics in the
-                     * router, and the fake quote interacted with the markdown
-                     * plaintext-ifier + splitter to ship a bare echo of the
-                     * contact's own message as its own bubble (Dermot
-                     * incident). The router's parrot guard now structurally
-                     * blocks that whole family. */
+                    /* F40 (inline "> {quoted}" reply fallback) was REMOVED here 2026-07-25:
+                     * native threading owns reply semantics in the router, and the fake quote
+                     * interacted with the markdown plaintext-ifier + splitter to ship a bare
+                     * echo of the contact's own message as its own bubble (Dermot incident).
+                     * The router's parrot guard now structurally blocks that whole family. */
                     /* ── Pre-send re-check: abort if real user responded while
                      * we were generating.  Prevents piling onto a conversation
                      * the user is actively handling. ─────────────────────────── */
@@ -8643,137 +8177,85 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         int window = 120;
                         if (dcfg_ps && dcfg_ps->user_response_window_sec > 0)
                             window = dcfg_ps->user_response_window_sec;
-                        if (chn_name && ch->channel->vtable->human_active_recently &&
+                        /* Same exemption as the early check: a self-test's own sent
+                         * copy is the command, not Seth typing (2026-09-29 05:30). */
+                        if (!selftest_on && chn_name &&
+                            ch->channel->vtable->human_active_recently &&
                             ch->channel->vtable->human_active_recently(ch->channel->ctx, batch_key,
                                                                        key_len, window)) {
                             hu_log_info("human", agent ? agent->observer : NULL,
                                         "pre-send abort: real user active "
-                                        "for %.*s — dropping generated response",
-                                        (int)(key_len > 20 ? 20 : key_len), batch_key);
+                                        "for %s — dropping generated response",
+                                        HU_LOG_WHO(batch_key, key_len));
                             goto skip_send;
                         }
                     }
 #endif
-                    /* Bus final delivery: post-processed text (send_event FINAL or send). */
-                    turn_out_state.text_delivered_via_bus = false;
-                    if (err == HU_OK && response && response_len > 0) {
-                        hu_bus_event_t rev;
-                        memset(&rev, 0, sizeof(rev));
-                        rev.type = HU_BUS_MESSAGE_SENT;
-                        if (agent->active_channel && agent->active_channel[0]) {
-                            int nc4 = snprintf(rev.channel, HU_BUS_CHANNEL_LEN, "%s",
-                                               agent->active_channel);
-                            (void)nc4;
-                        } else if (ch->channel->vtable->name) {
-                            const char *cn4 = ch->channel->vtable->name(ch->channel->ctx);
-                            if (cn4)
-                                (void)snprintf(rev.channel, HU_BUS_CHANNEL_LEN, "%s", cn4);
-                        }
-                        {
-                            size_t idk = key_len < HU_BUS_ID_LEN - 1 ? key_len : HU_BUS_ID_LEN - 1;
-                            memcpy(rev.id, batch_key, idk);
-                            rev.id[idk] = '\0';
-                        }
-                        rev.payload = response;
-                        hu_daemon_outbound_bus_set_message(&rev, response, response_len);
-                        daemon_out_bus_bridge.delivery_turn = &turn_out_state;
-                        hu_bus_publish(&daemon_outbound_bus, &rev);
-                        daemon_out_bus_bridge.delivery_turn = NULL;
+                    /* Final delivery: voice memo first; only when none went out does
+                     * the bus send the text (send_event FINAL or send). One reply is
+                     * never both. hu_daemon_voice_reply declines voice unless the reply
+                     * passes the same safety gates the text path below applies, and the
+                     * bus defers a gate-flagged final; a false return with
+                     * text_delivered_via_bus still false leaves delivery to that path. */
+                    /* SHIELD-005: resources keyed to the INBOUND tier, once. */
+                    (void)hu_daemon_crisis_ensure_resources(alloc, crisis_tier, &response,
+                                                            &response_len);
+                    hu_daemon_final_reply_t final_reply = {
+                        .alloc = alloc,
+                        .agent = agent,
+                        .config = config,
+                        .ch = ch,
+                        .batch_key = batch_key,
+                        .key_len = key_len,
+                        .combined = combined,
+                        .combined_len = combined_len,
+                        .response = response,
+                        .response_len = response_len,
+                        .unshaped = unshaped,
+                        .unshaped_len = unshaped_len,
+                        .bth_hour = bth_hour,
+                        .voice_first = !voice_first_memo ? 0
+                                       : (selftest_on && selftest.form == HU_DIR_FORM_VOICE)
+                                           ? HU_VOICE_FIRST_FORCED
+                                           : HU_VOICE_FIRST_MEMO,
+                        .is_group = msgs[batch_start].is_group,
+                        .text_ready = (err == HU_OK),
+                        .bus = &daemon_outbound_bus,
+                        .bridge = &daemon_out_bus_bridge,
+                        .turn = &turn_out_state,
+                    };
+                    /* Effects (Phase 3): a #effect self-test, or the director's effect
+                     * LIVE past its guards, marks this reply's first bubble. */
+                    {
+                        char fx[16];
+                        int64_t fx_now = (int64_t)time(NULL);
+                        if (selftest_on && selftest.effect[0])
+                            hu_imsg_effect_set(send_target, send_target_len, selftest.effect,
+                                               fx_now);
+                        else if (hu_expressive_effect_gate(
+                                     &director_result, director_result_valid,
+                                     hu_gate_mode_from_env("HU_DIRECTOR_FORMS", HU_GATE_OFF) ==
+                                         HU_GATE_LIVE,
+                                     combined, combined_len, msgs[batch_start].is_group, batch_key,
+                                     key_len, fx_now, fx, sizeof(fx)))
+                            hu_imsg_effect_set(send_target, send_target_len, fx, fx_now);
                     }
-                    /* ── Voice decision: TTS when channel has voice_enabled ───── */
-                    bool sent_voice = false;
-                    sent_voice = hu_daemon_voice_reply(alloc, agent, config, ch, batch_key, key_len,
-                                                       combined, combined_len, response,
-                                                       response_len, bth_hour);
+                    bool sent_voice = hu_daemon_deliver_final_reply(&final_reply);
+                    if (voice_first_memo && !sent_voice)
+                        hu_log_info("voice_first", agent ? agent->observer : NULL,
+                                    "memo went as text (voice declined or not delivered)");
+                    if (unshaped) {
+                        alloc->free(alloc->ctx, unshaped, unshaped_len + 1);
+                        unshaped = NULL;
+                    }
                     if (!sent_voice && !turn_out_state.text_delivered_via_bus) {
                         const char *eff_ch = ch->channel->vtable->name
                                                  ? ch->channel->vtable->name(ch->channel->ctx)
                                                  : "unknown";
-                        /* Strip invalid UTF-8 and surrogate-encoded garbage.
-                         * Keeps: ASCII printable, newlines, valid multi-byte UTF-8 (including
-                         * emoji). Strips: invalid sequences, lone surrogates (U+D800-U+DFFF encoded
-                         * as 3-byte). */
-                        {
-                            size_t w = 0;
-                            for (size_t r = 0; r < response_len;) {
-                                unsigned char b = (unsigned char)response[r];
-                                if (b < 0x80) {
-                                    if (b >= 0x20 || b == '\n' || b == '\t')
-                                        response[w++] = response[r];
-                                    r++;
-                                } else {
-                                    size_t seq = 0;
-                                    if ((b & 0xE0) == 0xC0)
-                                        seq = 2;
-                                    else if ((b & 0xF0) == 0xE0)
-                                        seq = 3;
-                                    else if ((b & 0xF8) == 0xF0)
-                                        seq = 4;
-                                    if (seq == 0 || r + seq > response_len) {
-                                        r++;
-                                        continue;
-                                    }
-                                    bool valid = true;
-                                    for (size_t k = 1; k < seq; k++) {
-                                        if (((unsigned char)response[r + k] & 0xC0) != 0x80) {
-                                            valid = false;
-                                            break;
-                                        }
-                                    }
-                                    /* Reject 3-byte sequences encoding surrogates (U+D800-U+DFFF)
-                                     */
-                                    if (valid && seq == 3) {
-                                        unsigned int s_cp =
-                                            ((b & 0x0F) << 12) |
-                                            (((unsigned char)response[r + 1] & 0x3F) << 6) |
-                                            ((unsigned char)response[r + 2] & 0x3F);
-                                        if (s_cp >= 0xD800 && s_cp <= 0xDFFF)
-                                            valid = false;
-                                    }
-                                    if (valid) {
-                                        if (w != r)
-                                            memmove(response + w, response + r, seq);
-                                        w += seq;
-                                    }
-                                    r += valid ? seq : 1;
-                                }
-                            }
-                            if (w < response_len) {
-                                response[w] = '\0';
-                                response_len = w;
-                            }
-                        }
-                        /* Strip meta-reasoning: local models sometimes emit (parenthetical
-                         * analysis) instead of just the message. Remove any leading text
-                         * up to and including the last ')' if the response starts with '('. */
-                        if (llm_decides && response_len > 0 && response[0] == '(') {
-                            char *last_paren = NULL;
-                            for (size_t ri = 0; ri < response_len; ri++) {
-                                if (response[ri] == ')')
-                                    last_paren = response + ri;
-                            }
-                            if (last_paren) {
-                                char *clean = last_paren + 1;
-                                while (*clean == ' ' || *clean == '\n' || *clean == '\r')
-                                    clean++;
-                                size_t new_len = response_len - (size_t)(clean - response);
-                                if (new_len > 0 && new_len < response_len) {
-                                    memmove(response, clean, new_len);
-                                    response[new_len] = '\0';
-                                    response_len = new_len;
-                                    hu_log_info("human", agent ? agent->observer : NULL,
-                                                "stripped meta-reasoning, clean len=%zu", new_len);
-                                } else if (new_len == 0) {
-                                    /* Entire response was meta-reasoning; use a fallback */
-                                    static const char fb[] = "hey whats up";
-                                    memcpy(response, fb, sizeof(fb));
-                                    response_len = sizeof(fb) - 1;
-                                    hu_log_info(
-                                        "human", agent ? agent->observer : NULL,
-                                        "meta-reasoning fallback (entire response was reasoning)");
-                                }
-                            }
-                        }
+                        /* UTF-8 garbage + llm_decides meta-reasoning strip
+                         * (daemon/outbound_sanitize.h; the replay harness runs it too). */
+                        hu_daemon_outbound_sanitize(response, &response_len, response_alloc_len + 1,
+                                                    llm_decides, agent ? agent->observer : NULL);
                         const char *send_ptr = response;
                         size_t send_len = response_len;
                         {
@@ -8791,67 +8273,26 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 delay_secs, recv_hr, curr_hr, (uint32_t)now_ts, batch_key, key_len,
                                 now_ts);
                             if (ack) {
-                                size_t ack_len = strlen(ack);
-                                if (response_len <= SIZE_MAX - ack_len &&
-                                    ack_len + response_len <= SIZE_MAX - 3) {
-                                    send_buf_ack = (char *)alloc->alloc(
-                                        alloc->ctx, ack_len + 2 + response_len + 1);
-                                }
+                                size_t joined_len = 0;
+                                send_buf_ack = hu_daemon_join_ack(alloc, ack, response,
+                                                                  response_len, &joined_len);
                                 if (send_buf_ack) {
-                                    memcpy(send_buf_ack, ack, ack_len);
-                                    send_buf_ack[ack_len] = '\n';
-                                    send_buf_ack[ack_len + 1] = '\n';
-                                    memcpy(send_buf_ack + ack_len + 2, response, response_len + 1);
                                     send_ptr = send_buf_ack;
-                                    send_len = ack_len + 2 + response_len;
+                                    send_len = joined_len;
                                 }
                             }
                         }
-                        /* SHIELD-004/005: Moderation + crisis escalation before send */
-                        {
-                            hu_moderation_result_t mod_r;
-                            memset(&mod_r, 0, sizeof(mod_r));
-                            if (hu_moderation_check(alloc, send_ptr, send_len, &mod_r) == HU_OK &&
-                                mod_r.flagged) {
-                                hu_log_warn("human", agent ? agent->observer : NULL,
-                                            "moderation flagged output (categories: %s%s%s%s), "
-                                            "blocking send",
-                                            mod_r.violence ? "violence " : "",
-                                            mod_r.hate ? "hate " : "",
-                                            mod_r.sexual ? "sexual " : "",
-                                            mod_r.self_harm ? "self-harm " : "");
-                                static const char mod_safe_reply[] =
-                                    "ugh brain fart — lemme rephrase that";
-                                if (send_buf_ack) {
-                                    alloc->free(alloc->ctx, send_buf_ack, send_len + 1);
-                                    send_buf_ack = NULL;
-                                }
-                                send_ptr = mod_safe_reply;
-                                send_len = sizeof(mod_safe_reply) - 1;
-                                if (mod_r.self_harm) {
-                                    char *crisis = NULL;
-                                    size_t crisis_len = 0;
-                                    if (hu_crisis_response_build(alloc, &crisis, &crisis_len) ==
-                                            HU_OK &&
-                                        crisis) {
-                                        size_t new_len = send_len + 2 + crisis_len;
-                                        char *merged =
-                                            (char *)alloc->alloc(alloc->ctx, new_len + 1);
-                                        if (merged) {
-                                            memcpy(merged, send_ptr, send_len);
-                                            merged[send_len] = '\n';
-                                            merged[send_len + 1] = '\n';
-                                            memcpy(merged + send_len + 2, crisis, crisis_len);
-                                            merged[new_len] = '\0';
-                                            send_buf_ack = merged;
-                                            send_ptr = send_buf_ack;
-                                            send_len = new_len;
-                                        }
-                                        alloc->free(alloc->ctx, crisis, crisis_len + 1);
-                                    }
-                                }
-                            }
-                        }
+                        /* SHIELD-004/005 screen + crisis floor (daemon/crisis.h). */
+                        size_t floor_len = 0;
+                        const char *crisis_floor =
+                            hu_self_harm_crisis_floor(crisis_tier, &floor_len);
+                        if (!hu_daemon_crisis_screen(alloc, crisis_tier, &send_ptr, &send_len,
+                                                     &send_buf_ack, agent ? agent->observer : NULL))
+#ifndef HU_IS_TEST
+                            goto skip_send;
+#else
+                            send_len = 0;
+#endif
                         /* SHIELD-001: Companion safety check before send */
                         {
                             hu_companion_safety_result_t cs_r;
@@ -8866,8 +8307,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                     alloc->free(alloc->ctx, send_buf_ack, send_len + 1);
                                     send_buf_ack = NULL;
                                 }
-                                send_ptr = cs_safe_reply;
-                                send_len = sizeof(cs_safe_reply) - 1;
+                                send_ptr = crisis_floor ? crisis_floor : cs_safe_reply;
+                                send_len = crisis_floor ? floor_len : sizeof(cs_safe_reply) - 1;
                             }
                         }
                         /* MEM-002: Memory claim verification gate + TRUST-006 updates */
@@ -8918,9 +8359,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                     if (have_ts && hu_trust_detect_erosion(&ts)) {
                                         hu_log_info("human", agent ? agent->observer : NULL,
                                                     "TRUST-006: trust eroded for "
-                                                    "%.*s (level=%.2f)",
-                                                    (int)(key_len > 20 ? 20 : key_len), batch_key,
-                                                    ts.trust_level);
+                                                    "%s (level=%.2f)",
+                                                    HU_LOG_WHO(batch_key, key_len), ts.trust_level);
                                     }
                                 }
                             }
@@ -8984,9 +8424,6 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                          * only REMOVES markup — never adds HTML/mrkdwn — so it is a
                          * strict cleanup for every channel and cannot regress email/slack.
                          * Falls back to send_ptr if the strip fails — never a regression. */
-                        /* Plaintext-ify ONCE before the choreo/fragment split so every bubble
-                         * path inherits clean text (was: only the whole-reply fallback ran the
-                         * chain). NULL result → keep send_ptr (no regression). */
                         char *split_clean = NULL;
                         size_t split_clean_len = 0;
                         const char *split_src = send_ptr;
@@ -8996,11 +8433,16 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                                   &split_clean_len)) {
                             split_src = split_clean;
                             split_src_len = split_clean_len;
-                        }
+                        } /* every bubble path sends split_src: WARN on a fragment ending */
+                        split_src_len = hu_reply_final_check(split_src, split_src_len,
+                                                             agent ? agent->observer : NULL);
 
                         /* F2: Choreography-driven message delivery */
                         hu_message_plan_t choreo_plan = {0};
                         bool delivered_recorded = false; /* one production_outcomes row per reply */
+                        uint64_t send_fails0 = hu_daemon_send_failure_total();
+                        int send_errs = 0; /* this reply's own send errors, every build */
+                        hu_reaction_type_t dir_rx = director_result.reaction; /* DEF-2 */
                         bool use_choreography = false;
                         if (agent && agent->frontiers.initialized) {
                             hu_choreography_config_t choreo_cfg = hu_choreography_config_default();
@@ -9025,8 +8467,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 #ifndef HU_IS_TEST
                                     if (choreo_plan.segments[seg].show_typing_indicator &&
                                         ch->channel->vtable->start_typing)
-                                        ch->channel->vtable->start_typing(ch->channel->ctx,
-                                                                          batch_key, key_len);
+                                        ch->channel->vtable->start_typing(
+                                            ch->channel->ctx, send_target, send_target_len);
                                     usleep((useconds_t)(dms * 1000));
 #endif
                                 }
@@ -9035,8 +8477,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                                 : NULL;
                                 size_t pv_cnt =
                                     (seg == 0 && all_send_media_cnt > 0) ? all_send_media_cnt : 0;
-                                /* F2b: Route through action-surface dispatcher for iMessage
-                                 * when enabled, else flat send */
+                                /* F2b: action-surface dispatcher for iMessage, else flat */
                                 const char *ch_name_choreo =
                                     ch->channel->vtable->name
                                         ? ch->channel->vtable->name(ch->channel->ctx)
@@ -9044,11 +8485,13 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 bool seg_text_sent = false;
                                 if (ch_name_choreo && strcmp(ch_name_choreo, "imessage") == 0 &&
                                     config && config->channels.imessage.action_surface_v2.enabled) {
-                                    (void)hu_daemon_dispatch_imessage_reply_msg_ex(
-                                        ch->channel, agent ? agent->persona : NULL, agent, config,
-                                        send_target, send_target_len, &msgs[batch_start],
-                                        choreo_plan.segments[seg].text,
-                                        choreo_plan.segments[seg].text_len, &seg_text_sent);
+                                    send_errs +=
+                                        hu_daemon_dispatch_imessage_reply_msg_ex(
+                                            ch->channel, agent ? agent->persona : NULL, agent,
+                                            config, send_target, send_target_len,
+                                            &msgs[batch_start], choreo_plan.segments[seg].text,
+                                            choreo_plan.segments[seg].text_len, &seg_text_sent,
+                                            dir_rx) != HU_OK;
                                 } else {
                                     seg_text_sent =
                                         ch->channel->vtable->send(
@@ -9056,6 +8499,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                             choreo_plan.segments[seg].text,
                                             choreo_plan.segments[seg].text_len, pv_ptr,
                                             pv_cnt) == HU_OK;
+                                    send_errs += !seg_text_sent;
                                 }
                                 if (seg_text_sent && !delivered_recorded) {
                                     delivered_recorded = true;
@@ -9151,8 +8595,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                 usleep((useconds_t)(dt_ms * 1000));
                                             }
                                             size_t dt_len = strlen(dt_chunks[dt]);
-                                            /* F2b: Route through action-surface dispatcher for
-                                             * iMessage when enabled, else flat send */
+                                            /* F2b: dispatcher for iMessage, else flat */
                                             const char *ch_name_f2b =
                                                 ch->channel->vtable->name
                                                     ? ch->channel->vtable->name(ch->channel->ctx)
@@ -9162,17 +8605,19 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                 strcmp(ch_name_f2b, "imessage") == 0 && config &&
                                                 config->channels.imessage.action_surface_v2
                                                     .enabled) {
-                                                (void)hu_daemon_dispatch_imessage_reply_msg_ex(
-                                                    ch->channel, agent ? agent->persona : NULL,
-                                                    agent, config, batch_key, key_len,
-                                                    &msgs[batch_start], dt_chunks[dt], dt_len,
-                                                    &dt_text_sent);
+                                                send_errs +=
+                                                    hu_daemon_dispatch_imessage_reply_msg_ex(
+                                                        ch->channel, agent ? agent->persona : NULL,
+                                                        agent, config, send_target, send_target_len,
+                                                        &msgs[batch_start], dt_chunks[dt], dt_len,
+                                                        &dt_text_sent, dir_rx) != HU_OK;
                                             } else {
                                                 dt_text_sent = ch->channel->vtable->send(
                                                                    ch->channel->ctx, batch_key,
                                                                    key_len, dt_chunks[dt], dt_len,
                                                                    (dt == 0) ? pv_ptr : NULL,
                                                                    (dt == 0) ? pv_cnt : 0) == HU_OK;
+                                                send_errs += !dt_text_sent;
                                             }
                                             if (dt_text_sent && !delivered_recorded) {
                                                 delivered_recorded = true;
@@ -9185,8 +8630,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 }
 #endif
                                 if (!did_double_text) {
-                                    /* F2b: Route through action-surface dispatcher for iMessage
-                                     * when enabled, else flat send */
+                                    /* F2b: action-surface dispatcher for iMessage, else flat */
                                     const char *ch_name_f2b =
                                         ch->channel->vtable->name
                                             ? ch->channel->vtable->name(ch->channel->ctx)
@@ -9195,17 +8639,19 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                     if (ch_name_f2b && strcmp(ch_name_f2b, "imessage") == 0 &&
                                         config &&
                                         config->channels.imessage.action_surface_v2.enabled) {
-                                        (void)hu_daemon_dispatch_imessage_reply_msg_ex(
-                                            ch->channel, agent ? agent->persona : NULL, agent,
-                                            config, batch_key, key_len, &msgs[batch_start],
-                                            fragments[f].text, fragments[f].text_len,
-                                            &frag_text_sent);
+                                        send_errs += hu_daemon_dispatch_imessage_reply_msg_ex(
+                                                         ch->channel, agent ? agent->persona : NULL,
+                                                         agent, config, send_target,
+                                                         send_target_len, &msgs[batch_start],
+                                                         fragments[f].text, fragments[f].text_len,
+                                                         &frag_text_sent, dir_rx) != HU_OK;
                                     } else {
                                         frag_text_sent =
                                             ch->channel->vtable->send(ch->channel->ctx, batch_key,
                                                                       key_len, fragments[f].text,
                                                                       fragments[f].text_len, pv_ptr,
                                                                       pv_cnt) == HU_OK;
+                                        send_errs += !frag_text_sent;
                                     }
                                     if (frag_text_sent && !delivered_recorded) {
                                         delivered_recorded = true;
@@ -9272,10 +8718,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 const char *const *pv_ptr =
                                     all_send_media_cnt > 0 ? all_send_media_ptr : NULL;
                                 size_t pv_cnt = all_send_media_cnt;
-                                /* F2c: Route through action-surface dispatcher for iMessage
-                                 * when enabled, else flat send. This is the reactive-reply
-                                 * path for short single-fragment messages with no choreography
-                                 * and no multi-fragment split. */
+                                /* F2c: one fragment: iMessage action surface, else flat. */
                                 const char *ch_name_f2c =
                                     ch->channel->vtable->name
                                         ? ch->channel->vtable->name(ch->channel->ctx)
@@ -9283,15 +8726,17 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 bool whole_text_sent = false;
                                 if (ch_name_f2c && strcmp(ch_name_f2c, "imessage") == 0 && config &&
                                     config->channels.imessage.action_surface_v2.enabled) {
-                                    (void)hu_daemon_dispatch_imessage_reply_msg_ex(
-                                        ch->channel, agent ? agent->persona : NULL, agent, config,
-                                        send_target, send_target_len, &msgs[batch_start], send_text,
-                                        send_text_len, &whole_text_sent);
+                                    send_errs += hu_daemon_dispatch_imessage_reply_msg_ex(
+                                                     ch->channel, agent ? agent->persona : NULL,
+                                                     agent, config, send_target, send_target_len,
+                                                     &msgs[batch_start], send_text, send_text_len,
+                                                     &whole_text_sent, dir_rx) != HU_OK;
                                 } else {
                                     whole_text_sent =
                                         ch->channel->vtable->send(
                                             ch->channel->ctx, send_target, send_target_len,
                                             send_text, send_text_len, pv_ptr, pv_cnt) == HU_OK;
+                                    send_errs += !whole_text_sent;
                                 }
                                 if (whole_text_sent && !delivered_recorded) {
                                     delivered_recorded = true;
@@ -9310,6 +8755,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 }
                             }
                         }
+                        if (hu_daemon_reply_lost(delivered_recorded, send_errs > 0, send_fails0,
+                                                 hu_daemon_send_failure_total()))
+                            (void)hu_daemon_note_reply_undelivered(agent->session_store, batch_key,
+                                                                   key_len);
                         if (split_clean)
                             alloc->free(alloc->ctx, split_clean, split_clean_len + 1);
                         /* Send correction after main message (2.5–5s delay) */
@@ -9425,9 +8874,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         }
 #endif
                         hu_log_info("human", agent ? agent->observer : NULL,
-                                    "turing: %d/10 [%s] for %.*s", tscore.overall,
+                                    "turing: %d/10 [%s] for %s", tscore.overall,
                                     hu_turing_verdict_name(tscore.verdict),
-                                    (int)(key_len > 20 ? 20 : key_len), batch_key);
+                                    HU_LOG_WHO(batch_key, key_len));
                         sqlite3 *ts_db = hu_sqlite_memory_get_db(agent->memory);
                         if (ts_db) {
                             (void)hu_turing_init_tables(ts_db);
@@ -9457,113 +8906,34 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 #endif
 
 #if !defined(HU_IS_TEST)
-                /* F9: Double-text — natural afterthought follow-up.
-                 * When llm_decides is active, use the fast classify provider. */
-                {
-                    const hu_provider_vtable_t *dt_vtable = (llm_decides && g_classify_provider_ok)
-                                                                ? g_classify_provider.vtable
-                                                                : agent->provider.vtable;
-                    void *dt_ctx = (llm_decides && g_classify_provider_ok) ? g_classify_provider.ctx
-                                                                           : agent->provider.ctx;
-                    /* One-emission-per-turn (2026-05-29 policy): suppress the
-                     * double-text afterthought when a reactive reply already
-                     * fired for this contact this turn — same FU-1 defer gate
-                     * the proactive paths use, so the reply doesn't pile into a
-                     * multi-bubble burst. */
-                    if (response && response_len > 0 && agent->persona &&
-                        ch->channel->vtable->send && dt_vtable && dt_vtable->chat_with_system &&
-                        !hu_daemon_proactive_should_defer(&agent->contact_send_recency, batch_key,
-                                                          key_len, (int64_t)time(NULL))) {
-                        float dt_prob = agent->persona->humanization.double_text_probability;
-                        uint32_t dt_seed = (uint32_t)time(NULL) * 1103515245u + 12345u +
-                                           (uint32_t)(uintptr_t)response;
-                        if (hu_conversation_should_double_text(response, response_len,
-                                                               history_entries, history_count,
-                                                               bth_hour, dt_seed, dt_prob)) {
-                            char dt_user[512];
-                            int dt_n = snprintf(
-                                dt_user, sizeof(dt_user),
-                                "You just sent this message: \"%.*s\"\n"
-                                "Add a brief, natural follow-up thought (1 short sentence max). "
-                                "Something you'd double-text a moment later.",
-                                (int)(response_len > 200 ? 200 : response_len), response);
-                            if (dt_n > 0 && (size_t)dt_n < sizeof(dt_user)) {
-                                char *dt_resp = NULL;
-                                size_t dt_resp_len = 0;
-                                size_t dt_fb_len = 0;
-                                const char *dt_fb = hu_daemon_fallback_model(config, &dt_fb_len);
-                                const char *dt_model =
-                                    (llm_decides && g_classify_provider_ok)
-                                        ? g_classify_model
-                                        : (agent->model_name ? agent->model_name : dt_fb);
-                                size_t dt_model_len =
-                                    (llm_decides && g_classify_provider_ok)
-                                        ? g_classify_model_len
-                                        : (agent->model_name ? agent->model_name_len : dt_fb_len);
-                                hu_error_t dt_err = dt_vtable->chat_with_system(
-                                    dt_ctx, alloc,
-                                    "You are texting as this person. Keep it casual, short, "
-                                    "lowercase. "
-                                    "No quotes, no explanation, just the follow-up text.",
-                                    93, dt_user, (size_t)dt_n, dt_model, dt_model_len, 0.9,
-                                    &dt_resp, &dt_resp_len);
-                                if (dt_err == HU_OK && dt_resp && dt_resp_len > 0 &&
-                                    dt_resp_len < 200) {
-                                    /* Post-process double-text through the same BTH pipeline */
-                                    hu_validator_chain_apply_default_in_place(
-                                        alloc, agent ? agent->observer : NULL, NULL, 0,
-                                        "double-text send", dt_resp, &dt_resp_len, dt_resp_len + 1);
-                                    if (dt_resp_len > 0) {
-                                        dt_resp_len = hu_conversation_vary_complexity(
-                                            dt_resp, dt_resp_len, dt_seed);
-                                        if (dt_resp_len > 1 && dt_resp[0] >= 'A' &&
-                                            dt_resp[0] <= 'Z' && dt_resp[1] >= 'a' &&
-                                            dt_resp[1] <= 'z' && dt_resp[0] != 'I') {
-                                            dt_resp[0] = (char)(dt_resp[0] + 32);
-                                        }
-                                        if (dt_resp_len > 1 && dt_resp[dt_resp_len - 1] == '.') {
-                                            dt_resp[dt_resp_len - 1] = '\0';
-                                            dt_resp_len--;
-                                        }
-                                        unsigned int dt_delay = 10000u + (dt_seed % 35000u);
-                                        usleep((useconds_t)(dt_delay * 1000u));
-                                        ch->channel->vtable->send(ch->channel->ctx, send_target,
-                                                                  send_target_len, dt_resp,
-                                                                  dt_resp_len, NULL, 0);
-                                        if (agent->bth_metrics)
-                                            agent->bth_metrics->double_texts++;
-                                    }
-                                }
-                                if (dt_resp)
-                                    alloc->free(alloc->ctx, dt_resp, dt_resp_len + 1);
-                            }
-                        }
-                    }
-                } /* end dt_vtable scope */
-
-                /* Self-reaction: occasionally haha/emphasize own message (~2%).
-                 * Skip for groups: get_latest_sent_rowid uses handle.id SQL. */
-                if (response && response_len > 0 && ch->channel->vtable->react &&
-                    !msgs[batch_start].is_group &&
-                    !hu_daemon_proactive_should_defer(&agent->contact_send_recency, batch_key,
-                                                      key_len, (int64_t)time(NULL))) {
-                    hu_reaction_type_t self_r = hu_conversation_classify_self_reaction(
-                        response, response_len, (uint32_t)time(NULL));
-                    if (self_r != HU_REACTION_NONE) {
-                        usleep(1500000 + ((uint32_t)time(NULL) % 3000000));
-#ifdef HU_HAS_IMESSAGE
-                        int64_t sent_id = hu_imessage_get_latest_sent_rowid(batch_key, key_len);
-#else
-                        int64_t sent_id = msgs[batch_end].message_id + 1;
-#endif
-                        if (sent_id > 0) {
-                            ch->channel->vtable->react(ch->channel->ctx, send_target,
-                                                       send_target_len, sent_id, self_r);
-                            hu_log_info("human", agent ? agent->observer : NULL,
-                                        "self-reaction on own message: %d", (int)self_r);
-                        }
-                    }
-                }
+                /* DEF-15: double-text afterthought, self-reaction and GIF, gated by
+                 * HU_SPONTANEITY (include/human/daemon/spontaneity.h). */
+                hu_spontaneity_turn_t spont = {.agent = agent,
+                                               .config = config,
+                                               .channel = ch->channel,
+                                               .alloc = alloc,
+                                               .contact = batch_key,
+                                               .contact_len = key_len,
+                                               .send_target = send_target,
+                                               .send_target_len = send_target_len,
+                                               .response = response,
+                                               .response_len = response ? response_len : 0,
+                                               .inbound = combined,
+                                               .inbound_len = combined_len,
+                                               .history = history_entries,
+                                               .history_count = history_count,
+                                               .hour_local = (uint8_t)bth_hour,
+                                               .is_group = msgs[batch_start].is_group,
+                                               .fallback_sent_id = msgs[batch_end].message_id + 1,
+                                               .classify = (llm_decides && g_classify_provider_ok)
+                                                               ? &g_classify_provider
+                                                               : NULL,
+                                               .classify_model = g_classify_model,
+                                               .classify_model_len = g_classify_model_len,
+                                               .chosen = HU_SPONT_NONE};
+                hu_daemon_spontaneity_choose(&spont);
+                hu_daemon_spontaneity_double_text(&spont);
+                hu_daemon_spontaneity_self_reaction(&spont);
 
                 /* GIF/music calibration: skip for group chats where batch_key
                  * is a chat identifier rather than a handle.id — SQL queries
@@ -9621,9 +8991,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 
                 /* GIF reaction: send a GIF when the moment calls for it */
                 bool gif_sent_this_turn = false;
+                uint64_t gif_now_ms = (uint64_t)time(NULL) * 1000ULL;
                 if (combined_len > 0 && ch->channel->vtable->send &&
-                    !hu_daemon_proactive_should_defer(&agent->contact_send_recency, batch_key,
-                                                      key_len, (int64_t)time(NULL))) {
+                    hu_daemon_spontaneity_gif_open(&spont, gif_now_ms)) {
                     float gif_prob = 0.10f;
                     const char *contact_rel = NULL;
                     size_t contact_rel_len = 0;
@@ -9651,13 +9021,12 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         gif_prob = 1.0f;
                     uint32_t gif_seed =
                         (uint32_t)time(NULL) * 2654435761u + (uint32_t)(uintptr_t)combined;
-                    uint64_t gif_now_ms = (uint64_t)time(NULL) * 1000ULL;
-                    if (hu_conversation_should_send_gif(combined, combined_len, history_entries,
-                                                        history_count, gif_seed, gif_prob) &&
-                        hu_conversation_gif_rate_allow(batch_key, key_len, gif_now_ms, 5, 600000)) {
-                        const char *tenor_key =
-                            config ? hu_config_get_provider_key(config, "tenor") : NULL;
-                        if (tenor_key && tenor_key[0]) {
+                    if ((selftest_on && selftest.form == HU_DIR_FORM_GIF) ||
+                        hu_daemon_spontaneity_gif_roll(&spont, gif_seed, gif_prob, gif_now_ms)) {
+                        /* Klipy (Tenor's v2 contract; Tenor shut down 2026-06-30). */
+                        const char *gif_key =
+                            config ? hu_config_get_provider_key(config, "klipy") : NULL;
+                        if (gif_key && gif_key[0]) {
                             char gif_style[128];
                             size_t gs_len = hu_conversation_build_gif_style_hint(
                                 contact_rel, contact_rel_len, gif_style, sizeof(gif_style));
@@ -9691,34 +9060,12 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                         &gif_query, &gif_query_len);
                                 }
                                 if (gif_query && gif_query_len > 0 && gif_query_len < 100) {
-                                    char *gif_path =
-                                        hu_imessage_fetch_gif(alloc, gif_query, gif_query_len,
-                                                              tenor_key, strlen(tenor_key));
-                                    if (gif_path) {
-                                        usleep(2000000 + (gif_seed % 3000000));
-                                        const char *media[] = {gif_path};
-                                        ch->channel->vtable->send(ch->channel->ctx, batch_key,
-                                                                  key_len, "", 0, media, 1);
-                                        (void)unlink(gif_path);
-                                        hu_conversation_gif_rate_record(batch_key, key_len,
-                                                                        gif_now_ms);
-                                        hu_conversation_gif_cal_record_send(
-                                            batch_key, key_len, gif_query, gif_query_len);
-                                        {
-                                            char cal_path[512];
-                                            int cp_n = hu_paths_state(cal_path, sizeof(cal_path),
-                                                                      "gif_calibration.json");
-                                            if (cp_n > 0 && (size_t)cp_n < sizeof(cal_path))
-                                                hu_conversation_gif_cal_save(cal_path,
-                                                                             (size_t)cp_n);
-                                        }
-                                        gif_sent_this_turn = true;
-                                        hu_log_info("human", agent ? agent->observer : NULL,
-                                                    "sent GIF: query=\"%.*s\"", (int)gif_query_len,
-                                                    gif_query);
-                                        size_t gp_path_len = strlen(gif_path);
-                                        alloc->free(alloc->ctx, gif_path, gp_path_len + 1);
-                                    }
+                                    char *gif_path = hu_imessage_fetch_gif(
+                                        alloc, gif_query, gif_query_len, gif_key, strlen(gif_key));
+                                    if (gif_path)
+                                        gif_sent_this_turn = hu_daemon_spontaneity_gif_send(
+                                            &spont, gif_path, gif_query, gif_query_len, gif_seed,
+                                            gif_now_ms);
                                 }
                                 if (gif_query)
                                     alloc->free(alloc->ctx, gif_query, gif_query_len + 1);
@@ -9760,19 +9107,34 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     }
                 }
 
+                const hu_director_result_t *share_dir =
+                    selftest_on && selftest.form == HU_DIR_FORM_SHARE
+                        ? &director_result
+                        : hu_expressive_share_gate(
+                              &director_result, director_result_valid,
+                              hu_gate_mode_from_env("HU_DIRECTOR_FORMS", HU_GATE_OFF) ==
+                                  HU_GATE_LIVE,
+                              combined, combined_len, msgs[batch_start].is_group, batch_key,
+                              key_len, (int64_t)time(NULL));
                 hu_daemon_rich_media_tick(alloc, agent, config, ch, batch_key, key_len, combined,
                                           combined_len, history_entries, history_count,
-                                          gif_sent_this_turn);
+                                          gif_sent_this_turn, share_dir);
+                if (share_dir && share_dir->share == HU_SHARE_SAVED) {
+                    char sq_path[512];
+                    if (share_queue_path(sq_path, sizeof(sq_path)) &&
+                        hu_share_send_saved(ch->channel, send_target, send_target_len, sq_path))
+                        hu_log_info("daemon", NULL, "sent a saved share");
+                }
 
                 /* Proactive image generation: occasionally create and send an image */
                 if (combined_len > 0 && ch->channel->vtable->send && !gif_sent_this_turn &&
                     agent->provider.vtable && agent->provider.vtable->chat_with_system) {
                     float img_prob = 0.02f;
                     float roll_img = (float)(rand() % 10000) / 10000.0f;
-                    if (roll_img < img_prob && getenv("OPENAI_API_KEY")) {
+                    if (roll_img < img_prob && hu_daemon_proactive_image_live()) { /* gated OFF */
                         static const char img_sys[] =
                             "Given the conversation, suggest a fun image to generate "
-                            "and share. Return ONLY a DALL-E prompt (under 200 chars) or SKIP.\n"
+                            "and share. Return ONLY an image prompt (under 200 chars) or SKIP.\n"
                             "Example: A cozy cat reading a tiny newspaper with coffee\n"
                             "Only suggest when the moment genuinely calls for a visual — "
                             "funny, sweet, or illustrative. Reply SKIP if it doesn't fit.";
@@ -9802,8 +9164,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                 "proactive image send failed: %d", (int)iserr);
                                 else
                                     hu_log_info("human", agent ? agent->observer : NULL,
-                                                "proactive image sent: %.*s", (int)img_suggest_len,
-                                                img_suggest);
+                                                "proactive image sent: %s",
+                                                HU_LOG_TEXT(img_suggest, img_suggest_len, 120));
                                 (void)unlink(img_path);
                             }
                         }
@@ -9817,10 +9179,14 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
             skip_send:
                 if (original_response)
                     alloc->free(alloc->ctx, original_response, original_len + 1);
+                if (unshaped) /* the pre-send abort jumps past its free */
+                    alloc->free(alloc->ctx, unshaped, unshaped_len + 1);
                 if (ch && ch->channel && ch->channel->vtable && ch->channel->vtable->stop_typing) {
-                    ch->channel->vtable->stop_typing(ch->channel->ctx, batch_key, key_len);
+                    ch->channel->vtable->stop_typing(ch->channel->ctx, send_target,
+                                                     send_target_len);
                 }
 #endif
+                (void)hu_post_send_defer_flush(); /* sent or aborted: run the deferred work */
                 if (response) {
                     /* Bump consecutive response counter for this contact */
                     hu_consec_limiter_note_reply(&consec_limiter, batch_key, key_len,
@@ -10060,6 +9426,17 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
             }
         }
 
+        /* Owner reminders (life-admin slice 1): deliver any that are due.
+         * Gated by HU_REMINDERS (off by default); paces itself to one pass
+         * per 20 s and logs once when it is not live. */
+        if (agent) {
+            hu_reminders_tick(agent, channels, channel_count, (int64_t)time(NULL));
+            /* Morning briefing (slice 2): HU_BRIEFING, off by default. */
+            hu_briefing_tick(agent, channels, channel_count, (int64_t)time(NULL));
+            /* Date drafts (slice 4): HU_DATE_NUDGES, off by default. */
+            hu_date_nudges_tick(agent, channels, channel_count, (int64_t)time(NULL));
+        }
+
         /* Sprint A.6 wire — periodic social tick: exercises the three
          * Tier-2 library-only scanners (gap / drift / signatures) and
          * snapshots their output to ~/.human/social_state.json. Default
@@ -10158,16 +9535,16 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         "Set initiative.target_handle=\"+1xxxxxxxxxx\" + dry_run=false to "
                         "enable LIVE delivery.");
                     hu_log_info("init_proposer", agent ? agent->observer : NULL,
-                                "init_proposer: would-have-sent (no target): %.*s",
-                                (int)init_decision.draft_len, init_decision.draft);
+                                "init_proposer: would-have-sent (no target): %s",
+                                HU_LOG_TEXT(init_decision.draft, init_decision.draft_len, 120));
                 } else if (!live_send) {
                     /* dry_run path — log the would-have-been-sent message
                      * at INFO so the operator can grep + tune before
                      * flipping dry_run=false. */
                     hu_log_info("init_proposer", agent ? agent->observer : NULL,
-                                "init_proposer: DRY-RUN would send to %s (confidence=%.2f): %.*s",
-                                target, init_decision.confidence, (int)init_decision.draft_len,
-                                init_decision.draft);
+                                "init_proposer: DRY-RUN would send to %s (confidence=%.2f): %s",
+                                HU_LOG_WHO_CSTR(target), init_decision.confidence,
+                                HU_LOG_TEXT(init_decision.draft, init_decision.draft_len, 120));
                 } else {
                     /* LIVE — find the iMessage channel and send. */
                     hu_error_t send_err = HU_ERR_NOT_FOUND;
@@ -10187,19 +9564,20 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     if (send_err == HU_OK) {
                         hu_log_info("init_proposer", agent ? agent->observer : NULL,
                                     "init_proposer: LIVE sent to %s "
-                                    "(confidence=%.2f, %zu bytes): %.*s",
-                                    target, init_decision.confidence, init_decision.draft_len,
-                                    (int)init_decision.draft_len, init_decision.draft);
+                                    "(confidence=%.2f, %zu bytes): %s",
+                                    HU_LOG_WHO_CSTR(target), init_decision.confidence,
+                                    init_decision.draft_len,
+                                    HU_LOG_TEXT(init_decision.draft, init_decision.draft_len, 120));
                     } else if (send_err == HU_ERR_NOT_FOUND) {
                         hu_log_warn("init_proposer", agent ? agent->observer : NULL,
                                     "init_proposer: iMessage channel not registered — "
                                     "FIRED dropped (would have sent to %s)",
-                                    target);
+                                    HU_LOG_WHO_CSTR(target));
                     } else {
                         hu_log_warn("init_proposer", agent ? agent->observer : NULL,
                                     "init_proposer: iMessage send failed for %s (err=%d) — "
                                     "draft dropped",
-                                    target, (int)send_err);
+                                    HU_LOG_WHO_CSTR(target), (int)send_err);
                     }
                 }
             }
@@ -10218,7 +9596,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
         hu_inner_thought_store_deinit(&inner_thought_store);
         inner_thought_store_ok = false;
     }
-
+    (void)hu_director_v2_shutdown(5000); /* no director-v2 shadow worker outlives the loop */
     hu_bus_unsubscribe(&daemon_outbound_bus, hu_daemon_outbound_bus_cb, &daemon_out_bus_bridge);
     hu_bus_deinit(&daemon_outbound_bus);
     hu_inbox_deinit(&inbox_watcher);
@@ -10233,9 +9611,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 #if defined(HU_ENABLE_RL_FULL)
     hu_reaction_handler_set_collector(NULL);
 #endif
-    /* Phase 1c teardown: detach the personal-model sinks. */
-    hu_reaction_handler_set_personal_model(NULL);
+    hu_reaction_handler_set_personal_model(NULL); /* Phase 1c teardown: detach the sinks. */
     hu_daemon_imessage_observer_wire_personal_model(NULL);
+    hu_daemon_confidence_owner_wire(NULL);
 #ifdef HU_ENABLE_SQLITE
     /* Sprint 60 follow-up teardown: clear the static crosstalk lookup
      * BEFORE the SQLite memory is closed so the callback never sees a

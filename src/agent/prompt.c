@@ -2,6 +2,7 @@
  * System prompt builder — identity, tools, memory, constraints.
  */
 #include "human/agent/prompt.h"
+#include "human/agent/length_policy.h"
 #include "human/agent/prompt_budget.h"
 #include "human/agent/prompt_trim.h"
 #include "human/core/gate_mode.h"
@@ -10,6 +11,7 @@
 #include "human/core/string.h"
 #include "human/data/loader.h"
 #include "human/persona.h"
+#include "human/persona/learned_style.h"
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -352,6 +354,10 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
     buf[0] = '\0';
 
     hu_error_t err;
+    /* Contact profile with the length sentences stripped (learned_style_live
+     * only); owned here so every `goto fail` releases it. */
+    char *ls_contact = NULL;
+    size_t ls_contact_cap = 0;
 
     /* Identity — use persona override or default */
     if (config->persona_prompt && config->persona_prompt_len > 0) {
@@ -511,6 +517,21 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
             }
         }
 
+        /* HU_LEARNED_STYLE=live rendered a learned line in the persona head
+         * this turn: the contact profile's hand-written length sentences
+         * ("usually 3-8 words") would contradict it, so they go too. */
+        const char *contact_text = config->contact_context;
+        size_t contact_text_len = config->contact_context_len;
+        if (config->learned_style_live && contact_text && contact_text_len > 0) {
+            ls_contact_cap = contact_text_len + 1;
+            ls_contact = (char *)alloc->alloc(alloc->ctx, ls_contact_cap);
+            if (ls_contact) {
+                (void)hu_learned_style_strip_contact(contact_text, contact_text_len, ls_contact,
+                                                     ls_contact_cap, &contact_text_len);
+                contact_text = ls_contact;
+            }
+        }
+
         /* Immersive middle sections, in prompt order. One row per section
          * collapses what were 12 copy-paste blocks (07-12 review): each row
          * appends optional header + text + optional trailer, records its
@@ -560,37 +581,60 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
                  HU_PROMPT_FIELD_CONTINUITY_CONTEXT, HU_TRIM_SLOT_CONTINUITY},
                 {hum_text, hum_text_len, k_hdr_humanness, sizeof(k_hdr_humanness) - 1, k_sep1, 1,
                  HU_PROMPT_FIELD_HUMANNESS_CONTEXT, HU_TRIM_SLOT_HUMANNESS},
-                {config->contact_context, config->contact_context_len, NULL, 0, NULL, 0,
-                 HU_PROMPT_FIELD_CONTACT_CONTEXT, -1},
+                {contact_text, contact_text_len, NULL, 0, NULL, 0, HU_PROMPT_FIELD_CONTACT_CONTEXT,
+                 -1},
                 {config->conversation_context, config->conversation_context_len, NULL, 0, NULL, 0,
                  HU_PROMPT_FIELD_CONVERSATION_CONTEXT, -1},
             };
-            for (size_t i = 0; i < sizeof(sections) / sizeof(sections[0]); i++) {
-                if (!sections[i].text || sections[i].text_len == 0)
-                    continue;
-                HU_PROMPT_TRACK_BEFORE();
-                size_t span_start = len;
-                if (sections[i].header_len > 0) {
-                    err =
-                        append(alloc, &buf, &len, &cap, sections[i].header, sections[i].header_len);
-                    if (err != HU_OK)
-                        goto fail;
-                }
-                err = append(alloc, &buf, &len, &cap, sections[i].text, sections[i].text_len);
-                if (err != HU_OK)
-                    goto fail;
-                if (sections[i].trailer_len > 0) {
-                    err = append(alloc, &buf, &len, &cap, sections[i].trailer,
-                                 sections[i].trailer_len);
-                    if (err != HU_OK)
-                        goto fail;
-                }
-                if (sections[i].span_slot >= 0) {
-                    spans[sections[i].span_slot].offset = span_start;
-                    spans[sections[i].span_slot].length = len - span_start;
-                }
-                HU_PROMPT_TRACK_AFTER(sections[i].field);
+            /* HU_PROMPT_CACHE_ORDER (default OFF; gated on the 2026-10-02 offline
+             * A/B, scripts/ab_agent_turns.py kind "cache"): the session context
+             * is the one section here that changes every message, so LIVE emits
+             * it after the stable sections and the server's prefix cache covers
+             * everything before it. SHADOW changes nothing (log only). */
+            const hu_gate_mode_t order_mode =
+                hu_gate_mode_from_env("HU_PROMPT_CACHE_ORDER", HU_GATE_OFF);
+            const bool stm_last = order_mode == HU_GATE_LIVE;
+            if (order_mode == HU_GATE_SHADOW && config->stm_context_len > 0) {
+                static atomic_bool s_cache_order_shadow = false;
+                hu_log_info_once(&s_cache_order_shadow, "prompt", NULL,
+                                 "HU_PROMPT_CACHE_ORDER shadow: would move the session context "
+                                 "after the stable sections");
             }
+            for (int pass = 0; pass < 2; pass++)
+                for (size_t i = 0; i < sizeof(sections) / sizeof(sections[0]); i++) {
+                    const bool deferred =
+                        stm_last && sections[i].field == HU_PROMPT_FIELD_STM_CONTEXT;
+                    if (deferred != (pass == 1))
+                        continue;
+                    if (!sections[i].text || sections[i].text_len == 0)
+                        continue;
+                    HU_PROMPT_TRACK_BEFORE();
+                    size_t span_start = len;
+                    if (sections[i].header_len > 0) {
+                        err = append(alloc, &buf, &len, &cap, sections[i].header,
+                                     sections[i].header_len);
+                        if (err != HU_OK)
+                            goto fail;
+                    }
+                    err = append(alloc, &buf, &len, &cap, sections[i].text, sections[i].text_len);
+                    if (err != HU_OK)
+                        goto fail;
+                    if (sections[i].trailer_len > 0) {
+                        err = append(alloc, &buf, &len, &cap, sections[i].trailer,
+                                     sections[i].trailer_len);
+                        if (err != HU_OK)
+                            goto fail;
+                    }
+                    if (sections[i].span_slot >= 0) {
+                        spans[sections[i].span_slot].offset = span_start;
+                        spans[sections[i].span_slot].length = len - span_start;
+                    }
+                    HU_PROMPT_TRACK_AFTER(sections[i].field);
+                }
+        }
+        if (ls_contact) {
+            alloc->free(alloc->ctx, ls_contact, ls_contact_cap);
+            ls_contact = NULL;
         }
         /* Everything appended from here to the early return is the guard
          * tail the positional cap must keep (hu_prompt_positional_cap_apply).
@@ -600,9 +644,17 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
         if (config->max_response_chars > 0) {
             char lbuf[192];
             int ln;
-            if (config->max_response_chars <= 80) {
+            /* LEGACY: "keep it tight" at <= 80. HU_LENGTH_POLICY LIVE: only for a
+             * short, casual inbound, else the bare limit (length_policy.h). */
+            bool tight = config->response_limit_tight == HU_LENGTH_TIGHT_LEGACY
+                             ? config->max_response_chars <= HU_LENGTH_POLICY_LEGACY_TIGHT_MAX
+                             : config->response_limit_tight == HU_LENGTH_TIGHT_YES;
+            if (tight) {
                 ln = snprintf(lbuf, sizeof(lbuf),
                               "\nRESPONSE LIMIT: Maximum %u characters. Keep it tight.\n",
+                              config->max_response_chars);
+            } else if (config->response_limit_tight == HU_LENGTH_TIGHT_NO) {
+                ln = snprintf(lbuf, sizeof(lbuf), "\nRESPONSE LIMIT: Maximum %u characters.\n",
                               config->max_response_chars);
             } else {
                 ln = snprintf(
@@ -1698,6 +1750,8 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
     return HU_OK;
 
 fail:
+    if (ls_contact)
+        alloc->free(alloc->ctx, ls_contact, ls_contact_cap);
     alloc->free(alloc->ctx, buf, cap);
     return err;
 }

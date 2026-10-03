@@ -191,7 +191,7 @@ static void dual_setup_ctx(hu_lora_retrain_ctx_t *ctx, dual_capture_t *cap,
     snprintf(today, sizeof(today), "2026-05-17");
     snprintf(kl_probe, sizeof(kl_probe), "tests/fixtures/kl_probe_200.jsonl");
     snprintf(old_pairs, sizeof(old_pairs), "tests/fixtures/old_pairs_holdout.jsonl");
-    snprintf(base_path, sizeof(base_path), "");
+    base_path[0] = '\0';
 
     ctx->slow_dir = slow_dir;
     ctx->quarantine_dir = q_dir;
@@ -350,7 +350,7 @@ static void test_quarantine_on_reject(void) {
 
     char current[256];
     snprintf(current, sizeof(current), "%s/current", root);
-    symlink(slow_v0, current);
+    HU_ASSERT_EQ(symlink(slow_v0, current), 0);
 
     dual_capture_t cap;
     memset(&cap, 0, sizeof(cap));
@@ -426,7 +426,7 @@ static void test_adapter_rollback_cli(void) {
     dual_touch_placeholder(v0);
     dual_touch_placeholder(v1);
     dual_touch_placeholder(v2);
-    symlink(v2, current);
+    HU_ASSERT_EQ(symlink(v2, current), 0);
 
     /* Invoke the CLI as if from argv. argc/argv mimic main()'s slice
      * after the "ml adapter-rollback" prefix is stripped (so argv[0]
@@ -460,7 +460,7 @@ static void test_adapter_rollback_cli(void) {
     mkdir(slow_dir, 0755);
     mkdir(q_dir, 0755);
     dual_touch_placeholder(v0);
-    symlink(v0, current);
+    HU_ASSERT_EQ(symlink(v0, current), 0);
     e = hu_ml_cli_adapter_rollback(NULL, argc, argv);
     HU_ASSERT_EQ(e, HU_ERR_TOOL_VALIDATION);
 

@@ -18,6 +18,7 @@
 #include "human/agent.h"
 #include "human/agent/persona_eval.h"
 #include "human/agent/reaction_handler.h"
+#include "human/agent/style_governor.h"
 #include "human/channel.h"
 #include "human/channel_loop.h"
 #include "human/channels/format.h"
@@ -28,17 +29,27 @@
 #include "human/channels/imessage_reply.h"
 #include "human/config.h"
 #include "human/context/conversation.h"
+#include "human/context/local_vision.h"
+#include "human/context/vision.h"
+#include "human/core/local_only_guard.h"
 #include "human/core/log.h"
+#include "human/core/log_redact.h"
 #include "human/core/paths.h"
 #include "human/core/time.h"
 #include "human/daemon.h"
+#include "human/daemon/hurt_handoff.h"
 #include "human/daemon/message_router.h"
+#include "human/daemon/prospective.h"
+#include "human/daemon/share_queue.h"
 #include "human/memory/agent_facts.h"
 #include "human/persona/pacing.h"
+#include "human/providers/factory.h"
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
 bool hu_daemon_plaintext_for_split_channel(void *ch_v, hu_allocator_t *alloc, const char *text,
                                            size_t len, char **out, size_t *out_len) {
@@ -57,8 +68,8 @@ void hu_daemon_log_send_effect(void *observer, const char *eff_ch, const char *t
 #ifndef HU_IS_TEST
     const char *eff = hu_conversation_classify_effect(text, len);
     if (eff)
-        hu_log_info("human", (hu_observer_t *)observer, "%s effect: %s (%.*s)", eff_ch, eff,
-                    (int)(len > 60 ? 60 : len), text);
+        hu_log_info("human", (hu_observer_t *)observer, "%s effect: %s (%s)", eff_ch, eff,
+                    HU_LOG_TEXT(text, len, 60));
 #else
     (void)observer;
     (void)eff_ch;
@@ -67,14 +78,50 @@ void hu_daemon_log_send_effect(void *observer, const char *eff_ch, const char *t
 #endif
 }
 
+/* The inbound message this daemon last reacted to. A reply split into
+ * bubbles is dispatched once per bubble, all answering the same message; the
+ * second bubble must not tap it again (live 2026-09-29 07:54). */
+static struct {
+    int64_t message_id;
+    int64_t at;
+} s_reacted;
+
+static bool reacted_to(int64_t message_id, int64_t now) {
+    return message_id > 0 && s_reacted.message_id == message_id && now - s_reacted.at < 600;
+}
+
+/* The emoji that carries a director-chosen reaction (the channel maps it back
+ * to the native tapback). */
+static const char *director_reaction_emoji(hu_reaction_type_t r) {
+    switch (r) {
+    case HU_REACTION_THUMBS_UP:
+        return "👍";
+    case HU_REACTION_THUMBS_DOWN:
+        return "👎";
+    case HU_REACTION_HAHA:
+        return "😂";
+    case HU_REACTION_EMPHASIS:
+        return "‼️";
+    case HU_REACTION_QUESTION:
+        return "❓";
+    default:
+        return "❤️";
+    }
+}
+
 /* Dispatcher: route iMessage reply through predicate (Phase A) to choose
- * between threaded / flat / tapback based on reply style facts. */
-hu_error_t hu_daemon_dispatch_imessage_reply_ex(
-    struct hu_channel *ch, const struct hu_persona *persona, const struct hu_agent *agent,
-    const struct hu_config *config, const char *target, size_t target_len,
-    const char *parent_msg_guid, size_t parent_guid_len, const char *body, size_t body_len,
-    const struct hu_conversation_snapshot *snapshot, int64_t inferred_message_id_for_react,
-    bool *out_text_sent) {
+ * between threaded / flat / tapback based on reply style facts. The predicate
+ * picks only the shape of the text (threaded or flat); whether a reaction
+ * rides along is the director's call (`director_reaction`, NONE = no
+ * reaction). The reply text always goes out. */
+static hu_error_t dispatch_reply_inner(struct hu_channel *ch, const struct hu_persona *persona,
+                                       const struct hu_agent *agent, const struct hu_config *config,
+                                       const char *target, size_t target_len,
+                                       const char *parent_msg_guid, size_t parent_guid_len,
+                                       const char *body, size_t body_len,
+                                       const struct hu_conversation_snapshot *snapshot,
+                                       int64_t inferred_message_id_for_react, bool *out_text_sent,
+                                       hu_reaction_type_t director_reaction) {
     if (out_text_sent)
         *out_text_sent = false;
     if (!ch || !ch->vtable || !target || !body) {
@@ -126,6 +173,10 @@ hu_error_t hu_daemon_dispatch_imessage_reply_ex(
                              tb_key, &tb_band);
         hu_reply_style_t demoted =
             hu_daemon_demote_stale_tapback_style(style, facts.seconds_since_parent, &tb_band);
+        if (director_reaction != HU_REACTION_NONE &&
+            hu_daemon_demote_stale_tapback_style(HU_REPLY_STYLE_TAPBACK, facts.seconds_since_parent,
+                                                 &tb_band) != HU_REPLY_STYLE_TAPBACK)
+            director_reaction = HU_REACTION_NONE; /* never a late reaction */
         if (demoted != style) {
             hu_log_info("human", agent ? agent->observer : NULL,
                         "reply-style tapback stale (parent %llds old > band cap) — demoted to "
@@ -135,9 +186,28 @@ hu_error_t hu_daemon_dispatch_imessage_reply_ex(
         }
     }
 
+    /* The text was decided upstream: never swallow it. The predicate picks only
+     * its shape (threaded or flat); a reaction rides along, before the text and
+     * in whatever shape it has, only when the director asked for one and this
+     * message has none yet (DEF-2). */
+    style = hu_imessage_reply_style_finalize(style);
+    bool add_reaction = director_reaction != HU_REACTION_NONE &&
+                        !reacted_to(inferred_message_id_for_react, (int64_t)time(NULL));
+
     /* Pacing (C5) — start. */
     uint64_t pace_start = 0;
     hu_persona_pace_reply_start(&pace_start);
+
+    if (add_reaction && ch->vtable->react_emoji) {
+        const char *emoji = director_reaction_emoji(director_reaction);
+        if (ch->vtable->react_emoji(ch->ctx, target, target_len, inferred_message_id_for_react,
+                                    emoji, strlen(emoji)) == HU_OK) {
+            s_reacted.message_id = inferred_message_id_for_react;
+            s_reacted.at = (int64_t)time(NULL);
+            hu_log_info("human", agent ? agent->observer : NULL,
+                        "imessage_dispatch: director reaction sent with the text");
+        }
+    }
 
     /* Dispatch by style. `actual_style` tracks what was ACTUALLY sent (which
      * can differ from the chosen `style` — e.g. a THREADED attempt that the AX
@@ -210,54 +280,16 @@ hu_error_t hu_daemon_dispatch_imessage_reply_ex(
         break;
     }
 
+    case HU_REPLY_STYLE_TAPBACK: /* finalize returns only THREADED or FLAT */
+    case HU_REPLY_STYLE_TAPBACK_PLUS_FLAT:
     case HU_REPLY_STYLE_FLAT:
+        actual_style = HU_REPLY_STYLE_FLAT;
         if (ch->vtable->send) {
             err = ch->vtable->send(ch->ctx, target, target_len, body, body_len, NULL, 0);
             if (err == HU_OK) {
                 tier_used = "flat";
                 hu_log_info("human", agent ? agent->observer : NULL,
                             "imessage_dispatch: flat send");
-            }
-        }
-        break;
-
-    case HU_REPLY_STYLE_TAPBACK:
-        if (ch->vtable->react_emoji) {
-            const char *emoji = "👍"; /* universal-positive default */
-            err = ch->vtable->react_emoji(ch->ctx, target, target_len,
-                                          inferred_message_id_for_react, emoji, strlen(emoji));
-            if (err == HU_OK) {
-                tier_used = "tapback";
-                hu_log_info("human", agent ? agent->observer : NULL,
-                            "imessage_dispatch: tapback emoji sent");
-            }
-        }
-        if (err != HU_OK || !ch->vtable->react_emoji) {
-            if (ch->vtable->send) {
-                err = ch->vtable->send(ch->ctx, target, target_len, body, body_len, NULL, 0);
-                if (err == HU_OK) {
-                    tier_used = "flat_fallback";
-                    actual_style = HU_REPLY_STYLE_FLAT;
-                    hu_log_info("human", agent ? agent->observer : NULL,
-                                "imessage_dispatch: tapback unavailable, flat fallback");
-                }
-            }
-        }
-        break;
-
-    case HU_REPLY_STYLE_TAPBACK_PLUS_FLAT:
-        /* Both: tapback first (best-effort), then text. */
-        if (ch->vtable->react_emoji) {
-            const char *emoji = "❤️"; /* heart for emotional acknowledgment */
-            (void)ch->vtable->react_emoji(ch->ctx, target, target_len,
-                                          inferred_message_id_for_react, emoji, strlen(emoji));
-        }
-        if (ch->vtable->send) {
-            err = ch->vtable->send(ch->ctx, target, target_len, body, body_len, NULL, 0);
-            if (err == HU_OK) {
-                tier_used = "tapback_plus_flat";
-                hu_log_info("human", agent ? agent->observer : NULL,
-                            "imessage_dispatch: tapback + flat");
             }
         }
         break;
@@ -543,15 +575,15 @@ hu_error_t hu_daemon_dispatch_imessage_reply(
     const struct hu_config *config, const char *target, size_t target_len,
     const char *parent_msg_guid, size_t parent_guid_len, const char *body, size_t body_len,
     const struct hu_conversation_snapshot *snapshot, int64_t inferred_message_id_for_react) {
-    return hu_daemon_dispatch_imessage_reply_ex(ch, persona, agent, config, target, target_len,
-                                                parent_msg_guid, parent_guid_len, body, body_len,
-                                                snapshot, inferred_message_id_for_react, NULL);
+    return hu_daemon_dispatch_imessage_reply_ex(
+        ch, persona, agent, config, target, target_len, parent_msg_guid, parent_guid_len, body,
+        body_len, snapshot, inferred_message_id_for_react, NULL, HU_REACTION_NONE);
 }
 
 hu_error_t hu_daemon_dispatch_imessage_reply_msg_ex(
     void *ch, const void *persona, const struct hu_agent *agent, const struct hu_config *config,
     const char *target, size_t target_len, const struct hu_channel_loop_msg *msg, const char *body,
-    size_t body_len, bool *out_text_sent) {
+    size_t body_len, bool *out_text_sent, hu_reaction_type_t director_reaction) {
     const hu_channel_loop_msg_t *m = (const hu_channel_loop_msg_t *)msg;
     if (out_text_sent)
         *out_text_sent = false;
@@ -565,8 +597,8 @@ hu_error_t hu_daemon_dispatch_imessage_reply_msg_ex(
     if (m && m->content[0] && body && body_len > 0 &&
         hu_conversation_reply_parrots_inbound(body, body_len, m->content, strlen(m->content))) {
         hu_log_warn("human", agent ? agent->observer : NULL,
-                    "parrot guard: dropped bubble echoing the inbound (%.*s…)",
-                    (int)(body_len > 40 ? 40 : body_len), body);
+                    "parrot guard: dropped bubble echoing the inbound (%s…)",
+                    HU_LOG_TEXT(body, body_len, 40));
         return HU_OK;
     }
 
@@ -576,7 +608,21 @@ hu_error_t hu_daemon_dispatch_imessage_reply_msg_ex(
         (struct hu_channel *)ch, (const struct hu_persona *)persona, agent, config, target,
         target_len, guid, guid ? strlen(guid) : 0, body, body_len,
         (const struct hu_conversation_snapshot *)&snap, m ? (int64_t)m->message_id : 0,
-        out_text_sent);
+        out_text_sent, director_reaction);
+}
+
+bool hu_daemon_reply_lost(bool delivered, bool any_send_err, uint64_t fails_before,
+                          uint64_t fails_after) {
+    return !delivered && (any_send_err || fails_after > fails_before);
+}
+
+hu_error_t hu_daemon_note_reply_undelivered(struct hu_session_store *store, const char *session,
+                                            size_t session_len) {
+    if (!store || !store->vtable || !store->vtable->save_message || !session || session_len == 0)
+        return HU_ERR_INVALID_ARGUMENT;
+    return store->vtable->save_message(store->ctx, session, session_len, "system", 6,
+                                       HU_DAEMON_UNDELIVERED_NOTE,
+                                       sizeof(HU_DAEMON_UNDELIVERED_NOTE) - 1);
 }
 
 /* ── production_outcomes: one row per DELIVERED reply ─────────────────────── */
@@ -585,12 +631,22 @@ hu_error_t hu_daemon_record_delivered_reply(struct hu_agent *agent, const char *
                                             const char *target, size_t target_len,
                                             const char *prompt, size_t prompt_len, const char *text,
                                             size_t text_len) {
+#ifdef HU_ENABLE_SQLITE
+    /* Prospective v2 settles surfaced reminders against the text as DELIVERED
+     * (spec 2026-09-30 §4.3). Runs before the collector checks: it depends on
+     * HU_PROSPECTIVE, not on SOTA. */
+    hu_daemon_prospective_delivered(agent, target, target_len, text, text_len);
+#endif
     if (!agent || !agent->sota.sota_initialized)
         return HU_OK; /* no collector (tests, SOTA off): nothing to record */
     if (!ch_name || !ch_name[0] || !target || target_len == 0 || !text || text_len == 0)
         return HU_OK;
     if (!prompt || prompt_len == 0)
         return HU_OK; /* the table's join needs a prompt; a media-only turn has none */
+    /* Self-test traffic is not training data: the owner's own handles (persona
+     * relationship "test") are never recorded (2026-09-30). */
+    if (hu_share_is_owner(agent->persona, target, target_len))
+        return HU_OK;
     /* Sprint 46 R5.3 — P(Seth) from the in-process PersonaEval classifier;
      * 0.5 when no model is loaded, stored as-is. */
     double p_seth = hu_persona_eval_score(agent->persona_eval, text, text_len);
@@ -603,4 +659,300 @@ hu_error_t hu_daemon_record_delivered_reply(struct hu_agent *agent, const char *
         hu_log_warn("daemon", agent->observer, "production_outcomes record_outbound failed: %s",
                     hu_error_string(err));
     return err;
+}
+
+size_t hu_daemon_burst_carry(hu_channel_loop_msg_t *msgs, size_t *count, size_t cap,
+                             const hu_channel_loop_msg_t *burst, size_t burst_count,
+                             const char *batch_key) {
+    if (!msgs || !count || !burst || !batch_key)
+        return 0;
+    size_t lost = 0;
+    for (size_t i = 0; i < burst_count; i++) {
+        if (strcmp(burst[i].session_key, batch_key) == 0 || !burst[i].content[0])
+            continue; /* the batch's own follow-up is merged by the caller */
+        if (*count < cap) {
+            msgs[(*count)++] = burst[i];
+            continue;
+        }
+        lost++;
+        hu_log_warn("human", NULL, "burst re-poll: no room to keep a message from %s — dropped",
+                    HU_LOG_WHO_CSTR(burst[i].session_key));
+    }
+    return lost;
+}
+
+bool hu_daemon_vision_route(const hu_config_t *cfg, const char *model, size_t model_len,
+                            const char **provider_out, const char **model_out) {
+    if (!cfg || !model || !provider_out || !model_out)
+        return false;
+    const hu_reliability_config_t *r = &cfg->reliability;
+    if (r->fallback_providers_len == 0 || !r->fallback_providers || !r->fallback_providers[0])
+        return false;
+    for (size_t i = 0; i < r->model_fallbacks_len; i++) {
+        const hu_config_model_fallback_t *mf = &r->model_fallbacks[i];
+        if (!mf->model || strlen(mf->model) != model_len || memcmp(mf->model, model, model_len))
+            continue;
+        if (mf->fallback_models_len == 0 || !mf->fallback_models[0])
+            return false;
+        *provider_out = r->fallback_providers[0];
+        *model_out = mf->fallback_models[0];
+        return true;
+    }
+    return false;
+}
+
+hu_error_t hu_daemon_describe_image(hu_allocator_t *alloc, hu_agent_t *agent,
+                                    const hu_config_t *cfg, const char *path, size_t path_len,
+                                    const char *model, size_t model_len, char **desc_out,
+                                    size_t *desc_len) {
+    if (!alloc || !agent)
+        return HU_ERR_INVALID_ARGUMENT;
+    /* local_only: no image bytes leave the process — the cloud is off-limits
+     * and the local server is text-only (422s). The caller substitutes a
+     * placeholder the model can react to. HU_LOCAL_VISION deliberately does
+     * NOT run here: the per-message path (hu_daemon_local_photo) describes
+     * each photo once, into the user turn. This step-6 latest-attachment call
+     * would re-describe it on every later turn, uncached, into system-side
+     * context (#617 review). */
+    if (hu_local_only_enforced())
+        return HU_ERR_NOT_SUPPORTED;
+    const char *vp = NULL, *vm = NULL;
+    if (hu_daemon_vision_route(cfg, model, model_len, &vp, &vm)) {
+        hu_provider_t prov = {0};
+        if (hu_provider_create_from_config(alloc, cfg, vp, strlen(vp), &prov) == HU_OK &&
+            prov.vtable) {
+            hu_error_t err = hu_vision_describe_image(alloc, &prov, path, path_len, vm, strlen(vm),
+                                                      desc_out, desc_len);
+            if (prov.vtable->deinit)
+                prov.vtable->deinit(prov.ctx, alloc);
+            return err;
+        }
+        hu_log_warn("human", agent->observer,
+                    "vision: could not create '%s' — describing via the agent's provider", vp);
+    }
+    return hu_vision_describe_image(alloc, &agent->provider, path, path_len, model, model_len,
+                                    desc_out, desc_len);
+}
+
+static const char k_obj_char[] = "\xEF\xBF\xBC"; /* U+FFFC, the attachment placeholder */
+
+/* text without any U+FFFC, trimmed of surrounding spaces/newlines, into buf.
+ * Returns the length, or (size_t)-1 when buf is too small. */
+static size_t strip_attachment_char(const char *text, size_t n, char *buf, size_t cap, bool *had) {
+    size_t o = 0;
+    *had = false;
+    for (size_t i = 0; i < n; i++) {
+        if (i + 3 <= n && memcmp(text + i, k_obj_char, 3) == 0) {
+            *had = true;
+            i += 2;
+            continue;
+        }
+        if (o + 1 >= cap)
+            return (size_t)-1;
+        buf[o++] = text[i];
+    }
+    while (o > 0 && (buf[o - 1] == ' ' || buf[o - 1] == '\n'))
+        o--;
+    size_t lead = 0;
+    while (lead < o && (buf[lead] == ' ' || buf[lead] == '\n'))
+        lead++;
+    memmove(buf, buf + lead, o - lead);
+    return o - lead;
+}
+
+/* buf[0..o) + (o ? "\n" : "") + note (NUL-terminated note of note_size). */
+static const char *append_note(const char *text, size_t *len, char *buf, size_t cap, size_t o,
+                               const char *note, size_t note_size) {
+    if (o + (o ? 1 : 0) + note_size > cap)
+        return text;
+    if (o)
+        buf[o++] = '\n';
+    memcpy(buf + o, note, note_size);
+    *len = o + note_size - 1;
+    return buf;
+}
+
+const char *hu_daemon_photo_placeholder(const char *text, size_t *len, char *buf, size_t cap) {
+    static const char note[] = "[They sent a photo]";
+    if (!text || !len || !buf || cap < sizeof(note) || text == buf)
+        return text;
+    size_t o = 0;
+    if (!(*len == 7 && memcmp(text, "[Photo]", 7) == 0)) { /* keep the caption */
+        bool had = false;
+        o = strip_attachment_char(text, *len, buf, cap, &had);
+        if (o == (size_t)-1)
+            return text;
+    }
+    return append_note(text, len, buf, cap, o, note, sizeof(note));
+}
+
+const char *hu_daemon_local_photo(const char *path, const char *text, size_t *len, char *buf,
+                                  size_t cap) {
+    hu_allocator_t a = hu_system_allocator();
+    char *desc = NULL;
+    size_t dl = 0;
+    if (!path || !text || !len || !buf || text == buf ||
+        hu_local_vision_describe(&a, path, strlen(path), &desc, &dl) != HU_OK || !desc)
+        return hu_daemon_photo_placeholder(text, len, buf, cap);
+    char note[1024];
+    int n = snprintf(note, sizeof(note), "[They sent a photo: %.*s]", (int)dl, desc);
+    a.free(a.ctx, desc, dl + 1);
+    size_t o = 0;
+    bool had = false;
+    if (!(*len == 7 && memcmp(text, "[Photo]", 7) == 0)) /* keep the caption */
+        o = strip_attachment_char(text, *len, buf, cap, &had);
+    if (n <= 0 || (size_t)n >= sizeof(note) || o == (size_t)-1)
+        return hu_daemon_photo_placeholder(text, len, buf, cap);
+    const char *r = append_note(text, len, buf, cap, o, note, (size_t)n + 1);
+    return r == text ? hu_daemon_photo_placeholder(text, len, buf, cap) : r;
+}
+
+bool hu_daemon_tool_traffic(const struct hu_persona *p, const char *key, size_t key_len,
+                            const char *text, size_t len, void *observer) {
+    if (!hu_share_is_tool_traffic(p, key, key_len, text, len))
+        return false;
+    hu_log_info("human", (hu_observer_t *)observer,
+                "rating-tool traffic on the owner's number: no reply, nothing learned");
+    return true;
+}
+
+bool hu_daemon_hurt_withheld(const struct hu_persona *p, const char *key, size_t key_len,
+                             const char *text, size_t len, bool is_group) {
+    if (is_group)
+        return false;
+    /* Hurt-signal hand-off: "u mad at me?", "why are you being short" is a
+     * repair moment the owner must answer himself. Runs before any LLM call,
+     * typing indicator or send; messages are already consumed upstream, so a
+     * skip is never replayed. HU_HURT_HANDOFF activation gated on a shadow
+     * fire-rate review (share of 1:1 batches, false positives read by the
+     * owner): do not flip to default-ON without that measurement. */
+    const hu_contact_profile_t *c = p ? hu_persona_find_contact(p, key, key_len) : NULL;
+    return hu_hurt_handoff_apply(hu_hurt_handoff_mode(), text, len, c ? c->name : NULL);
+}
+
+const char *hu_daemon_unseen_photo(const char *text, size_t *len, char *buf, size_t cap) {
+    static const char note[] =
+        "[They sent a picture that didn't load on your phone \xE2\x80\x94 you can't see it]";
+    if (!text || !len || !buf || cap == 0 || text == buf)
+        return text;
+    bool had = false;
+    size_t o = strip_attachment_char(text, *len, buf, cap, &had);
+    if (o == (size_t)-1 || !had)
+        return text;
+    return append_note(text, len, buf, cap, o, note, sizeof(note));
+}
+
+/* Every bubble is cased here, not only the reply's first line: shaping runs
+ * before the reply is split, so a bubble cut mid-line kept a lowercase start
+ * (32% of follow-on bubbles vs Seth's 9%, 2026-09-30). Governor rules apply
+ * (LIVE only, the card's lowercase share is kept). */
+/* One hold at a time: the service loop handles one batch at a time, and the
+ * next batch's hold replaces this one. */
+static struct {
+    char key[64];
+    int64_t until_ms;
+} s_reply_hold;
+static pthread_mutex_t s_reply_hold_mu = PTHREAD_MUTEX_INITIALIZER;
+
+void hu_daemon_reply_hold(const char *key, size_t key_len, int64_t until_ms) {
+    pthread_mutex_lock(&s_reply_hold_mu);
+    if (!key || key_len == 0 || key_len >= sizeof(s_reply_hold.key)) {
+        s_reply_hold.key[0] = '\0';
+        s_reply_hold.until_ms = 0;
+    } else {
+        memcpy(s_reply_hold.key, key, key_len);
+        s_reply_hold.key[key_len] = '\0';
+        s_reply_hold.until_ms = until_ms;
+    }
+    pthread_mutex_unlock(&s_reply_hold_mu);
+}
+
+void hu_daemon_reply_hold_for(const char *key, size_t key_len, uint32_t ms) {
+    hu_daemon_reply_hold(key, key_len, hu_time_get_current_ms() + (int64_t)ms);
+}
+
+int64_t hu_daemon_reply_hold_wait_ms(const char *key, size_t key_len, int64_t now_ms) {
+    int64_t wait = 0;
+    pthread_mutex_lock(&s_reply_hold_mu);
+    if (key && key_len > 0 && strlen(s_reply_hold.key) == key_len &&
+        memcmp(s_reply_hold.key, key, key_len) == 0 && s_reply_hold.until_ms > now_ms)
+        wait = s_reply_hold.until_ms - now_ms;
+    pthread_mutex_unlock(&s_reply_hold_mu);
+    return wait;
+}
+
+hu_error_t hu_daemon_dispatch_imessage_reply_ex(
+    struct hu_channel *ch, const struct hu_persona *persona, const struct hu_agent *agent,
+    const struct hu_config *config, const char *target, size_t target_len,
+    const char *parent_msg_guid, size_t parent_guid_len, const char *body, size_t body_len,
+    const struct hu_conversation_snapshot *snapshot, int64_t inferred_message_id_for_react,
+    bool *out_text_sent, hu_reaction_type_t director_reaction) {
+    int64_t hold_ms = hu_daemon_reply_hold_wait_ms(target, target_len, hu_time_get_current_ms());
+    if (hold_ms > 0) {
+#ifndef HU_IS_TEST
+        usleep((useconds_t)(hold_ms * 1000));
+#endif
+        hu_daemon_reply_hold(NULL, 0, 0); /* consumed: a burst's later bubbles go at once */
+    }
+    char cased[1024];
+    if (persona && body && body_len > 0 && body_len < sizeof(cased)) {
+        memcpy(cased, body, body_len);
+        cased[body_len] = '\0';
+        if (hu_style_governor_case_bubble(persona, cased, body_len))
+            body = cased;
+    }
+    return dispatch_reply_inner(ch, persona, agent, config, target, target_len, parent_msg_guid,
+                                parent_guid_len, body, body_len, snapshot,
+                                inferred_message_id_for_react, out_text_sent, director_reaction);
+}
+
+/* One draft at a time: the reply loop handles one contact's batch at a time. */
+static struct {
+    hu_allocator_t *alloc;
+    char *text;
+    size_t len;
+    char key[128];
+    size_t key_len;
+} s_quality_draft;
+
+static void quality_draft_drop(void) {
+    if (s_quality_draft.text && s_quality_draft.alloc)
+        s_quality_draft.alloc->free(s_quality_draft.alloc->ctx, s_quality_draft.text,
+                                    s_quality_draft.len + 1);
+    memset(&s_quality_draft, 0, sizeof(s_quality_draft));
+}
+
+void hu_daemon_quality_draft_keep(hu_allocator_t *alloc, const char *key, size_t key_len,
+                                  char *draft, size_t draft_len) {
+    quality_draft_drop();
+    if (!alloc || !draft)
+        return;
+    if (!key || key_len == 0 || key_len >= sizeof(s_quality_draft.key) || draft_len == 0) {
+        alloc->free(alloc->ctx, draft, draft_len + 1);
+        return;
+    }
+    s_quality_draft.alloc = alloc;
+    s_quality_draft.text = draft;
+    s_quality_draft.len = draft_len;
+    memcpy(s_quality_draft.key, key, key_len);
+    s_quality_draft.key_len = key_len;
+}
+
+bool hu_daemon_quality_draft_settle(hu_allocator_t *alloc, const char *key, size_t key_len,
+                                    char **response, size_t *response_len) {
+    if (!response || !response_len)
+        return false;
+    bool empty = !*response || *response_len == 0;
+    bool same = s_quality_draft.text && key && key_len == s_quality_draft.key_len &&
+                memcmp(key, s_quality_draft.key, key_len) == 0 && alloc == s_quality_draft.alloc;
+    if (empty && same) {
+        if (*response)
+            alloc->free(alloc->ctx, *response, *response_len + 1);
+        *response = s_quality_draft.text;
+        *response_len = s_quality_draft.len;
+        s_quality_draft.text = NULL; /* ownership moved to the caller */
+        hu_log_warn("human", NULL, "quality retry came back empty — sending the first draft");
+    }
+    quality_draft_drop();
+    return *response && *response_len > 0;
 }

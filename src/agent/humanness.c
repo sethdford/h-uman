@@ -136,8 +136,13 @@ hu_error_t hu_agent_build_turn_context(hu_agent_t *agent) {
         }
         char *vm_ctx = NULL;
         size_t vm_ctx_len = 0;
-        if (hu_voice_build_guidance(&agent->voice_profile, alloc, &vm_ctx, &vm_ctx_len) == HU_OK &&
-            vm_ctx && vm_ctx_len > 0) {
+        /* One profile serves every contact, so the known-relationship floor
+         * goes on a per-turn copy (never leaks to the next contact). */
+        hu_voice_profile_t vp = agent->voice_profile;
+        hu_voice_profile_apply_relationship(&vp, agent->persona, agent->memory_session_id,
+                                            agent->memory_session_id_len);
+        if (hu_voice_build_guidance(&vp, alloc, &vm_ctx, &vm_ctx_len) == HU_OK && vm_ctx &&
+            vm_ctx_len > 0) {
             (void)buf_append(alloc, &buf, &len, &cap, "\n", 1);
             (void)buf_append(alloc, &buf, &len, &cap, vm_ctx, vm_ctx_len);
             alloc->free(alloc->ctx, vm_ctx, vm_ctx_len + 1);

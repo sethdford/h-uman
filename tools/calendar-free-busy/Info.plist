@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>ai.human.calendar-free-busy</string>
+    <key>CFBundleName</key>
+    <string>hu-calendar-free-busy</string>
+    <key>NSCalendarsFullAccessUsageDescription</key>
+    <string>h-uman checks whether you are free before it agrees to a plan for you. It reads busy times only, never event titles or attendees.</string>
+    <key>NSCalendarsUsageDescription</key>
+    <string>h-uman checks whether you are free before it agrees to a plan for you. It reads busy times only, never event titles or attendees.</string>
+</dict>
+</plist>

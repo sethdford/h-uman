@@ -24,6 +24,7 @@
 
 #include "human/core/error.h"
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 /* Valid `decision` values. Storage is TEXT (for easy ad-hoc SQL from
@@ -35,6 +36,11 @@
 #define HU_PROACTIVE_DECISION_SEND    "send"
 #define HU_PROACTIVE_DECISION_DECLINE "decline"
 #define HU_PROACTIVE_DECISION_DEFER   "defer"
+
+/* Size of one recent-send reference. Outside the SQLite guard: the repeat
+ * check that consumes these (hu_init_proposer_repeats_recent) is built
+ * without SQLite too, and its tests failed to compile in the minimal build. */
+#define HU_PROACTIVE_REF_MAX 160
 
 #ifdef HU_ENABLE_SQLITE
 #include <sqlite3.h>
@@ -81,6 +87,31 @@ hu_error_t hu_proactive_decisions_repo_record(sqlite3 *db, int64_t ts, const cha
  * table has real rows). */
 hu_error_t hu_proactive_decisions_repo_count(sqlite3 *db, int64_t *out_count);
 
+/* The message_ref of each DELIVERED "proactive_send" row for `contact` with
+ * ts >= `since`, newest first, at most `cap` (each NUL-terminated,
+ * truncated to HU_PROACTIVE_REF_MAX - 1 bytes). For the repeat guard: never
+ * ask the same person the same thing twice in two weeks. */
+hu_error_t hu_proactive_decisions_repo_recent_sent_refs(sqlite3 *db, const char *contact,
+                                                        int64_t since,
+                                                        char out[][HU_PROACTIVE_REF_MAX],
+                                                        size_t cap, size_t *out_n);
+
+/* Timestamp of the newest row for (contact, trigger) that was actually sent
+ * (sent = 1), ignoring rows whose reason is `except_reason` (NULL ignores
+ * none); -1 when there is none.
+ * Voice-first spacing passes "self_test": an owner #voice self-test is not a
+ * memo anyone received and must not start the gap (bug 2026-10-01). */
+hu_error_t hu_proactive_decisions_repo_last_sent_ts_except(sqlite3 *db, const char *contact,
+                                                           const char *trigger,
+                                                           const char *except_reason,
+                                                           int64_t *out_ts);
+
+/* Rows for (contact, trigger, decision) with ts >= `since`. Voice triggers v2
+ * use it for the per-contact weekly cap. */
+hu_error_t hu_proactive_decisions_repo_count_since(sqlite3 *db, const char *contact,
+                                                   const char *trigger, const char *decision,
+                                                   int64_t since, int64_t *out_n);
+
 /* How many proactive sends to `contact` have FAILED TO DELIVER since that
  * contact last actually received one (0 if it never failed, or if the most
  * recent outcome was a delivery). The proactive circuit breaker gates on this.
@@ -113,6 +144,45 @@ hu_error_t hu_proactive_decisions_repo_consecutive_send_failures(sqlite3 *db, co
  * on every deploy. Fails CLOSED (returns false) on any read error: a breaker
  * that cannot read its own evidence must not silence a contact. */
 bool hu_proactive_send_circuit_is_open(sqlite3 *db, const char *contact, int64_t now);
+
+/* ── Unprompted-send ledger (DEF-6 / DEF-9, 2026-10-02) ─────────────────────
+ * Every unprompted send kind (proactive check-in, cron, read-no-reply bump,
+ * F25 emotional check-in, photo share) records a delivered row here, so the
+ * per-contact cap and the per-contact cool-off are derived from the log and
+ * survive restarts (the in-memory throttle reset ~43 times in 13 days). */
+
+/* The decision log's handle for a SQLite-backed memory (NULL otherwise), so
+ * domain code reaches the ledger through this repo, not the raw engine. */
+struct hu_legacy_memory;
+sqlite3 *hu_proactive_decisions_repo_db(struct hu_legacy_memory *mem);
+
+/* Creates unprompted_contact_state and seeds its epoch row ('*') with `now`
+ * if absent. Sends before the epoch never count as unanswered: nothing was
+ * recording replies then. Idempotent. */
+hu_error_t hu_proactive_decisions_repo_unprompted_state_ensure(sqlite3 *db, int64_t now);
+
+/* Contact `contact` wrote to us at `ts`: resets ONLY that contact's
+ * unanswered count (the global reset was DEF-6). */
+hu_error_t hu_proactive_decisions_repo_record_inbound(sqlite3 *db, const char *contact, int64_t ts);
+
+/* Delivered unprompted sends (any kind) to `contact` with ts >= since. */
+hu_error_t hu_proactive_decisions_repo_unprompted_sent_since(sqlite3 *db, const char *contact,
+                                                             int64_t since, int64_t *out_n);
+
+/* Delivered unprompted sends to `contact` since their last inbound (or the
+ * epoch), plus the newest such send's ts (0 when none). */
+hu_error_t hu_proactive_decisions_repo_unanswered(sqlite3 *db, const char *contact, int64_t now,
+                                                  int64_t *out_n, int64_t *out_last_send_ts);
+
+/* Trigger of the row the daemon writes when an outbound text failed on every
+ * channel path (src/daemon/daemon_send_failure.c). Distinct from
+ * 'proactive_send' so the circuit breaker's counts are unchanged. */
+#define HU_PROACTIVE_TRIGGER_OUTBOUND_SEND "outbound_send"
+
+/* Newest final send failure to `contact` (trigger outbound_send, reason
+ * send_failed). *have is false when there is none. */
+hu_error_t hu_proactive_decisions_repo_last_send_failure_ts(sqlite3 *db, const char *contact,
+                                                            int64_t *out_ts, bool *have);
 
 #ifdef __cplusplus
 }

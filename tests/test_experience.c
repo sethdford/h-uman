@@ -1,9 +1,9 @@
-#include "test_framework.h"
 #include "human/experience.h"
 #include "human/memory/vector.h"
+#include "test_framework.h"
 #ifdef HU_ENABLE_SQLITE
-#include "human/memory.h"
 #include "human/intelligence/distiller.h"
+#include "human/memory.h"
 #include <sqlite3.h>
 #endif
 #include <string.h>
@@ -22,9 +22,12 @@ static void test_experience_record(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_experience_store_t store;
     HU_ASSERT_EQ(hu_experience_store_init(&alloc, NULL, &store), HU_OK);
-    HU_ASSERT_EQ(hu_experience_record(&store, "send email", 10, "used gmail", 10, "delivered", 9, 0.95), HU_OK);
+    HU_ASSERT_EQ(
+        hu_experience_record(&store, "send email", 10, "used gmail", 10, "delivered", 9, 0.95),
+        HU_OK);
     HU_ASSERT_EQ(store.stored_count, (size_t)1);
-    HU_ASSERT_EQ(hu_experience_record(&store, "schedule", 8, "opened cal", 10, "created", 7, 0.88), HU_OK);
+    HU_ASSERT_EQ(hu_experience_record(&store, "schedule", 8, "opened cal", 10, "created", 7, 0.88),
+                 HU_OK);
     HU_ASSERT_EQ(store.stored_count, (size_t)2);
     hu_experience_store_deinit(&store);
 }
@@ -33,7 +36,8 @@ static void test_experience_recall(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_experience_store_t store;
     hu_experience_store_init(&alloc, NULL, &store);
-    char *ctx = NULL; size_t ctx_len = 0;
+    char *ctx = NULL;
+    size_t ctx_len = 0;
     HU_ASSERT_EQ(hu_experience_recall_similar(&store, "task", 4, &ctx, &ctx_len), HU_OK);
     HU_ASSERT(ctx == NULL);
     hu_experience_record(&store, "task", 4, "action", 6, "result", 6, 0.9);
@@ -74,9 +78,9 @@ static void test_experience_memory_store_recall(void) {
     HU_ASSERT_NOT_NULL(mem.ctx);
     hu_experience_store_t store;
     HU_ASSERT_EQ(hu_experience_store_init(&alloc, &mem, &store), HU_OK);
-    HU_ASSERT_EQ(hu_experience_record(&store, "send email", 10, "used gmail", 10, "delivered", 9,
-                                      0.95),
-                 HU_OK);
+    HU_ASSERT_EQ(
+        hu_experience_record(&store, "send email", 10, "used gmail", 10, "delivered", 9, 0.95),
+        HU_OK);
     HU_ASSERT_EQ(store.stored_count, (size_t)1);
     char *ctx = NULL;
     size_t ctx_len = 0;
@@ -88,6 +92,34 @@ static void test_experience_memory_store_recall(void) {
     hu_experience_store_deinit(&store);
     mem.vtable->deinit(mem.ctx);
 }
+
+/* 2026-10-02: the research agent recorded its whole 7,680-char task prompt
+ * (persona, beats, raw Twitter feed) as one "experience:" row, and recall put
+ * it into personal iMessage replies. The in-memory path always capped each
+ * field at HU_EXP_TEXT_MAX; the persisted path did not. */
+static void test_experience_persisted_fields_are_capped(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.ctx);
+    hu_experience_store_t store;
+    HU_ASSERT_EQ(hu_experience_store_init(&alloc, &mem, &store), HU_OK);
+    static char task[8000];
+    memset(task, 'x', sizeof(task));
+    memcpy(task, "You are the h-uman Research Agent", 33);
+    HU_ASSERT_EQ(hu_experience_record(&store, task, sizeof(task), "read feed", 9, "done", 4, 0.5),
+                 HU_OK);
+    hu_memory_entry_t e;
+    memset(&e, 0, sizeof(e));
+    bool found = false;
+    const char key[] = "experience:You are the h-um";
+    HU_ASSERT_EQ(mem.vtable->get(mem.ctx, &alloc, key, strlen(key), &e, &found), HU_OK);
+    HU_ASSERT_TRUE(found);
+    HU_ASSERT_TRUE(e.content_len <= 3 * 512 + 64);
+    HU_ASSERT_NOT_NULL(strstr(e.content, "Outcome: done")); /* the tail survives the cap */
+    hu_memory_entry_free_fields(&alloc, &e);
+    hu_experience_store_deinit(&store);
+    mem.vtable->deinit(mem.ctx);
+}
 #endif
 
 static void test_experience_record_recall_verifies_content(void) {
@@ -95,12 +127,9 @@ static void test_experience_record_recall_verifies_content(void) {
     hu_experience_store_t store;
     hu_experience_store_init(&alloc, NULL, &store);
 
-    hu_experience_record(&store, "debug segfault", 14,
-                         "used gdb backtrace", 18,
+    hu_experience_record(&store, "debug segfault", 14, "used gdb backtrace", 18,
                          "found null pointer", 18, 0.95);
-    hu_experience_record(&store, "optimize query", 14,
-                         "added index", 11,
-                         "50x speedup", 11, 0.99);
+    hu_experience_record(&store, "optimize query", 14, "added index", 11, "50x speedup", 11, 0.99);
 
     char *ctx = NULL;
     size_t ctx_len = 0;
@@ -113,7 +142,8 @@ static void test_experience_record_recall_verifies_content(void) {
 
     ctx = NULL;
     ctx_len = 0;
-    HU_ASSERT_EQ(hu_experience_recall_similar(&store, "optimize database", 17, &ctx, &ctx_len), HU_OK);
+    HU_ASSERT_EQ(hu_experience_recall_similar(&store, "optimize database", 17, &ctx, &ctx_len),
+                 HU_OK);
     HU_ASSERT_NOT_NULL(ctx);
     HU_ASSERT_TRUE(ctx_len > 0);
     HU_ASSERT_TRUE(strstr(ctx, "optimize") != NULL || strstr(ctx, "index") != NULL ||
@@ -149,16 +179,17 @@ static void test_experience_semantic_record_recall(void) {
     HU_ASSERT_NOT_NULL(store.embedder);
     HU_ASSERT_NOT_NULL(store.vec_store);
 
-    hu_experience_record(&store, "deploy kubernetes pods", 22,
-                         "kubectl apply", 13, "pods running", 12, 0.95);
-    hu_experience_record(&store, "debug memory leak", 17,
-                         "used valgrind", 13, "found leak", 10, 0.9);
-    hu_experience_record(&store, "optimize database queries", 25,
-                         "added indexes", 13, "faster queries", 14, 0.88);
+    hu_experience_record(&store, "deploy kubernetes pods", 22, "kubectl apply", 13, "pods running",
+                         12, 0.95);
+    hu_experience_record(&store, "debug memory leak", 17, "used valgrind", 13, "found leak", 10,
+                         0.9);
+    hu_experience_record(&store, "optimize database queries", 25, "added indexes", 13,
+                         "faster queries", 14, 0.88);
 
     char *ctx = NULL;
     size_t ctx_len = 0;
-    HU_ASSERT_EQ(hu_experience_recall_similar(&store, "kubernetes deployment", 20, &ctx, &ctx_len), HU_OK);
+    HU_ASSERT_EQ(hu_experience_recall_similar(&store, "kubernetes deployment", 20, &ctx, &ctx_len),
+                 HU_OK);
     HU_ASSERT_NOT_NULL(ctx);
     HU_ASSERT_TRUE(ctx_len > 0);
     alloc.free(alloc.ctx, ctx, ctx_len + 1);
@@ -230,6 +261,7 @@ void run_experience_tests(void) {
     HU_RUN_TEST(test_experience_semantic_deinit_cleanup);
 #ifdef HU_ENABLE_SQLITE
     HU_RUN_TEST(test_experience_memory_store_recall);
+    HU_RUN_TEST(test_experience_persisted_fields_are_capped);
     HU_RUN_TEST(test_experience_explog_persistence);
 #endif
 }

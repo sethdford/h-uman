@@ -18,9 +18,11 @@ npx tsx build.ts --outdir "$TMPDIR" 2>/dev/null || {
 
 # Format generated CSS to match committed (prettier) version
 # Use ui/.prettierrc so output matches postbuild formatting
-if [ -f "$TMPDIR/_tokens.css" ] && [ -f "$REPO_ROOT/ui/.prettierrc" ]; then
-  npx -y prettier --write --config "$REPO_ROOT/ui/.prettierrc" "$TMPDIR/_tokens.css" 2>/dev/null || true
-fi
+for css in _tokens.css _quiet.css; do
+  if [ -f "$TMPDIR/$css" ] && [ -f "$REPO_ROOT/ui/.prettierrc" ]; then
+    npx -y prettier --write --config "$REPO_ROOT/ui/.prettierrc" "$TMPDIR/$css" 2>/dev/null || true
+  fi
+done
 
 DRIFT=0
 
@@ -36,6 +38,15 @@ if ! diff -q "$TMPDIR/_tokens.css" "$REPO_ROOT/website/src/styles/_tokens.css" >
   echo "DRIFT: website/src/styles/_tokens.css differs from generated output"
   DRIFT=1
 fi
+
+# Check the Quiet Room layer (ui + website)
+for dest in ui/src/styles/_quiet.css website/src/styles/_quiet.css; do
+  if ! diff -q "$TMPDIR/_quiet.css" "$REPO_ROOT/$dest" >/dev/null 2>&1; then
+    echo "DRIFT: $dest differs from generated output"
+    diff "$TMPDIR/_quiet.css" "$REPO_ROOT/$dest" || true
+    DRIFT=1
+  fi
+done
 
 # Check C header output (compare raw build.ts output — no clang-format, since
 # version differences between CI and local create false drift positives)
@@ -84,9 +95,33 @@ if [ -f "$TMPDIR/design-tokens-reference.json" ] && [ -f "$REPO_ROOT/docs/design
   fi
 fi
 
+# Check the two docs generators that build.ts does not run. A missing output is
+# drift, not a skip: a generator that silently wrote nothing must not pass.
+npx tsx generate-docs.ts --outdir "$TMPDIR" >/dev/null 2>&1 || {
+  echo "Error: generate-docs.ts failed"
+  exit 1
+}
+npx tsx sync-tokens-studio.ts --outdir "$TMPDIR" >/dev/null 2>&1 || {
+  echo "Error: sync-tokens-studio.ts failed"
+  exit 1
+}
+
+# Ignore the "_Generated: <timestamp>" footer, which changes on every run.
+if ! diff -I '^_Generated: ' "$TMPDIR/design-tokens.md" "$REPO_ROOT/docs/design-tokens.md" >/dev/null 2>&1; then
+  echo "DRIFT: docs/design-tokens.md differs from generated output (npm run docs)"
+  diff -I '^_Generated: ' "$TMPDIR/design-tokens.md" "$REPO_ROOT/docs/design-tokens.md" || true
+  DRIFT=1
+fi
+
+if ! diff -q "$TMPDIR/tokens-studio.json" "$REPO_ROOT/docs/tokens-studio.json" >/dev/null 2>&1; then
+  echo "DRIFT: docs/tokens-studio.json differs from generated output (npm run sync:tokens-studio)"
+  diff "$TMPDIR/tokens-studio.json" "$REPO_ROOT/docs/tokens-studio.json" | head -40 || true
+  DRIFT=1
+fi
+
 if [ "$DRIFT" -eq 1 ]; then
   echo ""
-  echo "Token drift detected! Run 'cd design-tokens && npm run build' to regenerate."
+  echo "Token drift detected! Run 'cd design-tokens && npm run build && npm run docs && npm run sync:tokens-studio' to regenerate."
   exit 1
 else
   echo "No token drift detected."

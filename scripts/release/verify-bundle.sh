@@ -10,7 +10,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 # Default app paths
-APP_PATH="${1:-build/Human.app}"
+# Accept the documented `--app-path <path>` and a bare positional path (the
+# form CMakeLists.txt's verify target passes). Treating "--app-path" itself as
+# the path silently fell back to /Applications/Human.app.
+if [[ "${1:-}" == "--app-path" ]]; then
+    APP_PATH="${2:?--app-path needs a value}"
+else
+    APP_PATH="${1:-build/Human.app}"
+fi
 if [[ ! -d "$APP_PATH" ]]; then
     # Try /Applications as fallback
     APP_PATH="/Applications/Human.app"

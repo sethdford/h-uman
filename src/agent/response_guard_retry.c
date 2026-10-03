@@ -1,11 +1,14 @@
 #include "human/agent/response_guard_retry.h"
 #include "human/agent/tool_call_parser.h"
 #include "human/config.h"
+#include "human/core/llm_purpose.h"
+#include "human/core/local_only_guard.h"
 #include "human/core/log.h"
 #include "human/core/string.h"
 #include "human/providers/factory.h"
 
 #include <string.h>
+#include <strings.h>
 
 #define HU_GUARD_RETRY_USER_MAX    4096
 #define HU_GUARD_RETRY_MODEL_CLOUD "gemini-3.1-flash-lite"
@@ -102,7 +105,11 @@ static hu_error_t dispatch_slim_chat(hu_allocator_t *alloc, hu_observer_t *obs, 
     req.messages = msgs;
     req.messages_count = 2;
     req.temperature = 0.2;
-    req.max_tokens = 128;
+    /* Headroom, not a length target (the prompt sets the length): Gemini 3.x
+     * thinks even at thinkingBudget 0 (87-128 thought tokens measured
+     * 2026-09-30) and the thoughts share this cap. At 128, 1 of 3 probes
+     * stopped mid-sentence; at 512, 0 of 3. */
+    req.max_tokens = 512;
     req.model = model;
     req.model_len = model_len;
     req.reasoning_effort = NULL;
@@ -112,7 +119,9 @@ static hu_error_t dispatch_slim_chat(hu_allocator_t *alloc, hu_observer_t *obs, 
 
     hu_chat_response_t resp;
     memset(&resp, 0, sizeof(resp));
+    hu_llm_purpose_t prev_purpose = hu_llm_purpose_set(HU_LLM_PURPOSE_GUARD_RETRY);
     hu_error_t err = prov->vtable->chat(prov->ctx, alloc, &req, model, model_len, 0.2, &resp);
+    (void)hu_llm_purpose_set(prev_purpose);
     /* Free the built system prompt now that the chat call has copied/consumed it. */
     if (built_instruction) {
         size_t free_cap = identity_anchor_len + 2 + sizeof(repair_instruction_base);
@@ -125,6 +134,17 @@ static hu_error_t dispatch_slim_chat(hu_allocator_t *alloc, hu_observer_t *obs, 
                         hu_error_string(err));
         hu_chat_response_free(alloc, &resp);
         return err;
+    }
+    /* A reply the cap cut off is a fragment ("Wait, did we actually lock"
+     * reached a chat, 2026-09-30): fail, so the caller tries the next provider. */
+    if (resp.finish_reason && (strcasecmp(resp.finish_reason, "MAX_TOKENS") == 0 ||
+                               strcasecmp(resp.finish_reason, "length") == 0)) {
+        if (obs)
+            hu_log_warn("response_guard_retry", obs,
+                        "slim retry cut off by its token cap (finish=%s) — not sending it",
+                        resp.finish_reason);
+        hu_chat_response_free(alloc, &resp);
+        return HU_ERR_PROVIDER_RESPONSE;
     }
 
     char *guard_out = NULL;
@@ -157,6 +177,11 @@ static hu_error_t dispatch_slim_chat(hu_allocator_t *alloc, hu_observer_t *obs, 
     return response_guard_retry_strip_text_tool_calls(alloc, out, out_len);
 }
 
+/* local_only LIVE: the retry stays on the primary; no cloud fallback. */
+bool hu_response_guard_retry_cloud_fallback_allowed(const hu_config_t *cfg) {
+    return cfg != NULL && !hu_local_only_enforced();
+}
+
 hu_error_t hu_response_guard_retry_slim_with_identity(
     hu_allocator_t *alloc, hu_observer_t *obs, const hu_config_t *cfg, hu_provider_t *primary,
     const char *model, size_t model_len, const char *user_msg, size_t user_msg_len,
@@ -176,7 +201,7 @@ hu_error_t hu_response_guard_retry_slim_with_identity(
 #ifndef HU_ENABLE_CURL
     (void)cfg;
 #else
-    if (!cfg)
+    if (!hu_response_guard_retry_cloud_fallback_allowed(cfg))
         return err;
 
     static const struct {

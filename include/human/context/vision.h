@@ -4,15 +4,23 @@
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/provider.h"
+#include <stdbool.h>
 #include <stddef.h>
 
+/* True when an image of `file_bytes`, base64-encoded in a request, would not
+ * fit under `body_cap` (hu_http_max_provider_body_bytes). Such an image is
+ * downscaled to a JPEG before reading, on macOS via sips; iPhone screenshots
+ * (4-6 MB PNG) were all refused before this (2026-09-30). */
+bool hu_vision_needs_downscale(size_t file_bytes, size_t body_cap);
+
 /* Read an image file and encode it as base64 for the provider.
- * Supports JPEG, PNG, GIF, WEBP.
+ * Supports JPEG, PNG, GIF, WEBP, HEIC/HEIF; one too large for a request is
+ * first downscaled (see hu_vision_needs_downscale).
  * Returns the base64-encoded data and the media type string.
  * Caller owns both returned strings. */
 hu_error_t hu_vision_read_image(hu_allocator_t *alloc, const char *path, size_t path_len,
-                                char **base64_out, size_t *base64_len,
-                                char **media_type_out, size_t *media_type_len);
+                                char **base64_out, size_t *base64_len, char **media_type_out,
+                                size_t *media_type_len);
 
 /* Build a vision request to describe an image.
  * Creates a chat message with the image as a content part and a text prompt
@@ -20,8 +28,8 @@ hu_error_t hu_vision_read_image(hu_allocator_t *alloc, const char *path, size_t 
  * Caller owns the returned description string. */
 hu_error_t hu_vision_describe_image(hu_allocator_t *alloc, hu_provider_t *provider,
                                     const char *image_path, size_t image_path_len,
-                                    const char *model, size_t model_len,
-                                    char **description_out, size_t *description_len);
+                                    const char *model, size_t model_len, char **description_out,
+                                    size_t *description_len);
 
 /* Build context for the prompt when an image description is available.
  * Returns a context string like:

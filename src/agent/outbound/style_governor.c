@@ -21,7 +21,9 @@
 #include "human/persona/style_card.h"
 
 #include <math.h>
+#include <pthread.h>
 #include <stdatomic.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -100,6 +102,62 @@ void hu_style_governor_reset_casing_for_test(void) {
 }
 #endif
 
+/* ── Action D: card-derived entity casing table (cached) ──────────────── */
+
+/* pthread_once rather than an atomic int: unlike the scalar percentages
+ * above, two threads racing to fill a 64-entry table is not a benign race. */
+static pthread_once_t s_entity_once = PTHREAD_ONCE_INIT;
+static hu_style_entity_token_t s_entity_tab[HU_STYLE_CARD_MAX_ENTITY_TOKENS];
+static unsigned s_entity_count = 0;
+static const struct hu_persona *s_entity_persona = NULL; /* read by the init fn */
+
+static void entity_table_init_once(void) {
+    const char *env = getenv("HU_STYLE_GOVERNOR_ENTITY_CASING");
+    if (!(env && env[0] && strcmp(env, "live") == 0))
+        return; /* OFF by default — action D stays inert */
+    hu_style_card_t card;
+    hu_style_card_resolve(s_entity_persona ? s_entity_persona->name : NULL,
+                          s_entity_persona ? s_entity_persona->name_len : 0, &card);
+    if (!(card.entity_cap_rate >= 0.0) || card.entity_token_count == 0) {
+        hu_log_info("style_governor", NULL,
+                    "entity casing live but the style card carries no entity_casing axis "
+                    "(run scripts/measure_style_card.py) — action D inert");
+        return;
+    }
+    unsigned n = card.entity_token_count;
+    if (n > HU_STYLE_CARD_MAX_ENTITY_TOKENS)
+        n = HU_STYLE_CARD_MAX_ENTITY_TOKENS;
+    memcpy(s_entity_tab, card.entity_tokens, (size_t)n * sizeof(s_entity_tab[0]));
+    s_entity_count = n;
+    hu_log_info("style_governor", NULL, "entity casing live: %u tokens, corpus cap rate %.3f", n,
+                card.entity_cap_rate);
+}
+
+const hu_style_entity_token_t *hu_style_governor_entity_table(const struct hu_persona *persona,
+                                                              unsigned *out_count) {
+    s_entity_persona = persona;
+    pthread_once(&s_entity_once, entity_table_init_once);
+    if (out_count)
+        *out_count = s_entity_count;
+    return s_entity_count ? s_entity_tab : NULL;
+}
+
+#if HU_IS_TEST
+void hu_style_governor_reset_entities_for_test(void) {
+    /* pthread_once cannot be re-armed portably; reset the value it guards and
+     * re-run the initialiser directly. Tests are single-threaded here. */
+    s_entity_count = 0;
+    memset(s_entity_tab, 0, sizeof(s_entity_tab));
+    entity_table_init_once();
+}
+#endif
+
+unsigned hu_style_governor_entity_roll(const char *token, size_t len, unsigned casing_roll,
+                                       size_t offset) {
+    uint32_t basis = 0xc2b2ae35u ^ ((uint32_t)casing_roll * 2654435761u) ^ (uint32_t)offset;
+    return fnv_roll(token, len, basis);
+}
+
 unsigned hu_style_governor_roll(const char *text, size_t len) {
     /* ~90% of period-ending messages strip (across distinct messages). */
     return fnv_roll(text, len, 2166136261u);
@@ -168,6 +226,108 @@ static size_t line_start(const char *s, size_t from, size_t n) {
     return from;
 }
 
+/* ── Action D: entity casing pass ──────────────────────────────────── */
+
+static bool is_word_ch(char c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '\'';
+}
+
+static const hu_style_entity_token_t *entity_lookup(const hu_style_entity_token_t *tab,
+                                                    unsigned count, const char *tok, size_t len) {
+    for (unsigned i = 0; i < count; i++) {
+        if (strlen(tab[i].token) == len && memcmp(tab[i].token, tok, len) == 0)
+            return &tab[i];
+    }
+    return NULL;
+}
+
+/* Walk whitespace-delimited words. Capitalize the first letter of an
+ * all-lowercase word that is in the card's entity table, is NOT
+ * sentence-initial (those belong to action C, and the measurement counts
+ * only mid-sentence capitals), and wins its per-token roll.
+ *
+ * `buf` may be NULL for a DRY RUN: the decision logic is identical and the
+ * count is returned without mutating anything, so shape_full can honour the
+ * "no change -> *out == NULL" contract without duplicating this logic.
+ *
+ * Adjacent entity words share one decision, so a two-word name never comes
+ * out as "Tampa bay" — a run of entity tokens is decided once. */
+static unsigned entity_shape(char *buf, const char *text, size_t len,
+                             const hu_style_entity_token_t *tab, unsigned count,
+                             unsigned casing_roll) {
+    if (!tab || count == 0)
+        return 0;
+    unsigned changed = 0;
+    bool sentence_start = true; /* first word of the message */
+    bool prev_was_entity = false;
+    bool prev_decision = false;
+    size_t i = 0;
+    while (i < len) {
+        while (i < len && (text[i] == ' ' || text[i] == '\t' || text[i] == '\n')) {
+            if (text[i] == '\n')
+                sentence_start = true; /* one bubble per line */
+            i++;
+        }
+        if (i >= len)
+            break;
+        size_t ws = i;
+        while (i < len && text[i] != ' ' && text[i] != '\t' && text[i] != '\n')
+            i++;
+        size_t we = i; /* word is [ws, we) */
+
+        /* Skip URLs and handles wholesale — never rewrite inside one. */
+        bool skip = starts_with_url(text + ws, we - ws);
+        for (size_t k = ws; !skip && k < we; k++)
+            if (text[k] == '@' || text[k] == '/' || text[k] == ':')
+                skip = true;
+
+        /* Core token: strip surrounding punctuation. */
+        size_t cs = ws, ce = we;
+        while (cs < ce && !is_word_ch(text[cs]))
+            cs++;
+        while (ce > cs && !is_word_ch(text[ce - 1]))
+            ce--;
+
+        bool is_entity = false;
+        if (!skip && ce > cs && !sentence_start) {
+            bool all_lower = true;
+            for (size_t k = cs; k < ce; k++)
+                if (!((text[k] >= 'a' && text[k] <= 'z') || text[k] == '\'')) {
+                    all_lower = false;
+                    break;
+                }
+            if (all_lower) {
+                const hu_style_entity_token_t *e = entity_lookup(tab, count, text + cs, ce - cs);
+                if (e) {
+                    is_entity = true;
+                    bool cap;
+                    if (prev_was_entity) {
+                        cap = prev_decision; /* keep a multi-word name coherent */
+                    } else {
+                        unsigned roll =
+                            hu_style_governor_entity_roll(text + cs, ce - cs, casing_roll, cs);
+                        cap = roll < (unsigned)lround(e->cap_rate * 100.0);
+                    }
+                    prev_decision = cap;
+                    if (cap) {
+                        changed++;
+                        if (buf)
+                            buf[cs] = (char)(buf[cs] - 32);
+                    }
+                }
+            }
+        }
+        prev_was_entity = is_entity;
+
+        /* A word ending in . ! or ? opens a new sentence. */
+        if (we > ws && (text[we - 1] == '.' || text[we - 1] == '!' || text[we - 1] == '?'))
+            sentence_start = true;
+        else if (ce > cs)
+            sentence_start = false;
+    }
+    return changed;
+}
+
 hu_error_t hu_style_governor_shape(hu_allocator_t *alloc, const char *text, size_t len,
                                    unsigned period_roll, char **out, size_t *out_len,
                                    unsigned *actions) {
@@ -178,6 +338,15 @@ hu_error_t hu_style_governor_shape_ex(hu_allocator_t *alloc, const char *text, s
                                       unsigned period_roll, unsigned casing_roll,
                                       unsigned lowercase_start_pct, char **out, size_t *out_len,
                                       unsigned *actions) {
+    return hu_style_governor_shape_full(alloc, text, len, period_roll, casing_roll,
+                                        lowercase_start_pct, NULL, 0, out, out_len, actions);
+}
+
+hu_error_t hu_style_governor_shape_full(hu_allocator_t *alloc, const char *text, size_t len,
+                                        unsigned period_roll, unsigned casing_roll,
+                                        unsigned lowercase_start_pct,
+                                        const hu_style_entity_token_t *entities, unsigned count,
+                                        char **out, size_t *out_len, unsigned *actions) {
     if (!alloc || !text || !out || !out_len || !actions)
         return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;
@@ -238,7 +407,11 @@ hu_error_t hu_style_governor_shape_ex(hu_allocator_t *alloc, const char *text, s
             capitalize = true;
     }
 
-    if (acts == 0 && !capitalize)
+    /* Action D dry run — decide whether anything would change before we
+     * allocate, so the no-change contract (*out == NULL) still holds. */
+    unsigned entity_hits = entity_shape(NULL, text, cur, entities, count, casing_roll);
+
+    if (acts == 0 && !capitalize && entity_hits == 0)
         return HU_OK;
 
     char *shaped = (char *)alloc->alloc(alloc->ctx, cur + 1);
@@ -260,6 +433,8 @@ hu_error_t hu_style_governor_shape_ex(hu_allocator_t *alloc, const char *text, s
         }
         acts |= HU_STYLE_GOV_ACTION_START_CAPITALIZED;
     }
+    if (entity_hits > 0 && entity_shape(shaped, shaped, cur, entities, count, casing_roll) > 0)
+        acts |= HU_STYLE_GOV_ACTION_ENTITY_CAPITALIZED;
     *out = shaped;
     *out_len = cur;
     *actions = acts;
@@ -278,9 +453,11 @@ size_t hu_style_governor_apply_inplace(hu_allocator_t *alloc, char *buf, size_t 
     unsigned actions = 0;
     unsigned roll = hu_style_governor_roll(buf, len);
     unsigned casing = hu_style_governor_casing_roll(buf, len);
-    if (hu_style_governor_shape_ex(alloc, buf, len, roll, casing,
-                                   hu_style_governor_lowercase_start_pct(NULL), &shaped,
-                                   &shaped_len, &actions) != HU_OK ||
+    unsigned ents = 0;
+    const hu_style_entity_token_t *tab = hu_style_governor_entity_table(NULL, &ents);
+    if (hu_style_governor_shape_full(alloc, buf, len, roll, casing,
+                                     hu_style_governor_lowercase_start_pct(NULL), tab, ents,
+                                     &shaped, &shaped_len, &actions) != HU_OK ||
         !shaped)
         return len;
 
@@ -292,7 +469,8 @@ size_t hu_style_governor_apply_inplace(hu_allocator_t *alloc, char *buf, size_t 
         return len;
     }
 
-    /* LIVE — the governor only ever shrinks, so copying back into `buf`
+    /* LIVE — the governor only ever shrinks (actions C and D flip a byte's
+     * case in place and never change length), so copying back into `buf`
      * (which already held `len` bytes) is always in-bounds. */
     memcpy(buf, shaped, shaped_len);
     buf[shaped_len] = '\0';
@@ -327,9 +505,11 @@ static hu_outbound_verdict_t style_governor_run(hu_outbound_pipeline_stage_t *se
     unsigned actions = 0;
     unsigned roll = hu_style_governor_roll(msg->content, msg->content_len);
     unsigned casing = hu_style_governor_casing_roll(msg->content, msg->content_len);
-    if (hu_style_governor_shape_ex(ctx->alloc, msg->content, msg->content_len, roll, casing,
-                                   hu_style_governor_lowercase_start_pct(ctx->persona), &shaped,
-                                   &shaped_len, &actions) != HU_OK ||
+    unsigned ents = 0;
+    const hu_style_entity_token_t *tab = hu_style_governor_entity_table(ctx->persona, &ents);
+    if (hu_style_governor_shape_full(ctx->alloc, msg->content, msg->content_len, roll, casing,
+                                     hu_style_governor_lowercase_start_pct(ctx->persona), tab, ents,
+                                     &shaped, &shaped_len, &actions) != HU_OK ||
         !shaped)
         return hu_outbound_verdict_send();
 
@@ -348,3 +528,24 @@ hu_outbound_pipeline_stage_t hu_outbound_pipeline_stage_style_governor = {
     .run = style_governor_run,
     .state = NULL,
 };
+
+/* ── Action C per bubble ─────────────────────────────────────────────── */
+
+bool hu_style_governor_case_bubble_pct(char *buf, size_t len, unsigned lowercase_start_pct,
+                                       unsigned casing_roll) {
+    if (!buf || len == 0 || lowercase_start_pct >= 100 || casing_roll < lowercase_start_pct)
+        return false;
+    size_t i = line_start(buf, 0, len);
+    if (i >= len || buf[i] < 'a' || buf[i] > 'z' || starts_with_url(buf + i, len - i))
+        return false;
+    buf[i] = (char)(buf[i] - 'a' + 'A');
+    return true;
+}
+
+bool hu_style_governor_case_bubble(const struct hu_persona *persona, char *buf, size_t len) {
+    if (hu_style_governor_mode() != HU_STYLE_GOVERNOR_LIVE || !buf || len == 0)
+        return false;
+    return hu_style_governor_case_bubble_pct(buf, len,
+                                             hu_style_governor_lowercase_start_pct(persona),
+                                             hu_style_governor_casing_roll(buf, len));
+}

@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ai.human.vision-server.plist — local photo-caption server for HU_LOCAL_VISION
+  (include/human/context/local_vision.h, docs/guides/local-vision.md).
+
+  TEMPLATE. Rendered and installed only by scripts/install-local-vision.sh,
+  which fills in the HOME, PYTHON, MODEL and PORT placeholders. Never copy it by hand.
+
+  - mlx_vlm.server listens on every interface by default. The host is hard-coded to 127.0.0.1
+    here (not a placeholder) and the installer refuses a rendered plist that
+    says anything else: the daemon refuses any non-loopback URL too, but the
+    server must not listen off-box either.
+  - HF_HUB_OFFLINE=1: the model must already be in the HF cache; the server
+    never downloads.
+  - Same lifecycle as ai.human.mlx-server: exec'd python IS the launchd job,
+    KeepAlive restarts it on a crash. scripts/nightly-retrain.sh boots it out
+    for training and bootstraps it back afterwards.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>ai.human.vision-server</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>@PYTHON@</string>
+        <string>-m</string>
+        <string>mlx_vlm.server</string>
+        <string>--model</string>
+        <string>@MODEL@</string>
+        <string>--host</string>
+        <string>127.0.0.1</string>
+        <string>--port</string>
+        <string>@PORT@</string>
+        <string>--max-tokens</string>
+        <string>128</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+        <key>Crashed</key>
+        <true/>
+    </dict>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <key>StandardOutPath</key>
+    <string>@HOME@/.human/logs/vision-server.log</string>
+    <key>StandardErrorPath</key>
+    <string>@HOME@/.human/logs/vision-server.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>HOME</key>
+        <string>@HOME@</string>
+        <key>HF_HUB_OFFLINE</key>
+        <string>1</string>
+        <key>TRANSFORMERS_OFFLINE</key>
+        <string>1</string>
+    </dict>
+</dict>
+</plist>

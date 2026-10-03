@@ -476,8 +476,116 @@ static void whois_probe_never_spawns_under_test(void) {
                  (int)HU_WHOIS_INDETERMINATE);
 }
 
+/* Self-healing (spec 2026-09-28): the caps view was probed once per process, so
+ * a bridge that came back (imsg launch) was never seen, and one that died was
+ * trusted until restart. */
+static void caps_reprobe_policy_heals_both_ways(void) {
+    HU_ASSERT_TRUE(hu_imessage_caps_should_reprobe(1000, -1, false, false)); /* never probed */
+    HU_ASSERT_FALSE(hu_imessage_caps_should_reprobe(1060, 1000, true, false));
+    HU_ASSERT_TRUE(hu_imessage_caps_should_reprobe(1600, 1000, true, false)); /* 10 min TTL */
+    HU_ASSERT_FALSE(hu_imessage_caps_should_reprobe(1060, 1000, false, false));
+    HU_ASSERT_TRUE(hu_imessage_caps_should_reprobe(1120, 1000, false, false)); /* down: 2 min */
+    HU_ASSERT_TRUE(hu_imessage_caps_should_reprobe(1030, 1000, true, true));   /* verb failed */
+    HU_ASSERT_FALSE(hu_imessage_caps_should_reprobe(1010, 1000, true, true));  /* but not a storm */
+}
+
+/* Repair = `imsg launch`, which restarts Messages.app: only when the bridge is
+ * down, SIP is off (else it cannot work), Seth has been idle 5 min, and at most
+ * once per 30 min. */
+static void caps_bridge_repair_never_interrupts_seth(void) {
+    HU_ASSERT_TRUE(hu_imessage_bridge_repair_due(false, false, 400.0, -1));
+    HU_ASSERT_FALSE(hu_imessage_bridge_repair_due(true, false, 400.0, -1));   /* bridge up */
+    HU_ASSERT_FALSE(hu_imessage_bridge_repair_due(false, true, 400.0, -1));   /* SIP on */
+    HU_ASSERT_FALSE(hu_imessage_bridge_repair_due(false, false, 120.0, -1));  /* he's typing */
+    HU_ASSERT_FALSE(hu_imessage_bridge_repair_due(false, false, 400.0, 600)); /* tried 10 min ago */
+    HU_ASSERT_TRUE(hu_imessage_bridge_repair_due(false, false, 400.0, 1900));
+}
+
+/* Phase 5 (spec 2026-09-28): a bubble that is exactly one link goes through the
+ * bridge as a rich-link balloon; anything else stays a normal text. */
+static void caps_bare_url_is_exactly_one_link(void) {
+    const char *yt = "https://www.youtube.com/shorts/abc123";
+    HU_ASSERT_TRUE(hu_imsg_is_bare_url(yt, strlen(yt)));
+    const char *pad = "  https://music.apple.com/us/song/x/1 \n";
+    HU_ASSERT_TRUE(hu_imsg_is_bare_url(pad, strlen(pad)));
+    const char *said = "check this https://youtu.be/x";
+    HU_ASSERT_FALSE(hu_imsg_is_bare_url(said, strlen(said)));
+    const char *two = "https://a.example/x https://b.example/y";
+    HU_ASSERT_FALSE(hu_imsg_is_bare_url(two, strlen(two)));
+    HU_ASSERT_FALSE(hu_imsg_is_bare_url("http://", 7));
+    HU_ASSERT_FALSE(hu_imsg_is_bare_url("ftp://x.example/y", 17));
+}
+
+static void caps_chat_guid_for_a_handle(void) {
+    char g[128];
+    HU_ASSERT_TRUE(hu_imsg_chat_guid(g, sizeof(g), "+15550101234", 12) > 0);
+    HU_ASSERT_STR_EQ(g, "iMessage;-;+15550101234");
+    HU_ASSERT_TRUE(hu_imsg_chat_guid(g, sizeof(g), "a@example.com", 13) > 0);
+    HU_ASSERT_STR_EQ(g, "iMessage;-;a@example.com");
+    HU_ASSERT_EQ(hu_imsg_chat_guid(g, sizeof(g), "chat123;x", 9), 0u); /* not a handle */
+    HU_ASSERT_EQ(hu_imsg_chat_guid(g, 8, "+15550101234", 12), 0u);
+}
+
+/* The effect executor: the daemon marks the next text to a person with an
+ * effect; the send path takes it once, and only for that person, within 2 min. */
+static void caps_effect_slot_is_one_shot_and_scoped(void) {
+    char e[16];
+    hu_imsg_effect_set("+15550000001", 12, "confetti", 1000);
+    HU_ASSERT_FALSE(hu_imsg_effect_take("+15550000002", 12, 1001, e, sizeof(e))); /* not theirs */
+    HU_ASSERT_TRUE(hu_imsg_effect_take("+15550000001", 12, 1001, e, sizeof(e)));
+    HU_ASSERT_STR_EQ(e, "confetti");
+    HU_ASSERT_FALSE(hu_imsg_effect_take("+15550000001", 12, 1002, e, sizeof(e))); /* once */
+    hu_imsg_effect_set("+15550000001", 12, "loud", 2000);
+    HU_ASSERT_FALSE(hu_imsg_effect_take("+15550000001", 12, 2200, e, sizeof(e))); /* stale */
+}
+
+/* Typing rhythm (2026-09-29, Seth: "typing... stopping... thinking and then
+ * typing again"). Phases alternate: typing 4-12 s, paused 1.5-4 s. */
+static void test_imsg_typing_phases_stay_in_human_ranges(void) {
+    uint32_t seed = 7;
+    uint32_t tmin = UINT32_MAX, tmax = 0, pmin = UINT32_MAX, pmax = 0;
+    for (int i = 0; i < 500; i++) {
+        uint32_t t = hu_imsg_typing_phase_ms(&seed, true);
+        uint32_t p = hu_imsg_typing_phase_ms(&seed, false);
+        tmin = t < tmin ? t : tmin;
+        tmax = t > tmax ? t : tmax;
+        pmin = p < pmin ? p : pmin;
+        pmax = p > pmax ? p : pmax;
+    }
+    HU_ASSERT_TRUE(tmin >= 4000 && tmax <= 12000);
+    HU_ASSERT_TRUE(pmin >= 1500 && pmax <= 4000);
+    HU_ASSERT_TRUE(tmax - tmin > 4000); /* varied, not a fixed beat */
+    HU_ASSERT_TRUE(pmax - pmin > 1000);
+}
+
+/* Before a send: top typing up to what the text takes; never wait long. */
+static void test_imsg_typing_catchup_tops_up_and_is_bounded(void) {
+    HU_ASSERT_EQ(hu_imsg_typing_catchup_ms(3000, 0), 3000u);
+    HU_ASSERT_EQ(hu_imsg_typing_catchup_ms(3000, 1000), 2000u);
+    HU_ASSERT_EQ(hu_imsg_typing_catchup_ms(3000, 45000), 0u); /* typed all along */
+    HU_ASSERT_EQ(hu_imsg_typing_catchup_ms(60000, 0), HU_IMSG_TYPING_CATCHUP_MAX_MS);
+}
+
+/* 2026-09-27: imsg reported failure after delivering; the AppleScript
+ * fallback sent the same text again. Only a clearly newer sent row counts. */
+static void test_imessage_send_landed_needs_a_newer_sent_row(void) {
+    HU_ASSERT_TRUE(hu_imessage_send_landed(73356, 73358));
+    HU_ASSERT_TRUE(hu_imessage_send_landed(0, 12)); /* first message to them */
+    HU_ASSERT_FALSE(hu_imessage_send_landed(73356, 73356));
+    HU_ASSERT_FALSE(hu_imessage_send_landed(-1, 73358)); /* lookup failed before */
+    HU_ASSERT_FALSE(hu_imessage_send_landed(73356, -1)); /* lookup failed after */
+}
+
 void run_imessage_caps_tests(void) {
+    HU_RUN_TEST(test_imsg_typing_phases_stay_in_human_ranges);
+    HU_RUN_TEST(test_imsg_typing_catchup_tops_up_and_is_bounded);
+    HU_RUN_TEST(test_imessage_send_landed_needs_a_newer_sent_row);
     HU_TEST_SUITE("imessage_caps");
+    HU_RUN_TEST(caps_effect_slot_is_one_shot_and_scoped);
+    HU_RUN_TEST(caps_bare_url_is_exactly_one_link);
+    HU_RUN_TEST(caps_chat_guid_for_a_handle);
+    HU_RUN_TEST(caps_reprobe_policy_heals_both_ways);
+    HU_RUN_TEST(caps_bridge_repair_never_interrupts_seth);
     HU_RUN_TEST(whois_parse_reachable_says_reachable);
     HU_RUN_TEST(whois_parse_is_key_order_independent);
     HU_RUN_TEST(whois_parse_green_handles_are_not_reachable);

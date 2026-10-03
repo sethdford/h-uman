@@ -439,10 +439,10 @@ static void shadow_predicate_with_emotional_weight(void) {
 static void shadow_off_by_default(void) {
     /* With HU_DIFFICULTY_ROUTE unset (default OFF), no shadow entries are logged */
     unsetenv("HU_DIFFICULTY_ROUTE");
-    hu_model_router_config_t cfg = hu_model_router_default_config();
+    hu_model_router_config_t local_cfg = hu_model_router_default_config();
     /* Substantive CONVERSATIONAL message */
     const char *msg = "what do you think should i go to the party tonight or stay home";
-    hu_model_selection_t sel = hu_model_route(&cfg, msg, strlen(msg), NULL, 0, 14, 0);
+    hu_model_selection_t sel = hu_model_route(&local_cfg, msg, strlen(msg), NULL, 0, 14, 0);
 
     HU_ASSERT(sel.tier == HU_TIER_CONVERSATIONAL);
     /* With default OFF, returns CONVERSATIONAL unchanged */
@@ -452,9 +452,9 @@ static void shadow_live_not_implemented_warns_once(void) {
     /* Setting HU_DIFFICULTY_ROUTE=live should warn but not promote (LIVE is not implemented) */
     setenv("HU_DIFFICULTY_ROUTE", "live", 1);
 
-    hu_model_router_config_t cfg = hu_model_router_default_config();
+    hu_model_router_config_t local_cfg = hu_model_router_default_config();
     const char *msg = "what do you think should i go to the party tonight or stay home";
-    hu_model_selection_t sel1 = hu_model_route(&cfg, msg, strlen(msg), NULL, 0, 14, 0);
+    hu_model_selection_t sel1 = hu_model_route(&local_cfg, msg, strlen(msg), NULL, 0, 14, 0);
 
     /* Still returns CONVERSATIONAL (LIVE is not implemented, fails closed to OFF) */
     HU_ASSERT(sel1.tier == HU_TIER_CONVERSATIONAL);
@@ -470,13 +470,13 @@ static void shadow_mode_selection_matches_off_mode_for_substantive_message(void)
     hu_route_decision_log_t *log = hu_route_global_log();
     hu_route_log_init(log);
 
-    hu_model_router_config_t cfg = hu_model_router_default_config();
+    hu_model_router_config_t local_cfg = hu_model_router_default_config();
     /* Substantive CONVERSATIONAL message with reasoning marker */
     const char *msg = "what do you think should i go to the party tonight or stay home";
 
     /* Route in OFF mode (default) */
     unsetenv("HU_DIFFICULTY_ROUTE");
-    hu_model_selection_t sel_off = hu_model_route(&cfg, msg, strlen(msg), NULL, 0, 14, 0);
+    hu_model_selection_t sel_off = hu_model_route(&local_cfg, msg, strlen(msg), NULL, 0, 14, 0);
 
     HU_ASSERT_EQ(sel_off.tier, HU_TIER_CONVERSATIONAL); /* precondition for shadow test */
 
@@ -485,7 +485,7 @@ static void shadow_mode_selection_matches_off_mode_for_substantive_message(void)
 
     /* Route in SHADOW mode */
     setenv("HU_DIFFICULTY_ROUTE", "shadow", 1);
-    hu_model_selection_t sel_shadow = hu_model_route(&cfg, msg, strlen(msg), NULL, 0, 14, 0);
+    hu_model_selection_t sel_shadow = hu_model_route(&local_cfg, msg, strlen(msg), NULL, 0, 14, 0);
     unsetenv("HU_DIFFICULTY_ROUTE");
 
     /* Selection must be identical */
@@ -548,9 +548,9 @@ static void casual_message_never_shadow_logged(void) {
     hu_route_log_init(log);
 
     setenv("HU_DIFFICULTY_ROUTE", "shadow", 1);
-    hu_model_router_config_t cfg = hu_model_router_default_config();
+    hu_model_router_config_t local_cfg = hu_model_router_default_config();
     const char *msg = "hey how are you"; /* 4 words, casual */
-    hu_model_selection_t sel = hu_model_route(&cfg, msg, strlen(msg), NULL, 0, 14, 0);
+    hu_model_selection_t sel = hu_model_route(&local_cfg, msg, strlen(msg), NULL, 0, 14, 0);
 
     HU_ASSERT(sel.tier == HU_TIER_REFLEXIVE);
 

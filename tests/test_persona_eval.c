@@ -4,6 +4,7 @@
 #include "test_framework.h"
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 
@@ -22,6 +23,24 @@ static void persona_eval_load_v2_model_succeeds(void) {
     HU_ASSERT_EQ((int)hu_persona_eval_load(&alloc, NULL, &m), (int)HU_OK);
     HU_ASSERT_NOT_NULL(m);
     hu_persona_eval_free(&alloc, m);
+}
+
+/* The model lived in /tmp, which a reboot empties: P(Seth) then silently fell
+ * back to 0.5 (10 "model file unreadable" warnings the week of 2026-09-23).
+ * The default is the state dir now. */
+static void persona_eval_default_path_is_in_the_state_dir(void) {
+    const char *prev = getenv("HU_STATE_DIR");
+    char saved[512] = {0};
+    if (prev)
+        snprintf(saved, sizeof(saved), "%s", prev);
+    setenv("HU_STATE_DIR", "/tmp/hu-state-test", 1);
+    char buf[512];
+    HU_ASSERT_TRUE(hu_persona_eval_default_path(buf, sizeof(buf)) > 0);
+    HU_ASSERT_STR_EQ(buf, "/tmp/hu-state-test/models/seth_speaker_id.json");
+    if (prev)
+        setenv("HU_STATE_DIR", saved, 1);
+    else
+        unsetenv("HU_STATE_DIR");
 }
 
 static void persona_eval_load_missing_returns_io(void) {
@@ -118,6 +137,7 @@ void run_persona_eval_tests(void) {
     HU_TEST_SUITE("persona_eval");
     HU_RUN_TEST(persona_eval_load_v2_model_succeeds);
     HU_RUN_TEST(persona_eval_load_missing_returns_io);
+    HU_RUN_TEST(persona_eval_default_path_is_in_the_state_dir);
     HU_RUN_TEST(persona_eval_load_null_out);
     HU_RUN_TEST(persona_eval_score_null_model_neutral);
     HU_RUN_TEST(persona_eval_seth_shape_high);

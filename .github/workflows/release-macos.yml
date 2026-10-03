@@ -21,7 +21,9 @@ concurrency:
 jobs:
   build:
     name: Build macOS release binary
-    runs-on: macos-14-arm64
+    # macos-15 is GitHub's arm64 image. "macos-14-arm64" is an image name, not a
+    # runner label: no runner ever picked the job up.
+    runs-on: macos-15
     timeout-minutes: 30
     env:
       MACOS_DEPLOYMENT_TARGET: '10.15'
@@ -62,7 +64,10 @@ jobs:
           mkdir -p "build/Release/Human.app/Contents/_CodeSignature"
           cp build/human "build/Release/Human.app/Contents/MacOS/human"
           chmod 755 "build/Release/Human.app/Contents/MacOS/human"
-          # TODO: Copy Info.plist from US-C1.1 when available
+          bash scripts/release/write-info-plist.sh \
+            --app-path "build/Release/Human.app" \
+            --min-macos "$MACOS_DEPLOYMENT_TARGET"
+          bash scripts/release/verify-bundle.sh --app-path "build/Release/Human.app"
 
       - name: Build .pkg installer
         run: |
@@ -94,7 +99,7 @@ jobs:
   sign-and-release:
     name: Sign, notarize, and publish release
     needs: build
-    runs-on: macos-14-arm64
+    runs-on: macos-15
     timeout-minutes: 45
     if: |
       (github.ref_type == 'tag' && startswith(github.ref, 'refs/tags/v')) ||
@@ -209,7 +214,11 @@ jobs:
     name: Publish unsigned pre-release to main
     needs: build
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    # Opt-in: publishing a public unsigned pre-release on every main push only
+    # happens once the repository variable PUBLISH_PRERELEASE is set to 'true'
+    # (Settings → Secrets and variables → Actions → Variables). Unset, the
+    # build job still runs and uploads the .pkg as a workflow artifact.
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && vars.PUBLISH_PRERELEASE == 'true'
     permissions:
       contents: write
     steps:

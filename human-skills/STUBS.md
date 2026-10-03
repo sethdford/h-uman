@@ -16,10 +16,10 @@ Last updated: 2026-03-20
 | Lines of C/H code              | **~233K**                |
 | Test files                     | 291                      |
 | Tests passing                  | **9,500+/9,500+ (100%)**   |
-| Binary size (MinSizeRel+LTO)   | **~1696 KB (all flags)** |
-| Cold start (--version)         | **4–27 ms avg**          |
-| Peak RSS (--version)           | **~5.7 MB**              |
-| Peak RSS (test suite)          | **~6.0 MB**              |
+| Binary size (release-size build) | **<!-- fp:binary_kb -->~2760 KB<!-- /fp -->** |
+| Cold start (--version)         | **<!-- fp:startup_range -->3–6 ms<!-- /fp -->** |
+| Peak RSS (--version)           | **<!-- fp:version_rss_mb -->6.9 MB<!-- /fp -->** |
+| Idle RSS (`human mcp`)         | **<!-- fp:idle_rss_mb -->8.6 MB<!-- /fp -->** |
 | Test throughput                | **700+ tests/sec**       |
 
 ## Module Parity

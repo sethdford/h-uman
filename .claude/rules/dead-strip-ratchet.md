@@ -63,7 +63,7 @@ relink `human` from `build/CMakeFiles/human.dir/link.txt` with
 
 ## Measurement details that are easy to get wrong
 
-Three of these were measured mistakes before the gate was correct:
+Four of these were measured mistakes before the gate was correct:
 
 1. **Attribute by SYMBOL NAME, never by archive-member basename.** The map
    lists members as `libhuman_core.a(dispatch.c.o)` — a basename. This tree has
@@ -80,6 +80,13 @@ Three of these were measured mistakes before the gate was correct:
    Under ASan every object defines `____asan_globals_registered` as a common
    symbol and the linker coalesces them into one map entry, so a by-name
    membership test marks all 981 members live and collapses A to 0.
+4. **Test objects of deleted sources must not count as references.** CMake
+   never removes the `.o` of a source that left the build, so after a test file
+   is deleted its stale object keeps "referencing" whatever it called, and B
+   undercounts locally while a clean CI build counts correctly. On 2026-09-28
+   deleting `tests/test_cross_channel_acl.c` left `hu_persona_load_defaults`
+   dead; local B read 73, CI read 74, and pre-commit auto-locked the wrong 73.
+   The gate now keeps a test object only if its `src/`/`tests/` source exists.
 
 **B counts symbols, not functions.** At the baseline (79, currently measuring
 76), B is a mix of whole function symbols and function-local statics
@@ -99,15 +106,23 @@ function and unit-testing it in isolation is not wiring — see
 `.claude/rules/ground-truth-over-proxy-signals.md`). As deletion work lands,
 auto-lock captures the gain; no manual baseline edit is needed.
 
-## Enforcement: two hooks, two jobs
+## Enforcement: two hooks and a CI job
 
 `scripts/check-dead-strip-ratchet.sh` is wired into **both** hooks, because the
-two things a ratchet must do live in different places:
+two things a ratchet must do live in different places — and into CI, because a
+local hook cannot enforce what it cannot measure:
 
 | Hook | Fires when | What it does |
 |---|---|---|
 | `.githooks/pre-commit` | a `src/` `.c`/`.h` is staged (`ACMD`, like the clone ratchet) | runs the gate plain, so **`ratchet_autolock` can rewrite and stage a lowered baseline**. This is the *only* place that can happen: `scripts/lib/ratchet.sh` refuses to rewrite unless `HU_RATCHET_FROM_HOOK=1`, which only pre-commit exports — pre-push cannot, since its `git add` would stage a file into no commit. Skips in one line when `build/` is absent or stale. |
-| `.githooks/pre-push` | every push, after the suite passes | **rebuilds `build/` incrementally** (`cmake --build build --target human human_tests`), then runs the gate with `HU_DEAD_STRIP_STRICT=1`. This is the enforcement point. |
+| `.githooks/pre-push` | every push, after the suite passes | **rebuilds `build/` incrementally** (`cmake --build build --target human human_tests`), then runs the gate with `HU_DEAD_STRIP_STRICT=1`. The **local** enforcement point — but it skips in one line when the worktree has no configured `build/`, which on 2026-09-26 was 9 of this repo's 19 worktrees. |
+| `dead-strip-ratchet` job in `.github/workflows/ci.yml` | every PR touching `src/`, `include/`, the CMake config or the gate itself, and every push to main | configures **`--preset dev` by name** on `macos-latest`, builds `human` + `human_tests`, runs the gate with `HU_DEAD_STRIP_STRICT=1`. The backstop: unlike the hooks it always has a build, so it can always measure — and a `RATCHET_SKIP` there is treated as a FAILURE, because on a runner configured for the gate a skip means the gate malfunctioned. |
+
+Without the CI half the gate was bypassable: a push from a worktree with no
+`build/` printed `No configured build/ — skipping the dead-strip ratchet.`
+and exited 0, and a skipped gate is indistinguishable from a passing one.
+The hooks now say so in one line when they skip, naming CI as the place the
+check actually happens.
 
 Without the pre-commit half the baselines could only ever freeze, never ratchet
 down — the exact pathology `.claude/rules/ratchet-decay.md` exists to prevent.
@@ -131,7 +146,24 @@ Unlike every other ratchet in `scripts/ratchet-config.tsv`, this one measures a
   set and therefore compiles a different set of translation units, so its counts
   are *not* comparable to these constants. That is why neither hook points
   `HU_BUILD_DIR` at `build-check`.
-- **The gate skips rather than guesses.** No `build/`, no link map, not macOS,
+- **A build dir that is not the dev preset is skipped, strict mode or not.**
+  Before counting, the gate compares every cache variable the `dev` preset sets
+  (resolved through `inherits`; `CMAKE_EXPORT_COMPILE_COMMANDS` excluded, it
+  selects no sources) against `$BUILD_DIR/CMakeCache.txt`. On any mismatch it
+  prints `RATCHET_SKIP: build/ is not the dev preset (<VAR>=<cached> vs preset
+  <expected>); reconfigure with: cmake --preset dev` and exits 0. A missing
+  `CMakeCache.txt` skips too. This used to be an unchecked assumption, and on
+  2026-09-26 it failed every push from the main checkout: its `build/` had been
+  hand-configured with `HU_ENABLE_ALL_CHANNELS=ON`, compiled 1,026 archive
+  members instead of 991, and reported A=33 / B=96 against ceilings 31 / 76.
+  A real dev-preset build of the same commit (f714418ac) gave A=31 / B=76.
+  `HU_DEAD_STRIP_STRICT=1` does not override this skip. Strict mode disables
+  stale-tree demotion because pre-push's rebuild makes the tree current, but no
+  rebuild turns a differently-configured tree into the dev preset. The skip
+  exits before auto-lock, so a mismatched build can never lock a baseline.
+  Tested by `tests/fixtures/check-dead-strip-config/run-smoke-test.sh`.
+- **The gate skips rather than guesses.** No `build/`, `build/` not the dev
+  preset (above), no link map, not macOS,
   `nm` unable to read every member, `nm -u` failing over the test objects → it
   prints `RATCHET_SKIP: <reason>` and exits 0. A gate that cannot measure must
   not block a commit or a push
@@ -141,7 +173,11 @@ Unlike every other ratchet in `scripts/ratchet-config.tsv`, this one measures a
 - **A stale `build/` demotes the gate to advisory — except under
   `HU_DEAD_STRIP_STRICT=1`.** If any `src/` or `include/` file is newer than
   `build/human` or `build/human_tests`, the counts describe an earlier tree, so
-  they are printed and the gate exits 0. This is the right answer for an ad-hoc
+  they are printed and the gate exits 0. The same holds when either link.txt
+  the gate reads is newer than those binaries — a reconfigure that has not
+  been rebuilt yet (link.txt is written copy-if-different, so a no-op
+  re-configure does not trip this; CMakeCache.txt, rewritten on every run,
+  would). This is the right answer for an ad-hoc
   run and for pre-commit (which must not block a commit on a tree nobody built).
   It is the *wrong* answer for pre-push, which is why pre-push rebuilds first
   and then sets `HU_DEAD_STRIP_STRICT=1` to disable the demotion. For a manual
@@ -151,6 +187,8 @@ Unlike every other ratchet in `scripts/ratchet-config.tsv`, this one measures a
 Linux CI is a documented gap: the map parser is macOS `ld`'s
 (`# Object files:` / `# Symbols:` / `# Dead Stripped Symbols:`). GNU `ld -Map`
 is a different format; on any non-Darwin host the gate skips.
+That is why the CI job runs on `macos-latest` and not on one of the many
+cheaper Linux jobs: on Linux it would skip every time and prove nothing.
 
 ## Related
 

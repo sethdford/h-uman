@@ -1,5 +1,6 @@
 /* src/tts/voice_reply.c — see include/human/tts/voice_reply.h */
 #include "human/tts/voice_reply.h"
+#include "human/tts/speech_direction.h"
 
 #include "human/daemon/voice_facade.h"
 #include "human/persona.h"
@@ -20,6 +21,42 @@ hu_error_t hu_voice_reply_build_request(const hu_persona_voice_config_t *voice,
                                         const char *response, size_t response_len,
                                         const char *incoming, size_t incoming_len, int hour_local,
                                         uint32_t seed, hu_voice_reply_request_t *out) {
+    return hu_voice_reply_build_request_ex(voice, response, response_len, incoming, incoming_len,
+                                           hour_local, seed, false, out);
+}
+
+hu_error_t hu_voice_reply_build_request_directed(const hu_persona_voice_config_t *voice,
+                                                 const char *rendered, size_t rendered_len,
+                                                 const char *first_emotion, size_t sentence_count,
+                                                 hu_voice_reply_request_t *out) {
+    if (!voice || !rendered || rendered_len == 0 || !out || rendered_len >= sizeof(out->transcript))
+        return HU_ERR_INVALID_ARGUMENT;
+    memset(out, 0, sizeof(*out));
+    memcpy(out->transcript, rendered, rendered_len);
+    out->transcript[rendered_len] = '\0';
+    out->transcript_len = rendered_len;
+    out->sentence_count = sentence_count;
+    snprintf(out->emotion, sizeof(out->emotion), "%s",
+             first_emotion && first_emotion[0]
+                 ? first_emotion
+                 : (voice->default_emotion[0] ? voice->default_emotion : "content"));
+    snprintf(out->model, sizeof(out->model), "%s",
+             voice->model[0] ? voice->model : HU_VOICE_REPLY_DEFAULT_MODEL);
+    out->tts.model_id = out->model;
+    out->tts.voice_id = voice->voice_id;
+    out->tts.emotion = out->emotion;
+    out->tts.speed =
+        voice->default_speed > 0.f ? voice->default_speed : HU_VOICE_REPLY_DEFAULT_SPEED;
+    out->tts.volume = 1.0f;
+    out->tts.nonverbals = voice->nonverbals;
+    return HU_OK;
+}
+
+hu_error_t hu_voice_reply_build_request_ex(const hu_persona_voice_config_t *voice,
+                                           const char *response, size_t response_len,
+                                           const char *incoming, size_t incoming_len,
+                                           int hour_local, uint32_t seed, bool laughter_cue,
+                                           hu_voice_reply_request_t *out) {
     if (!voice || !response || response_len == 0 || !out)
         return HU_ERR_INVALID_ARGUMENT;
     memset(out, 0, sizeof(*out));
@@ -32,10 +69,14 @@ hu_error_t hu_voice_reply_build_request(const hu_persona_voice_config_t *voice,
         .base_speed =
             voice->default_speed > 0.f ? voice->default_speed : HU_VOICE_REPLY_DEFAULT_SPEED,
         .pause_factor = 1.0f,
-        .discourse_rate = 0.3f,
+        /* F1 restraint (Ferni bans stock openers and inserted markers): the
+         * wording is the reply's own; prep only adds pauses, tags and a real
+         * laugh when the reply laughed. */
+        .discourse_rate = 0.0f,
         .nonverbals_enabled = voice->nonverbals,
         .strip_ssml = false,
-        .thinking_sounds = true,
+        .thinking_sounds = false,
+        .laughter_cue = laughter_cue,
         .seed = seed,
         .hour_local = (uint8_t)hour,
     };
@@ -52,8 +93,10 @@ hu_error_t hu_voice_reply_build_request(const hu_persona_voice_config_t *voice,
     out->transcript_len = n;
     out->sentence_count = prep.sentence_count;
 
+    /* Only calm emotions reach Sonic (voiceai 2026-09-27). */
+    const char *dom = prep.dominant_emotion ? prep.dominant_emotion : cfg.default_emotion;
     snprintf(out->emotion, sizeof(out->emotion), "%s",
-             prep.dominant_emotion ? prep.dominant_emotion : cfg.default_emotion);
+             dom && hu_direction_emotion_is_calm(dom, strlen(dom)) ? dom : "content");
     snprintf(out->model, sizeof(out->model), "%s",
              voice->model[0] ? voice->model : HU_VOICE_REPLY_DEFAULT_MODEL);
 

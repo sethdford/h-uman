@@ -11,6 +11,9 @@
 #include "test_framework.h"
 #include <stdio.h>
 #include <stdlib.h>
+#ifndef _WIN32
+#include <sys/stat.h>
+#endif
 #include <string.h>
 #include <unistd.h>
 
@@ -671,137 +674,6 @@ static void test_config_parse_memory_api(void) {
     hu_arena_destroy(arena);
 }
 
-/* ─── config_serialize: hu_config_save ──────────────────────────────────────── */
-static void test_config_save_null_cfg_returns_error(void) {
-    hu_error_t err = hu_config_save(NULL);
-    HU_ASSERT_EQ(err, HU_ERR_INVALID_ARGUMENT);
-}
-
-static void test_config_save_null_path_returns_error(void) {
-    hu_allocator_t backing = hu_system_allocator();
-    hu_config_t cfg = {0};
-    hu_arena_t *arena = hu_arena_create(backing);
-    HU_ASSERT_NOT_NULL(arena);
-    cfg.arena = arena;
-    cfg.allocator = hu_arena_allocator(arena);
-    cfg.default_provider = hu_strdup(&cfg.allocator, "ollama");
-    cfg.default_model = hu_strdup(&cfg.allocator, "llama2");
-    cfg.gateway.port = 3000;
-    cfg.config_path = NULL;
-    hu_error_t err = hu_config_save(&cfg);
-    HU_ASSERT_EQ(err, HU_ERR_INVALID_ARGUMENT);
-    hu_arena_destroy(arena);
-}
-
-static void test_config_save_roundtrip_key_fields(void) {
-    hu_allocator_t backing = hu_system_allocator();
-    hu_config_t cfg;
-    memset(&cfg, 0, sizeof(cfg));
-    hu_arena_t *arena = hu_arena_create(backing);
-    HU_ASSERT_NOT_NULL(arena);
-    cfg.allocator = hu_arena_allocator(arena);
-    cfg.arena = arena;
-    cfg.workspace_dir = hu_strdup(&cfg.allocator, "/tmp/test-workspace");
-    cfg.default_provider = hu_strdup(&cfg.allocator, "ollama");
-    cfg.default_model = hu_strdup(&cfg.allocator, "llama3");
-    cfg.gateway.port = 3000;
-
-    char tmp_path[] = "/tmp/hu_test_save_XXXXXX";
-    int fd = mkstemp(tmp_path);
-    HU_ASSERT(fd >= 0);
-    close(fd);
-    cfg.config_path = tmp_path;
-
-    hu_error_t err = hu_config_save(&cfg);
-    HU_ASSERT_EQ(err, HU_OK);
-
-    FILE *f = fopen(tmp_path, "r");
-    HU_ASSERT_NOT_NULL(f);
-    char buf[4096];
-    size_t n = fread(buf, 1, sizeof(buf) - 1, f);
-    fclose(f);
-    buf[n] = '\0';
-    unlink(tmp_path);
-
-    hu_config_t cfg2;
-    memset(&cfg2, 0, sizeof(cfg2));
-    hu_arena_t *arena2 = hu_arena_create(backing);
-    HU_ASSERT_NOT_NULL(arena2);
-    cfg2.allocator = hu_arena_allocator(arena2);
-    cfg2.arena = arena2;
-    err = hu_config_parse_json(&cfg2, buf, n);
-    HU_ASSERT_EQ(err, HU_OK);
-
-    HU_ASSERT_STR_EQ(cfg2.workspace_dir, "/tmp/test-workspace");
-    HU_ASSERT_STR_EQ(cfg2.default_provider, "ollama");
-    HU_ASSERT_STR_EQ(cfg2.default_model, "llama3");
-    HU_ASSERT_EQ(cfg2.gateway.port, 3000);
-
-    hu_arena_destroy(arena);
-    hu_arena_destroy(arena2);
-}
-
-static void test_config_sandbox_save_roundtrip(void) {
-    hu_allocator_t backing = hu_system_allocator();
-    hu_config_t cfg;
-    memset(&cfg, 0, sizeof(cfg));
-    hu_arena_t *arena = hu_arena_create(backing);
-    HU_ASSERT_NOT_NULL(arena);
-    cfg.allocator = hu_arena_allocator(arena);
-    cfg.arena = arena;
-
-    const char *j = "{\"security\":{\"sandbox\":\"firejail\",\"sandbox_config\":{"
-                    "\"enabled\":true,\"backend\":\"firejail\","
-                    "\"firejail_args\":[\"--whitelist=/opt\",\"--net=none\"],"
-                    "\"net_proxy\":{\"enabled\":true,\"deny_all\":false,"
-                    "\"proxy_addr\":\"http://10.0.0.1:3128\","
-                    "\"allowed_domains\":[\"api.example.com\",\"*.internal.io\"]}"
-                    "}}}";
-    hu_error_t err = hu_config_parse_json(&cfg, j, strlen(j));
-    HU_ASSERT_EQ(err, HU_OK);
-
-    char tmp_path[] = "/tmp/hu_test_cfg_XXXXXX";
-    int fd = mkstemp(tmp_path);
-    HU_ASSERT(fd >= 0);
-    close(fd);
-    cfg.config_path = tmp_path;
-
-    err = hu_config_save(&cfg);
-    HU_ASSERT_EQ(err, HU_OK);
-
-    FILE *f = fopen(tmp_path, "r");
-    HU_ASSERT_NOT_NULL(f);
-    char buf[8192];
-    size_t n = fread(buf, 1, sizeof(buf) - 1, f);
-    fclose(f);
-    buf[n] = '\0';
-    unlink(tmp_path);
-
-    hu_config_t cfg2;
-    memset(&cfg2, 0, sizeof(cfg2));
-    hu_arena_t *arena2 = hu_arena_create(backing);
-    HU_ASSERT_NOT_NULL(arena2);
-    cfg2.allocator = hu_arena_allocator(arena2);
-    cfg2.arena = arena2;
-    err = hu_config_parse_json(&cfg2, buf, n);
-    HU_ASSERT_EQ(err, HU_OK);
-
-    HU_ASSERT_TRUE(cfg2.security.sandbox_config.enabled);
-    HU_ASSERT_EQ((int)cfg2.security.sandbox_config.backend, (int)HU_SANDBOX_FIREJAIL);
-    HU_ASSERT_EQ(cfg2.security.sandbox_config.firejail_args_len, 2);
-    HU_ASSERT_STR_EQ(cfg2.security.sandbox_config.firejail_args[0], "--whitelist=/opt");
-    HU_ASSERT_STR_EQ(cfg2.security.sandbox_config.firejail_args[1], "--net=none");
-    HU_ASSERT_TRUE(cfg2.security.sandbox_config.net_proxy.enabled);
-    HU_ASSERT_FALSE(cfg2.security.sandbox_config.net_proxy.deny_all);
-    HU_ASSERT_STR_EQ(cfg2.security.sandbox_config.net_proxy.proxy_addr, "http://10.0.0.1:3128");
-    HU_ASSERT_EQ(cfg2.security.sandbox_config.net_proxy.allowed_domains_len, 2);
-    HU_ASSERT_STR_EQ(cfg2.security.sandbox_config.net_proxy.allowed_domains[0], "api.example.com");
-    HU_ASSERT_STR_EQ(cfg2.security.sandbox_config.net_proxy.allowed_domains[1], "*.internal.io");
-
-    hu_arena_destroy(arena);
-    hu_arena_destroy(arena2);
-}
-
 static void test_config_parse_behavior_thresholds(void) {
     hu_allocator_t backing = hu_system_allocator();
     hu_config_t cfg_local;
@@ -1069,53 +941,6 @@ static void test_config_parse_personalization_m3_probe_only(void) {
     hu_arena_destroy(arena);
 }
 
-static void test_config_save_roundtrip_m3_probe_path(void) {
-    hu_allocator_t backing = hu_system_allocator();
-    hu_config_t cfg;
-    memset(&cfg, 0, sizeof(cfg));
-    hu_arena_t *arena = hu_arena_create(backing);
-    HU_ASSERT_NOT_NULL(arena);
-    cfg.allocator = hu_arena_allocator(arena);
-    cfg.arena = arena;
-    cfg.workspace_dir = hu_strdup(&cfg.allocator, "/tmp/test-workspace");
-    cfg.default_provider = hu_strdup(&cfg.allocator, "ollama");
-    cfg.default_model = hu_strdup(&cfg.allocator, "llama3");
-    cfg.gateway.port = 3000;
-    cfg.personalization.m3_adapter_probe_path =
-        hu_strdup(&cfg.allocator, "/tmp/hu_m3_probe_fixture.bin");
-
-    char tmp_path[] = "/tmp/hu_cfg_m3_XXXXXX";
-    int fd = mkstemp(tmp_path);
-    HU_ASSERT(fd >= 0);
-    close(fd);
-    cfg.config_path = tmp_path;
-
-    HU_ASSERT_EQ(hu_config_save(&cfg), HU_OK);
-    FILE *f = fopen(tmp_path, "r");
-    HU_ASSERT_NOT_NULL(f);
-    char buf[4096];
-    size_t n = fread(buf, 1, sizeof(buf) - 1, f);
-    fclose(f);
-    buf[n] = '\0';
-    unlink(tmp_path);
-    HU_ASSERT_NOT_NULL(strstr(buf, "m3_adapter_probe_path"));
-    HU_ASSERT_NOT_NULL(strstr(buf, "/tmp/hu_m3_probe_fixture.bin"));
-
-    hu_config_t cfg2;
-    memset(&cfg2, 0, sizeof(cfg2));
-    hu_arena_t *arena2 = hu_arena_create(backing);
-    HU_ASSERT_NOT_NULL(arena2);
-    cfg2.allocator = hu_arena_allocator(arena2);
-    cfg2.arena = arena2;
-    hu_error_t err2 = hu_config_parse_json(&cfg2, buf, n);
-    HU_ASSERT_EQ(err2, HU_OK);
-    HU_ASSERT_NOT_NULL(cfg2.personalization.m3_adapter_probe_path);
-    HU_ASSERT_STR_EQ(cfg2.personalization.m3_adapter_probe_path, "/tmp/hu_m3_probe_fixture.bin");
-
-    hu_arena_destroy(arena);
-    hu_arena_destroy(arena2);
-}
-
 /* Track D D1.3 — rollback flag parses as a bool default-false. */
 static void test_config_personalization_m3_disabled_default_false(void) {
     hu_allocator_t backing = hu_system_allocator();
@@ -1149,49 +974,6 @@ static void test_config_personalization_m3_disabled_true(void) {
     HU_ASSERT_NOT_NULL(cfg_local.personalization.m3_adapter_probe_path);
     HU_ASSERT_STR_EQ(cfg_local.personalization.m3_adapter_probe_path, "/x.bin");
     hu_arena_destroy(arena);
-}
-
-static void test_config_save_roundtrip_m3_disabled(void) {
-    hu_allocator_t backing = hu_system_allocator();
-    hu_config_t cfg;
-    memset(&cfg, 0, sizeof(cfg));
-    hu_arena_t *arena = hu_arena_create(backing);
-    HU_ASSERT_NOT_NULL(arena);
-    cfg.allocator = hu_arena_allocator(arena);
-    cfg.arena = arena;
-    cfg.workspace_dir = hu_strdup(&cfg.allocator, "/tmp/test-workspace");
-    cfg.default_provider = hu_strdup(&cfg.allocator, "ollama");
-    cfg.default_model = hu_strdup(&cfg.allocator, "llama3");
-    cfg.gateway.port = 3000;
-    cfg.personalization.m3_adapter_disabled = true;
-
-    char tmp_path[] = "/tmp/hu_cfg_m3_disable_XXXXXX";
-    int fd = mkstemp(tmp_path);
-    HU_ASSERT(fd >= 0);
-    close(fd);
-    cfg.config_path = tmp_path;
-
-    HU_ASSERT_EQ(hu_config_save(&cfg), HU_OK);
-    FILE *f = fopen(tmp_path, "r");
-    HU_ASSERT_NOT_NULL(f);
-    char buf[4096];
-    size_t n = fread(buf, 1, sizeof(buf) - 1, f);
-    fclose(f);
-    buf[n] = '\0';
-    unlink(tmp_path);
-    HU_ASSERT_NOT_NULL(strstr(buf, "m3_adapter_disabled"));
-
-    hu_config_t cfg2;
-    memset(&cfg2, 0, sizeof(cfg2));
-    hu_arena_t *arena2 = hu_arena_create(backing);
-    HU_ASSERT_NOT_NULL(arena2);
-    cfg2.allocator = hu_arena_allocator(arena2);
-    cfg2.arena = arena2;
-    HU_ASSERT_EQ(hu_config_parse_json(&cfg2, buf, n), HU_OK);
-    HU_ASSERT_TRUE(cfg2.personalization.m3_adapter_disabled);
-
-    hu_arena_destroy(arena);
-    hu_arena_destroy(arena2);
 }
 
 /* Spec 2026-05-19 (Task 1) — `learning.dpo_pair_training_threshold`
@@ -1259,51 +1041,6 @@ static void test_config_parse_learning_threshold_negative_clamped_to_zero(void) 
     HU_ASSERT_EQ(hu_config_parse_json(&cfg_local, json, strlen(json)), HU_OK);
     HU_ASSERT_EQ(cfg_local.learning.dpo_pair_training_threshold, 0);
     hu_arena_destroy(arena);
-}
-
-static void test_config_parse_learning_threshold_roundtrip(void) {
-    /* Parse → save → re-parse round-trip preserves a non-default
-     * threshold. Default-valued configs should NOT emit the block (so
-     * the canonical config stays terse), but explicit overrides must
-     * survive a save/load cycle. */
-    hu_allocator_t backing = hu_system_allocator();
-    hu_config_t cfg;
-    memset(&cfg, 0, sizeof(cfg));
-    hu_arena_t *arena = hu_arena_create(backing);
-    HU_ASSERT_NOT_NULL(arena);
-    cfg.arena = arena;
-    cfg.allocator = hu_arena_allocator(arena);
-    const char *json = "{\"learning\":{\"dpo_pair_training_threshold\":42}}";
-    HU_ASSERT_EQ(hu_config_parse_json(&cfg, json, strlen(json)), HU_OK);
-
-    char tmp_path[] = "/tmp/human_test_learning_threshold_XXXXXX";
-    int fd = mkstemp(tmp_path);
-    HU_ASSERT_GT(fd, -1);
-    close(fd);
-    cfg.config_path = tmp_path;
-    HU_ASSERT_EQ(hu_config_save(&cfg), HU_OK);
-
-    FILE *f = fopen(tmp_path, "r");
-    HU_ASSERT_NOT_NULL(f);
-    char buf[4096];
-    size_t n = fread(buf, 1, sizeof(buf) - 1, f);
-    fclose(f);
-    buf[n] = '\0';
-    unlink(tmp_path);
-    /* Non-default threshold MUST appear in the serialized output. */
-    HU_ASSERT_NOT_NULL(strstr(buf, "dpo_pair_training_threshold"));
-
-    hu_config_t cfg2;
-    memset(&cfg2, 0, sizeof(cfg2));
-    hu_arena_t *arena2 = hu_arena_create(backing);
-    HU_ASSERT_NOT_NULL(arena2);
-    cfg2.arena = arena2;
-    cfg2.allocator = hu_arena_allocator(arena2);
-    HU_ASSERT_EQ(hu_config_parse_json(&cfg2, buf, n), HU_OK);
-    HU_ASSERT_EQ(cfg2.learning.dpo_pair_training_threshold, 42);
-
-    hu_arena_destroy(arena);
-    hu_arena_destroy(arena2);
 }
 
 /* M3-trivia (2026-05-26): nightly_lora_enabled config plumbing contracts.
@@ -1446,40 +1183,6 @@ static void test_config_parse_reflection_clamps_pathological_hours(void) {
     HU_ASSERT_EQ(cfg_local.reflection_loop.min_interval_hours, 12);
     HU_ASSERT_EQ(cfg_local.reflection_loop.idle_threshold_hours, 2);
     HU_ASSERT_EQ(cfg_local.reflection_loop.daily_floor_hours, 24);
-    hu_arena_destroy(arena);
-}
-
-static void test_config_parse_learning_default_does_not_serialize(void) {
-    /* Default threshold (100) should NOT emit the `learning` block —
-     * keep the canonical default config terse, same pattern as
-     * `personalization.m3_adapter_disabled`. */
-    hu_allocator_t backing = hu_system_allocator();
-    hu_config_t cfg;
-    memset(&cfg, 0, sizeof(cfg));
-    hu_arena_t *arena = hu_arena_create(backing);
-    HU_ASSERT_NOT_NULL(arena);
-    cfg.arena = arena;
-    cfg.allocator = hu_arena_allocator(arena);
-    HU_ASSERT_EQ(hu_config_parse_json(&cfg, "{}", 2), HU_OK);
-    HU_ASSERT_EQ(cfg.learning.dpo_pair_training_threshold, 100);
-
-    char tmp_path[] = "/tmp/human_test_learning_default_XXXXXX";
-    int fd = mkstemp(tmp_path);
-    HU_ASSERT_GT(fd, -1);
-    close(fd);
-    cfg.config_path = tmp_path;
-    HU_ASSERT_EQ(hu_config_save(&cfg), HU_OK);
-
-    FILE *f = fopen(tmp_path, "r");
-    HU_ASSERT_NOT_NULL(f);
-    char buf[4096];
-    size_t n = fread(buf, 1, sizeof(buf) - 1, f);
-    fclose(f);
-    buf[n] = '\0';
-    unlink(tmp_path);
-    /* Default threshold MUST NOT appear. */
-    HU_ASSERT(strstr(buf, "dpo_pair_training_threshold") == NULL);
-
     hu_arena_destroy(arena);
 }
 
@@ -1822,16 +1525,8 @@ void run_config_parse_tests(void) {
     HU_RUN_TEST(test_config_parse_memory_api);
 
     HU_TEST_SUITE("Config serialize");
-    HU_RUN_TEST(test_config_save_null_cfg_returns_error);
-    HU_RUN_TEST(test_config_save_null_path_returns_error);
-    HU_RUN_TEST(test_config_save_roundtrip_key_fields);
-    HU_RUN_TEST(test_config_save_roundtrip_m3_probe_path);
     HU_RUN_TEST(test_config_personalization_m3_disabled_default_false);
     HU_RUN_TEST(test_config_personalization_m3_disabled_true);
-    HU_RUN_TEST(test_config_save_roundtrip_m3_disabled);
-
-    HU_TEST_SUITE("Config sandbox roundtrip");
-    HU_RUN_TEST(test_config_sandbox_save_roundtrip);
 
     HU_TEST_SUITE("Behavior thresholds");
     HU_RUN_TEST(test_config_parse_behavior_thresholds);
@@ -1853,8 +1548,6 @@ void run_config_parse_tests(void) {
     HU_RUN_TEST(test_config_parse_learning_threshold_override);
     HU_RUN_TEST(test_config_parse_learning_threshold_zero_disables);
     HU_RUN_TEST(test_config_parse_learning_threshold_negative_clamped_to_zero);
-    HU_RUN_TEST(test_config_parse_learning_threshold_roundtrip);
-    HU_RUN_TEST(test_config_parse_learning_default_does_not_serialize);
     /* M3-trivia: nightly_lora_enabled config plumbing (replaces
      * HU_NIGHTLY_LORA_ENABLED env var as the canonical opt-in). */
     HU_RUN_TEST(test_config_parse_learning_nightly_lora_default_is_false);

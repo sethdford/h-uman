@@ -3,6 +3,7 @@
 #define HU_AGENT_INTERNAL_H
 
 #include "human/agent.h"
+#include "human/agent/response_guard.h"
 #include "human/observer.h"
 #include "human/provider.h"
 #include "human/security.h"
@@ -61,6 +62,15 @@ static inline uint64_t hu_agent_internal_monotonic_ms(void) {
     return (uint64_t)ts.tv_sec * 1000ULL + (uint64_t)(ts.tv_nsec / 1000000L);
 }
 
+/* Exclusive lower bound of a backward scan over the last `window` history
+ * entries: `history_count - window`, clamped at 0. Written inline as a bare
+ * subtraction it wraps on size_t whenever the history is shorter than the
+ * window, so `hi > history_count - window` is false from the start and the
+ * scan silently never runs in a short conversation. */
+static inline size_t hu_agent_history_floor(size_t history_count, size_t window) {
+    return history_count > window ? history_count - window : 0;
+}
+
 /* Average content_len over the most-recent up-to-`max_n` assistant
  * turns in `agent->history` (skips system / user / tool entries).
  * Returns 0 when there are no qualifying turns; the response guard
@@ -76,6 +86,32 @@ static inline uint64_t hu_agent_internal_monotonic_ms(void) {
 #define HU_GUARD_ASSISTANT_LEN_EWMA_ALPHA 0.35
 
 size_t hu_agent_internal_recent_assistant_avg_len(const hu_agent_t *agent, size_t max_n);
+
+/* The response guard's per-turn context (G5-G9) for a reply to `msg`: the
+ * recent-length baseline, whether `msg` is a question/request, the channel's
+ * G5 multiplier and G9 opt-out, the director text + history, and the persona
+ * strings G7/G8 look for. One builder for every guard call site. */
+void hu_agent_internal_guard_context(const hu_agent_t *agent, const char *msg, size_t msg_len,
+                                     hu_guard_context_t *out);
+
+/* Fit the request's messages ([0] = system, last = the current message): the
+ * per-turn history_msg_cap first, then the 20 KB byte budget (oldest first).
+ * Compacts msgs in place and returns the new count. */
+/* The provider the contact-recall planner may call: NULL (its local
+ * heuristic path) for a short casual message, which is not worth a 4 s
+ * planner call — the semantic-recall register gate already skips those —
+ * or when HU_RECALL_PLANNER_LLM is off/shadow (default live). */
+hu_provider_t *hu_agent_internal_recall_provider(hu_agent_t *agent, const char *msg,
+                                                 size_t msg_len);
+
+/* Open the experience store for this turn's writes. Refuses
+ * (HU_ERR_NOT_SUPPORTED) with no memory or on an owner self-test turn, so
+ * test traffic never becomes an experience other contacts recall. */
+struct hu_experience_store;
+hu_error_t hu_agent_internal_experience_init(hu_agent_t *agent, struct hu_experience_store *store);
+
+size_t hu_agent_internal_fit_history(const hu_agent_t *agent, hu_chat_message_t *msgs,
+                                     size_t msgs_count);
 
 /* Sprint 46 R5.3 (refactored for testability per audit FAIL):
  * Lazy-load the PersonaEval v2 classifier into agent->persona_eval.
@@ -429,5 +465,33 @@ void hu_agent_internal_post_hook_fire(hu_agent_t *agent, const char *tool_name,
 #ifndef HU_OPINION_FRICTION_COUNT
 #define HU_OPINION_FRICTION_COUNT 2
 #endif
+
+/* Newest-first, de-duplicated HU_ROLE_TOOL names from agent->history (Story F.2).
+ * Shared by the S3 retrieval stage (src/agent/turn/turn_retrieve.c) and the
+ * persona-context build in agent_turn.c. Returns the number written. */
+size_t hu_agent_internal_collect_recent_tool_names(const hu_agent_t *agent, const char **out_names,
+                                                   size_t out_cap);
+
+/* Shared by the S16 tool-dispatch stage (src/agent/turn/turn_tools.c) and the
+ * rest of the turn in agent_turn.c; defined in agent_turn.c. */
+#if (defined(__unix__) || defined(__APPLE__)) && !defined(HU_IS_TEST)
+struct hu_hula_program;
+struct hu_hula_exec;
+/* One HU_ROLE_TOOL history entry per CALL / DELEGATE / EMIT node of a finished
+ * HuLa run. */
+void hu_agent_internal_hula_append_histories(hu_agent_t *agent, const struct hu_hula_program *prog,
+                                             const struct hu_hula_exec *exec);
+#endif
+#ifndef HU_IS_TEST
+struct hu_spawn_config;
+/* Zero + inherit the parent's fields into *tpl (HuLa compiler / exec spawn). */
+void hu_agent_internal_hula_fill_spawn_tpl(hu_agent_t *agent, struct hu_spawn_config *tpl);
+/* *tpl must stay valid until hu_hula_exec_run returns (exec keeps its address). */
+void hu_agent_internal_hula_exec_bind_spawn(hu_agent_t *agent, struct hu_hula_exec *exec,
+                                            struct hu_spawn_config *tpl);
+#endif
+/* True when a message of 48+ bytes contains one of the loaded multi-step
+ * needles; gates the multi-agent orchestrator in S16. */
+bool hu_agent_internal_message_looks_multistep(const char *m, size_t mlen);
 
 #endif /* HU_AGENT_INTERNAL_H */

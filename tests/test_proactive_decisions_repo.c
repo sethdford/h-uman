@@ -94,8 +94,122 @@ static void test_proactive_decisions_repo_ensure_schema_idempotent(void) {
     mem.vtable->deinit(mem.ctx);
 }
 
+/* Voice-first spacing (spec 2026-09-28): the newest DELIVERED row for this
+ * contact and trigger; declines, other triggers and other contacts ignored. */
+static void test_proactive_decisions_repo_last_sent_ts(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    HU_ASSERT_NOT_NULL(db);
+    int64_t ts = 0;
+    HU_ASSERT_EQ(hu_proactive_decisions_repo_last_sent_ts_except(db, "+15550000001", "voice_reply",
+                                                                 NULL, &ts),
+                 HU_OK);
+    HU_ASSERT_EQ(ts, -1);
+    (void)hu_proactive_decisions_repo_record(db, 100, "+15550000001", "voice_reply",
+                                             HU_PROACTIVE_DECISION_SEND, "voice", 1, NULL);
+    (void)hu_proactive_decisions_repo_record(db, 200, "+15550000001", "voice_reply",
+                                             HU_PROACTIVE_DECISION_SEND, "voice", 0, NULL);
+    (void)hu_proactive_decisions_repo_record(db, 300, "+15550000001", "voice_first",
+                                             HU_PROACTIVE_DECISION_SEND, "heartfelt", 1, NULL);
+    (void)hu_proactive_decisions_repo_record(db, 400, "+15550000002", "voice_reply",
+                                             HU_PROACTIVE_DECISION_SEND, "voice", 1, NULL);
+    HU_ASSERT_EQ(hu_proactive_decisions_repo_last_sent_ts_except(db, "+15550000001", "voice_reply",
+                                                                 NULL, &ts),
+                 HU_OK);
+    HU_ASSERT_EQ(ts, 100);
+    mem.vtable->deinit(mem.ctx);
+}
+
+/* Spacing ignores owner self-tests (bug 2026-10-01): a newer "self_test" send
+ * is skipped, an older real memo still counts, and NULL excludes nothing. */
+static void test_proactive_decisions_repo_last_sent_ts_except(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    HU_ASSERT_NOT_NULL(db);
+    const char *c = "+15550000001";
+    (void)hu_proactive_decisions_repo_record(db, 100, c, "voice_reply", HU_PROACTIVE_DECISION_SEND,
+                                             "voice_first", 1, NULL);
+    (void)hu_proactive_decisions_repo_record(db, 500, c, "voice_reply", HU_PROACTIVE_DECISION_SEND,
+                                             "self_test", 1, NULL);
+    int64_t ts = 0;
+    HU_ASSERT_EQ(
+        hu_proactive_decisions_repo_last_sent_ts_except(db, c, "voice_reply", "self_test", &ts),
+        HU_OK);
+    HU_ASSERT_EQ(ts, 100);
+    HU_ASSERT_EQ(hu_proactive_decisions_repo_last_sent_ts_except(db, c, "voice_reply", NULL, &ts),
+                 HU_OK);
+    HU_ASSERT_EQ(ts, 500);
+    mem.vtable->deinit(mem.ctx);
+}
+
+/* Weekly cap (voice triggers v2): rows for one contact/trigger/decision since a time. */
+static void test_proactive_decisions_repo_count_since(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    HU_ASSERT_NOT_NULL(db);
+    const char *c = "+15550000001";
+    int64_t n = -1;
+    HU_ASSERT_EQ(hu_proactive_decisions_repo_count_since(db, c, "voice_v2", "send", 0, &n), HU_OK);
+    HU_ASSERT_EQ(n, 0);
+    (void)hu_proactive_decisions_repo_record(db, 100, c, "voice_v2", HU_PROACTIVE_DECISION_SEND,
+                                             "story_inbound", 0, NULL);
+    (void)hu_proactive_decisions_repo_record(db, 200, c, "voice_v2", HU_PROACTIVE_DECISION_SEND,
+                                             "story_inbound", 0, NULL);
+    (void)hu_proactive_decisions_repo_record(db, 300, c, "voice_v2", HU_PROACTIVE_DECISION_DECLINE,
+                                             "weekly_cap", 0, NULL);
+    (void)hu_proactive_decisions_repo_record(db, 300, "+15550000002", "voice_v2",
+                                             HU_PROACTIVE_DECISION_SEND, "story_inbound", 0, NULL);
+    (void)hu_proactive_decisions_repo_record(db, 300, c, "voice_first", HU_PROACTIVE_DECISION_SEND,
+                                             "heartfelt", 0, NULL);
+    HU_ASSERT_EQ(hu_proactive_decisions_repo_count_since(db, c, "voice_v2", "send", 150, &n),
+                 HU_OK);
+    HU_ASSERT_EQ(n, 1);
+    HU_ASSERT_EQ(hu_proactive_decisions_repo_count_since(db, c, "voice_v2", "send", 0, &n), HU_OK);
+    HU_ASSERT_EQ(n, 2);
+    HU_ASSERT_EQ(hu_proactive_decisions_repo_count_since(NULL, c, "voice_v2", "send", 0, &n),
+                 HU_ERR_INVALID_ARGUMENT);
+    mem.vtable->deinit(mem.ctx);
+}
+
+/* Repeat guard (2026-09-30): the texts of this contact's recent DELIVERED
+ * proactive check-ins, newest first; declines, other triggers, other
+ * contacts and anything older than `since` are left out. */
+static void test_proactive_decisions_repo_recent_sent_refs(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    HU_ASSERT_NOT_NULL(db);
+    const char *c = "+15550000001";
+    (void)hu_proactive_decisions_repo_record(db, 100, c, "proactive_send",
+                                             HU_PROACTIVE_DECISION_SEND, NULL, 1, "too old");
+    (void)hu_proactive_decisions_repo_record(db, 500, c, "proactive_send",
+                                             HU_PROACTIVE_DECISION_SEND, NULL, 1, "first");
+    (void)hu_proactive_decisions_repo_record(db, 600, c, "proactive_send",
+                                             HU_PROACTIVE_DECISION_SEND, NULL, 0, "never sent");
+    (void)hu_proactive_decisions_repo_record(db, 700, c, "voice_reply", HU_PROACTIVE_DECISION_SEND,
+                                             NULL, 1, "a reply");
+    (void)hu_proactive_decisions_repo_record(db, 800, "+15550000002", "proactive_send",
+                                             HU_PROACTIVE_DECISION_SEND, NULL, 1, "other person");
+    (void)hu_proactive_decisions_repo_record(db, 900, c, "proactive_send",
+                                             HU_PROACTIVE_DECISION_SEND, NULL, 1, "second");
+    char refs[4][HU_PROACTIVE_REF_MAX];
+    size_t n = 0;
+    HU_ASSERT_EQ(hu_proactive_decisions_repo_recent_sent_refs(db, c, 400, refs, 4, &n), HU_OK);
+    HU_ASSERT_EQ(n, 2u);
+    HU_ASSERT_STR_EQ(refs[0], "second");
+    HU_ASSERT_STR_EQ(refs[1], "first");
+    mem.vtable->deinit(mem.ctx);
+}
+
 void run_proactive_decisions_repo_tests(void) {
     HU_TEST_SUITE("proactive_decisions_repo");
+    HU_RUN_TEST(test_proactive_decisions_repo_recent_sent_refs);
+    HU_RUN_TEST(test_proactive_decisions_repo_last_sent_ts);
+    HU_RUN_TEST(test_proactive_decisions_repo_last_sent_ts_except);
+    HU_RUN_TEST(test_proactive_decisions_repo_count_since);
     HU_RUN_TEST(test_proactive_decisions_repo_record_and_count);
     HU_RUN_TEST(test_proactive_decisions_repo_rejects_invalid_decision);
     HU_RUN_TEST(test_proactive_decisions_repo_rejects_null_db);

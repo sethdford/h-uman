@@ -17,11 +17,16 @@
 #include "human/autoresponder.h"
 #include "human/config.h"
 #include "human/core/json.h"
+#include "human/core/llm_purpose.h"
+#include "human/core/local_only_guard.h"
 #include "human/core/log.h"
+#include "human/core/log_redact.h"
 #include "human/memory.h"
 #include "human/memory/proactive_decisions_repo.h" /* C5 Part A: decision log */
 #include "human/provider.h"
+#include "human/providers/chat_oneshot.h"
 #include "human/reflection.h" /* T8: pull unsurfaced patterns into bundle */
+#include <ctype.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -36,6 +41,11 @@ static atomic_bool g_warned_disabled = false;
 static atomic_bool g_warned_enabled = false;
 /* Guard for DND-gate diagnostic: alert when no config but gate fires */
 static atomic_bool g_warned_no_dnd_config = false;
+
+static const char *g_last_llm_caller = NULL;
+const char *hu_init_proposer_last_llm_caller_for_test(void) {
+    return g_last_llm_caller;
+}
 
 void hu_init_proposer_reset_warn_guards_for_test(void) {
 #if HU_IS_TEST
@@ -53,6 +63,33 @@ void hu_init_proposer_reset_warn_guards_for_test(void) {
  * (HU_IS_TEST) skip the write entirely so unit tests never touch a real
  * db path by accident; tests exercise the repo directly instead (see
  * tests/test_proactive_decisions_repo.c). */
+/* Did this contact already get a check-in on the same topic in the last 14
+ * days? Reads the delivered proactive_send rows (message_ref prefixes). */
+static bool init_proposer_repeats_recent_send(const struct hu_agent *agent, const char *contact,
+                                              const char *draft, size_t draft_len,
+                                              int64_t now_unix) {
+#if defined(HU_ENABLE_SQLITE)
+    if (!agent || !agent->memory || !contact || !contact[0])
+        return false;
+    struct sqlite3 *db = hu_sqlite_memory_get_db(agent->memory);
+    if (!db)
+        return false;
+    char recent[8][HU_PROACTIVE_REF_MAX];
+    size_t n = 0;
+    if (hu_proactive_decisions_repo_recent_sent_refs(db, contact, now_unix - (int64_t)14 * 86400,
+                                                     recent, 8, &n) != HU_OK)
+        return false;
+    return hu_init_proposer_repeats_recent(draft, draft_len, (const char (*)[160])recent, n);
+#else
+    (void)agent;
+    (void)contact;
+    (void)draft;
+    (void)draft_len;
+    (void)now_unix;
+    return false;
+#endif
+}
+
 static void init_proposer_record_decision(const struct hu_agent *agent, const char *contact,
                                           const char *trigger, const char *decision,
                                           const char *reason, const char *message_ref,
@@ -119,6 +156,8 @@ static const char *init_proposer_reason_for_result(hu_init_proposer_result_t r) 
         return "llm_negative";
     case HU_INIT_RESULT_GUARD_REJECT:
         return "guard_reject";
+    case HU_INIT_RESULT_DISABLED:
+        return "disabled";
     case HU_INIT_RESULT_SKIP:
         return "no_provider_or_skip";
     case HU_INIT_RESULT_FIRED:
@@ -192,7 +231,7 @@ hu_error_t hu_init_proposer_tick(const struct hu_initiative_config *cfg,
                          "initiative subsystem disabled by config "
                          "(cfg->initiative.enabled=false); set initiative.enabled=true "
                          "in config.json to activate");
-        *out_result = HU_INIT_RESULT_SKIP;
+        *out_result = HU_INIT_RESULT_DISABLED;
         return HU_OK;
     }
 
@@ -654,71 +693,23 @@ static void find_first_json_object(const char *text, size_t len, size_t *out_sta
  *
  * On failure, *out_response is NULL.
  */
-/* Both call sites live in the #else (non-test) branches of the proposer
- * tick/run functions, so in HU_IS_TEST (human_tests) builds this helper
- * is unused and would trip -Wunused-function under -Werror. Guard the
- * definition with the same condition as its callers. */
-#if !HU_IS_TEST
+/* Also called by hu_init_proposer_decide_once in every build, so it is not
+ * guarded by HU_IS_TEST (the tick paths still never reach it in tests). */
 static hu_error_t init_proposer_call_llm(hu_allocator_t *alloc, struct hu_provider *provider,
                                          const char *sys_prompt, const char *user_msg,
                                          const char *model, char **out_response,
                                          size_t *out_response_len) {
-    *out_response = NULL;
-    *out_response_len = 0;
-
-    /* Prefer the structured chat() vtable. Some test mocks only set
-     * chat_with_system(); fall back so we don't break those callers. */
-    if (provider->vtable && provider->vtable->chat) {
-        hu_chat_message_t msgs[2];
-        memset(msgs, 0, sizeof(msgs));
-        msgs[0].role = HU_ROLE_SYSTEM;
-        msgs[0].content = sys_prompt;
-        msgs[0].content_len = strlen(sys_prompt);
-        msgs[1].role = HU_ROLE_USER;
-        msgs[1].content = user_msg;
-        msgs[1].content_len = strlen(user_msg);
-
-        hu_chat_request_t req;
-        memset(&req, 0, sizeof(req));
-        req.messages = msgs;
-        req.messages_count = 2;
-        req.model = model;
-        req.model_len = strlen(model);
-        req.temperature = 0.2;
-        req.max_tokens = 512;    /* compact JSON; not a long-form generation */
-        req.thinking_budget = 0; /* deterministic classifier — no thinking */
-        req.response_format = "json_object";
-        req.response_format_len = strlen("json_object");
-
-        hu_chat_response_t resp;
-        memset(&resp, 0, sizeof(resp));
-        hu_error_t err =
-            provider->vtable->chat(provider->ctx, alloc, &req, model, strlen(model), 0.2, &resp);
-        if (err == HU_OK && resp.content && resp.content_len > 0) {
-            char *buf = (char *)alloc->alloc(alloc->ctx, resp.content_len + 1);
-            if (buf) {
-                memcpy(buf, resp.content, resp.content_len);
-                buf[resp.content_len] = '\0';
-                *out_response = buf;
-                *out_response_len = resp.content_len;
-            } else {
-                err = HU_ERR_OUT_OF_MEMORY;
-            }
-        }
-        hu_chat_response_free(alloc, &resp);
-        return err;
-    }
-
-    /* Fallback path for providers/mocks without structured chat(). The
-     * truncation risk above DOES apply here, but it's the only path
-     * available — better to attempt than to hard-fail. */
-    if (!provider->vtable || !provider->vtable->chat_with_system)
-        return HU_ERR_NOT_SUPPORTED;
-    return provider->vtable->chat_with_system(provider->ctx, alloc, sys_prompt, strlen(sys_prompt),
-                                              user_msg, strlen(user_msg), model, strlen(model), 0.2,
+    /* max_tokens 512, thinking_budget 0, json_object: see the comment above. */
+    const hu_chat_oneshot_opts_t opts = {
+        .temperature = 0.2, .max_tokens = 512, .json_object = true};
+    /* Drafts are background work: X-HU-Priority: batch lets a reply jump them. */
+    hu_llm_purpose_t prev_purpose = hu_llm_purpose_set(HU_LLM_PURPOSE_PROACTIVE);
+    hu_error_t err = hu_provider_chat_oneshot(alloc, provider, model, strlen(model), sys_prompt,
+                                              strlen(sys_prompt), user_msg, strlen(user_msg), &opts,
                                               out_response, out_response_len);
+    (void)hu_llm_purpose_set(prev_purpose);
+    return err;
 }
-#endif /* !HU_IS_TEST */
 
 /* 2026-05-26 issue-sweep — defense-in-depth fallback for truncated
  * responses. Even with gemini-3.5-flash + json_object mode, the model
@@ -842,7 +833,7 @@ hu_init_proposer_result_t hu_init_proposer_evaluate_decision(const hu_init_decis
     return HU_INIT_RESULT_FIRED;
 }
 
-hu_error_t hu_init_proposer_tick_with_provider(
+static hu_error_t init_proposer_tick_run(
     const struct hu_initiative_config *cfg, const struct hu_autoresponder_config *ar_cfg,
     int32_t tz_offset_seconds, struct hu_proactive_budget *budget, const struct hu_agent *agent,
     struct hu_provider *provider, hu_allocator_t *alloc, int64_t last_inbound_unix,
@@ -896,6 +887,7 @@ hu_error_t hu_init_proposer_tick_with_provider(
     static char user_msg[16384];
     hu_init_proposer_build_propose_prompt(&bundle, sys_prompt, sizeof(sys_prompt), user_msg,
                                           sizeof(user_msg));
+    g_last_llm_caller = hu_local_only_current_caller(); /* the tag this request carries */
 
 #if HU_IS_TEST
     /* Test builds: never make a real network call. Return SKIP so unit
@@ -943,8 +935,8 @@ hu_error_t hu_init_proposer_tick_with_provider(
         }
         preview[copy] = '\0';
         hu_log_warn("init_proposer", NULL,
-                    "response parse failed: err=%d response_len=%zu preview=%.*s%s", (int)perr,
-                    response_len, (int)copy, preview, response_len > copy ? "..." : "");
+                    "response parse failed: err=%d response_len=%zu preview=%s", (int)perr,
+                    response_len, HU_LOG_TEXT(preview, copy, 120));
         alloc->free(alloc->ctx, response, response_len + 1);
         if (out_result)
             *out_result = HU_INIT_RESULT_PARSE_ERROR;
@@ -957,9 +949,9 @@ hu_error_t hu_init_proposer_tick_with_provider(
 
     hu_log_info("init_proposer", NULL,
                 "LLM verdict: should_propose=%d confidence=%.3f draft_len=%zu result=%d "
-                "reason=%.*s",
+                "reason=%s",
                 decision.should_propose ? 1 : 0, decision.confidence, decision.draft_len,
-                (int)verdict, (int)decision.skip_reason_len, decision.skip_reason);
+                (int)verdict, HU_LOG_TEXT(decision.skip_reason, decision.skip_reason_len, 120));
 
     if (out_result)
         *out_result = verdict;
@@ -967,6 +959,22 @@ hu_error_t hu_init_proposer_tick_with_provider(
         memcpy(out_decision, &decision, sizeof(decision));
     return HU_OK;
 #endif
+}
+
+/* Tags the owner-initiative propose-model request "initiative" for local_only
+ * (the daemon calls this entry point directly; the _ex one tags "proactive"). */
+hu_error_t hu_init_proposer_tick_with_provider(
+    const struct hu_initiative_config *cfg, const struct hu_autoresponder_config *ar_cfg,
+    int32_t tz_offset_seconds, struct hu_proactive_budget *budget, const struct hu_agent *agent,
+    struct hu_provider *provider, hu_allocator_t *alloc, int64_t last_inbound_unix,
+    int64_t now_unix, int64_t *last_tick_unix_inout, uint64_t *tick_id_inout,
+    hu_init_proposer_result_t *out_result, hu_init_decision_t *out_decision) {
+    const char *lo_prev = hu_local_only_enter("initiative"); /* keeps an outer "proactive" */
+    hu_error_t err = init_proposer_tick_run(
+        cfg, ar_cfg, tz_offset_seconds, budget, agent, provider, alloc, last_inbound_unix, now_unix,
+        last_tick_unix_inout, tick_id_inout, out_result, out_decision);
+    (void)hu_local_only_set_caller(lo_prev);
+    return err;
 }
 
 /* ──────────────────────────────────────────────────────────────────────────
@@ -1021,6 +1029,16 @@ size_t hu_init_proposer_build_propose_user_message_ex(const hu_proactive_compose
             pos += (size_t)n;
     }
 
+    /* HU_PROPOSER_CONTEXT block (contact profile, recent thread, insights):
+     * pre-rendered with its own headers; absent on every call not pinned to
+     * a local provider, so today's prompt is unchanged byte for byte. */
+    if (inputs->proposer_context && inputs->proposer_context_len > 0 && pos + 1 < out_cap) {
+        size_t avail = out_cap - pos - 1;
+        size_t copy = inputs->proposer_context_len < avail ? inputs->proposer_context_len : avail;
+        memcpy(out + pos, inputs->proposer_context, copy);
+        pos += copy;
+    }
+
     /* Content fragments. Each gets its own labeled header so the model
      * can see WHICH source contributed what. Memory is filtered through
      * the optional content_is_safe predicate if present — risk-mitigation
@@ -1041,6 +1059,7 @@ size_t hu_init_proposer_build_propose_user_message_ex(const hu_proactive_compose
         {"feeds", inputs->feeds_context, inputs->feeds_context_len, false},
         {"due_followups", inputs->due_followups_context, inputs->due_followups_context_len, false},
     };
+    bool memory_rendered = false;
     for (size_t i = 0; i < sizeof(fields) / sizeof(fields[0]); i++) {
         if (!fields[i].body || fields[i].body_len == 0)
             continue;
@@ -1064,6 +1083,20 @@ size_t hu_init_proposer_build_propose_user_message_ex(const hu_proactive_compose
         size_t copy = fields[i].body_len < avail ? fields[i].body_len : avail;
         memcpy(out + pos, fields[i].body, copy);
         pos += copy;
+        if (strcmp(fields[i].label, "memory") == 0)
+            memory_rendered = true;
+    }
+
+    /* Whose news (2026-09-30): memory says "The user is navigating a recent
+     * relocation to Florida" (Seth's move) and the proposer asked his sister
+     * and mother how THEIR Florida move was going, six times in eight days. */
+    if (memory_rendered && pos + 1 < out_cap) {
+        int n = snprintf(out + pos, out_cap - pos,
+                         "\n\n--- whose news ---\nMemory lines about \"the user\" describe "
+                         "Seth's own life (his move, job, trips). Never ask the contact about "
+                         "Seth's news as if it were theirs.");
+        if (n > 0 && (size_t)n < out_cap - pos)
+            pos += (size_t)n;
     }
 
     /* Final question — same wording as the bundle-based path. */
@@ -1077,6 +1110,163 @@ size_t hu_init_proposer_build_propose_user_message_ex(const hu_proactive_compose
     }
     out[pos] = '\0';
     return pos;
+}
+
+#if !HU_IS_TEST /* its only caller is the _ex LLM tail, compiled out under test */
+static const char *init_proposer_guard_detector(const hu_guard_report_t *r) {
+    if (r->detected_naked_discourse_opener)
+        return "naked_discourse_opener";
+    if (r->detected_persona_identity_echo)
+        return "persona_identity_echo";
+    if (r->detected_persona_pii_echo)
+        return "persona_pii_echo";
+    if (r->detected_director_echo)
+        return "director_echo";
+    if (r->detected_length_anomaly)
+        return "length_anomaly";
+    if (r->detected_semantic_leak)
+        return "semantic_leak";
+    if (r->detected_degenerate_repetition)
+        return "degenerate_repetition";
+    return "unknown";
+}
+#endif
+
+/* After the confidence threshold: the response guard on a FIRED draft (M3
+ * Dispatch T2 — the same G1–G9 gate reactive replies get; a rewrite replaces
+ * the draft, a reject downgrades to GUARD_REJECT), then the 14-day repeat
+ * guard (2026-09-30: Mindy got "how are things settling in down there" three
+ * times in a week). No logging, no DPO capture, no decision row — callers
+ * decide what to record. */
+static hu_init_proposer_result_t
+init_proposer_finalize(const struct hu_agent *agent, hu_allocator_t *alloc,
+                       const hu_proactive_compose_inputs_t *inputs, const char *contact,
+                       int64_t now_unix, hu_init_decision_t *d, hu_init_proposer_result_t verdict,
+                       hu_guard_report_t *report, bool *guard_rejected, bool *repeat_rejected) {
+    memset(report, 0, sizeof(*report));
+    *guard_rejected = false;
+    *repeat_rejected = false;
+    if (verdict == HU_INIT_RESULT_FIRED && d->draft_len > 0) {
+        hu_guard_context_t gctx;
+        memset(&gctx, 0, sizeof(gctx));
+        if (agent && agent->persona) {
+            if (agent->persona->name && agent->persona->name_len > 1) {
+                gctx.persona_name = agent->persona->name;
+                gctx.persona_name_len = agent->persona->name_len;
+            }
+            const char *id =
+                agent->persona->identity ? agent->persona->identity : agent->persona->core_anchor;
+            if (id) {
+                gctx.persona_identity = id;
+                gctx.persona_identity_len = strlen(id);
+            }
+            if (agent->persona->biography) {
+                gctx.persona_biography = agent->persona->biography;
+                gctx.persona_biography_len = strlen(agent->persona->biography);
+            }
+        }
+        /* Per-channel G9 disable (Sprint 41 follow-up #4). */
+        if (inputs->channel_name && inputs->channel_name_len > 0)
+            gctx.naked_opener_disabled = hu_response_guard_g9_disabled_for_channel(
+                inputs->channel_name, inputs->channel_name_len);
+        char *gout = NULL;
+        size_t gout_len = 0;
+        hu_guard_outcome_t outcome = HU_GUARD_OK;
+        if (hu_response_guard_check_ex(alloc, d->draft, d->draft_len, &gctx, &gout, &gout_len,
+                                       &outcome, report) == HU_OK) {
+            verdict = hu_init_proposer_evaluate_guard_outcome((int)outcome);
+            if (outcome == HU_GUARD_REWROTE && gout && gout_len > 0) {
+                size_t copy = gout_len < sizeof(d->draft) - 1 ? gout_len : sizeof(d->draft) - 1;
+                memcpy(d->draft, gout, copy);
+                d->draft[copy] = '\0';
+                d->draft_len = copy;
+                alloc->free(alloc->ctx, gout, gout_len + 1);
+            } else if (outcome == HU_GUARD_REJECT) {
+                *guard_rejected = true;
+            }
+        }
+    }
+    if (verdict == HU_INIT_RESULT_FIRED && d->draft_len > 0 &&
+        init_proposer_repeats_recent_send(agent, contact, d->draft, d->draft_len, now_unix)) {
+        verdict = HU_INIT_RESULT_GUARD_REJECT;
+        *repeat_rejected = true;
+    }
+    return verdict;
+}
+
+hu_init_proposer_result_t
+hu_init_proposer_final_verdict(const struct hu_initiative_config *cfg, const struct hu_agent *agent,
+                               hu_allocator_t *alloc, const hu_proactive_compose_inputs_t *inputs,
+                               int64_t now_unix, hu_init_decision_t *decision) {
+    if (!alloc || !inputs || !decision)
+        return HU_INIT_RESULT_PARSE_ERROR;
+    double threshold = cfg && cfg->confidence_threshold > 0.0 ? cfg->confidence_threshold : 0.85;
+    char contact[128];
+    init_proposer_copy_contact(inputs, contact, sizeof(contact));
+    hu_guard_report_t report;
+    bool g = false, r = false;
+    return init_proposer_finalize(agent, alloc, inputs, contact, now_unix, decision,
+                                  hu_init_proposer_evaluate_decision(decision, threshold), &report,
+                                  &g, &r);
+}
+
+size_t hu_init_proposer_format_ex_verdict(const hu_proactive_compose_inputs_t *inputs,
+                                          const hu_init_decision_t *d, int verdict,
+                                          size_t user_msg_bytes, char *out, size_t cap) {
+    if (!out || cap == 0)
+        return 0;
+    out[0] = '\0';
+    if (!inputs || !d)
+        return 0;
+    int n;
+    if (inputs->proposer_context_len > 0)
+        n = snprintf(out, cap,
+                     "LLM verdict (ex, channel=%.*s): should_propose=%d confidence=%.3f "
+                     "draft_len=%zu result=%d user_msg_bytes=%zu reason_len=%zu (context-enriched; "
+                     "text not logged)",
+                     (int)inputs->channel_name_len,
+                     inputs->channel_name ? inputs->channel_name : "", d->should_propose ? 1 : 0,
+                     d->confidence, d->draft_len, verdict, user_msg_bytes, d->skip_reason_len);
+    else
+        n = snprintf(out, cap,
+                     "LLM verdict (ex, channel=%.*s): should_propose=%d confidence=%.3f "
+                     "draft_len=%zu result=%d user_msg_bytes=%zu reason=%s",
+                     (int)inputs->channel_name_len,
+                     inputs->channel_name ? inputs->channel_name : "", d->should_propose ? 1 : 0,
+                     d->confidence, d->draft_len, verdict, user_msg_bytes,
+                     HU_LOG_TEXT(d->skip_reason, d->skip_reason_len, 120));
+    if (n < 0)
+        return 0;
+    return (size_t)n < cap ? (size_t)n : cap - 1;
+}
+
+hu_error_t hu_init_proposer_decide_once(hu_allocator_t *alloc, struct hu_provider *provider,
+                                        const char *model,
+                                        const hu_proactive_compose_inputs_t *inputs,
+                                        int64_t now_unix, int64_t last_inbound_unix,
+                                        hu_init_decision_t *out) {
+    if (!alloc || !provider || !provider->vtable || !inputs || !out)
+        return HU_ERR_INVALID_ARGUMENT;
+    memset(out, 0, sizeof(*out));
+    const size_t cap = 16384; /* same cap as the _ex path's user message */
+    char *user_msg = (char *)alloc->alloc(alloc->ctx, cap);
+    if (!user_msg)
+        return HU_ERR_OUT_OF_MEMORY;
+    hu_init_proposer_build_propose_user_message_ex(inputs, now_unix, last_inbound_unix, user_msg,
+                                                   cap);
+    char *response = NULL;
+    size_t response_len = 0;
+    hu_error_t err = init_proposer_call_llm(alloc, provider, s_system_prompt, user_msg,
+                                            model ? model : "", &response, &response_len);
+    alloc->free(alloc->ctx, user_msg, cap);
+    if (err != HU_OK || !response || response_len == 0) {
+        if (response)
+            alloc->free(alloc->ctx, response, response_len + 1);
+        return err != HU_OK ? err : HU_ERR_PROVIDER_RESPONSE;
+    }
+    err = hu_init_proposer_parse_response(response, response_len, out);
+    alloc->free(alloc->ctx, response, response_len + 1);
+    return err;
 }
 
 /* M3 Dispatch T2 — pure verdict mapping. Exposed in the header so the
@@ -1095,13 +1285,14 @@ hu_init_proposer_result_t hu_init_proposer_evaluate_guard_outcome(int guard_outc
     }
 }
 
-hu_error_t hu_init_proposer_tick_with_provider_ex(
-    const struct hu_initiative_config *cfg, const struct hu_autoresponder_config *ar_cfg,
-    int32_t tz_offset_seconds, struct hu_proactive_budget *budget, const struct hu_agent *agent,
-    struct hu_provider *provider, hu_allocator_t *alloc,
-    const hu_proactive_compose_inputs_t *inputs, int64_t last_inbound_unix, int64_t now_unix,
-    int64_t *last_tick_unix_inout, uint64_t *tick_id_inout, hu_init_proposer_result_t *out_result,
-    hu_init_decision_t *out_decision) {
+static hu_error_t
+init_proposer_tick_ex_run(const struct hu_initiative_config *cfg,
+                          const struct hu_autoresponder_config *ar_cfg, int32_t tz_offset_seconds,
+                          struct hu_proactive_budget *budget, const struct hu_agent *agent,
+                          struct hu_provider *provider, hu_allocator_t *alloc,
+                          const hu_proactive_compose_inputs_t *inputs, int64_t last_inbound_unix,
+                          int64_t now_unix, int64_t *last_tick_unix_inout, uint64_t *tick_id_inout,
+                          hu_init_proposer_result_t *out_result, hu_init_decision_t *out_decision) {
     /* AC-6 backwards compatibility: inputs=NULL → identical to the
      * original function. T2-T8 will land additional behavior; T1 is
      * pure addition. */
@@ -1179,9 +1370,10 @@ hu_error_t hu_init_proposer_tick_with_provider_ex(
             alloc->free(alloc->ctx, response, response_len + 1);
         if (out_result)
             *out_result = HU_INIT_RESULT_LLM_ERROR;
-        init_proposer_record_decision(agent, contact_buf[0] ? contact_buf : NULL,
-                                      "init_proposer_llm", HU_PROACTIVE_DECISION_DECLINE,
-                                      "llm_error", NULL, now_unix);
+        if (!inputs->defer_llm_failure_row) /* the caller's fallback records the outcome */
+            init_proposer_record_decision(agent, contact_buf[0] ? contact_buf : NULL,
+                                          "init_proposer_llm", HU_PROACTIVE_DECISION_DECLINE,
+                                          "llm_error", NULL, now_unix);
         return HU_OK;
     }
 
@@ -1191,9 +1383,10 @@ hu_error_t hu_init_proposer_tick_with_provider_ex(
     if (perr != HU_OK) {
         if (out_result)
             *out_result = HU_INIT_RESULT_PARSE_ERROR;
-        init_proposer_record_decision(agent, contact_buf[0] ? contact_buf : NULL,
-                                      "init_proposer_llm", HU_PROACTIVE_DECISION_DECLINE,
-                                      "parse_error", NULL, now_unix);
+        if (!inputs->defer_llm_failure_row)
+            init_proposer_record_decision(agent, contact_buf[0] ? contact_buf : NULL,
+                                          "init_proposer_llm", HU_PROACTIVE_DECISION_DECLINE,
+                                          "parse_error", NULL, now_unix);
         return HU_OK;
     }
 
@@ -1211,95 +1404,46 @@ hu_error_t hu_init_proposer_tick_with_provider_ex(
      * — the next tick can try again, and retrying a propose-or-skip
      * prompt with a repair-style instruction is semantically odd
      * (no inbound user-msg to repair toward). */
-    if (verdict == HU_INIT_RESULT_FIRED && decision.draft_len > 0) {
-        hu_guard_context_t guard_ctx;
-        memset(&guard_ctx, 0, sizeof(guard_ctx));
-        if (agent && agent->persona) {
-            if (agent->persona->name && agent->persona->name_len > 1) {
-                guard_ctx.persona_name = agent->persona->name;
-                guard_ctx.persona_name_len = agent->persona->name_len;
-            }
-            const char *id =
-                agent->persona->identity ? agent->persona->identity : agent->persona->core_anchor;
-            if (id) {
-                guard_ctx.persona_identity = id;
-                guard_ctx.persona_identity_len = strlen(id);
-            }
-            if (agent->persona->biography) {
-                guard_ctx.persona_biography = agent->persona->biography;
-                guard_ctx.persona_biography_len = strlen(agent->persona->biography);
-            }
-        }
-        /* Per-channel G9 disable (Sprint 41 follow-up #4) — consult the
-         * runtime channel list. Voice-style channels can suppress G9
-         * without affecting other detectors. */
-        if (inputs->channel_name && inputs->channel_name_len > 0) {
-            guard_ctx.naked_opener_disabled = hu_response_guard_g9_disabled_for_channel(
-                inputs->channel_name, inputs->channel_name_len);
-        }
-
-        char *guard_out = NULL;
-        size_t guard_out_len = 0;
-        hu_guard_outcome_t guard_outcome = HU_GUARD_OK;
-        hu_guard_report_t guard_report;
-        memset(&guard_report, 0, sizeof(guard_report));
-        hu_error_t gerr =
-            hu_response_guard_check_ex(alloc, decision.draft, decision.draft_len, &guard_ctx,
-                                       &guard_out, &guard_out_len, &guard_outcome, &guard_report);
-        if (gerr == HU_OK) {
-            verdict = hu_init_proposer_evaluate_guard_outcome((int)guard_outcome);
-            if (guard_outcome == HU_GUARD_REWROTE && guard_out && guard_out_len > 0) {
-                /* Copy rewrite back into the decision's fixed buffer,
-                 * truncating if the rewrite is somehow longer than
-                 * HU_INIT_DRAFT_MAX (extremely rare — guard typically
-                 * STRIPS bytes, never adds). */
-                size_t copy = guard_out_len < sizeof(decision.draft) - 1
-                                  ? guard_out_len
-                                  : sizeof(decision.draft) - 1;
-                memcpy(decision.draft, guard_out, copy);
-                decision.draft[copy] = '\0';
-                decision.draft_len = copy;
-                alloc->free(alloc->ctx, guard_out, guard_out_len + 1);
-            } else if (guard_outcome == HU_GUARD_REJECT) {
-                /* Capture the rejection as a DPO negative pair. The
-                 * "prompt" for proactive is the propose-or-skip USER
-                 * message — captures WHAT context the model was trying
-                 * to respond to when it produced the rejected draft. */
-                const char *dpo_detector = "unknown";
-                if (guard_report.detected_naked_discourse_opener)
-                    dpo_detector = "naked_discourse_opener";
-                else if (guard_report.detected_persona_identity_echo)
-                    dpo_detector = "persona_identity_echo";
-                else if (guard_report.detected_persona_pii_echo)
-                    dpo_detector = "persona_pii_echo";
-                else if (guard_report.detected_director_echo)
-                    dpo_detector = "director_echo";
-                else if (guard_report.detected_length_anomaly)
-                    dpo_detector = "length_anomaly";
-                else if (guard_report.detected_semantic_leak)
-                    dpo_detector = "semantic_leak";
-                else if (guard_report.detected_degenerate_repetition)
-                    dpo_detector = "degenerate_repetition";
-                (void)hu_response_guard_log_dpo_negative(user_msg, strlen(user_msg), decision.draft,
-                                                         decision.draft_len, dpo_detector,
-                                                         inputs->channel_name, (int64_t)now_unix);
-                hu_log_warn("init_proposer", NULL,
-                            "FIRED draft GUARD-REJECTED (channel=%.*s detector=%s len=%zu) — "
-                            "skipping send, captured as DPO negative",
-                            (int)inputs->channel_name_len,
-                            inputs->channel_name ? inputs->channel_name : "", dpo_detector,
-                            decision.draft_len);
-            }
-        }
+    bool guard_rejected = false;
+    bool repeat_rejected = false;
+    hu_guard_report_t guard_report;
+    verdict = init_proposer_finalize(agent, alloc, inputs, contact_buf, now_unix, &decision,
+                                     verdict, &guard_report, &guard_rejected, &repeat_rejected);
+    /* A proposal built from the HU_PROPOSER_CONTEXT block (real message
+     * text) never puts the draft or the reason in the log — lengths only. */
+    const bool redact = inputs->proposer_context_len > 0;
+    if (guard_rejected) {
+        /* Capture the rejection as a DPO negative pair. The "prompt" for
+         * proactive is the propose-or-skip USER message — WHAT context the
+         * model was responding to when it produced the rejected draft. */
+        const char *dpo_detector = init_proposer_guard_detector(&guard_report);
+        (void)hu_response_guard_log_dpo_negative(user_msg, strlen(user_msg), decision.draft,
+                                                 decision.draft_len, dpo_detector,
+                                                 inputs->channel_name, (int64_t)now_unix);
+        hu_log_warn("init_proposer", NULL,
+                    "FIRED draft GUARD-REJECTED (channel=%.*s detector=%s len=%zu) — "
+                    "skipping send, captured as DPO negative",
+                    (int)inputs->channel_name_len, inputs->channel_name ? inputs->channel_name : "",
+                    dpo_detector, decision.draft_len);
+    }
+    if (repeat_rejected) {
+        if (redact)
+            hu_log_info("init_proposer", NULL,
+                        "FIRED draft rejected: repeats a check-in from the last 14 days "
+                        "(draft_len=%zu)",
+                        decision.draft_len);
+        else
+            hu_log_info("init_proposer", NULL,
+                        "FIRED draft rejected: repeats a check-in from the last 14 days (%s)",
+                        HU_LOG_TEXT(decision.draft, decision.draft_len, 60));
     }
 
-    hu_log_info("init_proposer", NULL,
-                "LLM verdict (ex, channel=%.*s): should_propose=%d confidence=%.3f "
-                "draft_len=%zu result=%d user_msg_bytes=%zu reason=%.*s",
-                (int)inputs->channel_name_len, inputs->channel_name ? inputs->channel_name : "",
-                decision.should_propose ? 1 : 0, decision.confidence, decision.draft_len,
-                (int)verdict, strlen(user_msg), (int)decision.skip_reason_len,
-                decision.skip_reason);
+    {
+        char vline[512];
+        hu_init_proposer_format_ex_verdict(inputs, &decision, (int)verdict, strlen(user_msg), vline,
+                                           sizeof(vline));
+        hu_log_info("init_proposer", NULL, "%s", vline);
+    }
 
     if (out_result)
         *out_result = verdict;
@@ -1322,4 +1466,81 @@ hu_error_t hu_init_proposer_tick_with_provider_ex(
                                   msg_ref_buf[0] ? msg_ref_buf : NULL, now_unix);
     return HU_OK;
 #endif
+}
+
+/* Tags every model request of a proactive tick "proactive" for local_only. */
+hu_error_t hu_init_proposer_tick_with_provider_ex(
+    const struct hu_initiative_config *cfg, const struct hu_autoresponder_config *ar_cfg,
+    int32_t tz_offset_seconds, struct hu_proactive_budget *budget, const struct hu_agent *agent,
+    struct hu_provider *provider, hu_allocator_t *alloc,
+    const hu_proactive_compose_inputs_t *inputs, int64_t last_inbound_unix, int64_t now_unix,
+    int64_t *last_tick_unix_inout, uint64_t *tick_id_inout, hu_init_proposer_result_t *out_result,
+    hu_init_decision_t *out_decision) {
+    const char *lo_prev = hu_local_only_set_caller("proactive");
+    hu_error_t err = init_proposer_tick_ex_run(
+        cfg, ar_cfg, tz_offset_seconds, budget, agent, provider, alloc, inputs, last_inbound_unix,
+        now_unix, last_tick_unix_inout, tick_id_inout, out_result, out_decision);
+    (void)hu_local_only_set_caller(lo_prev);
+    return err;
+}
+
+/* Content words of a check-in: lowercased letters, apostrophes dropped,
+ * 4+ letters, minus greetings and filler that every check-in shares. */
+#define REPEAT_MAX_WORDS 24
+static size_t repeat_words(const char *s, size_t len, char out[][24]) {
+    static const char *const k_filler[] = {
+        "hows",  "whats",   "have",     "been",     "going", "doing", "things", "hope", "youre",
+        "your",  "morning", "evening",  "there",    "down",  "with",  "that",   "this", "just",
+        "okay",  "good",    "along",    "coming",   "like",  "about", "still",  "into", "over",
+        "here",  "today",   "week",     "thinking", "some",  "much",  "really", "well", "last",
+        "night", "doing",   "anything", "hear",     "from",  "been",  "what",   "when", NULL};
+    size_t n = 0, wl = 0;
+    char w[24];
+    for (size_t i = 0; i <= len && n < REPEAT_MAX_WORDS; i++) {
+        char c = i < len ? s[i] : ' ';
+        if (isalpha((unsigned char)c)) {
+            if (wl + 1 < sizeof(w))
+                w[wl++] = (char)tolower((unsigned char)c);
+            continue;
+        }
+        if (c == '\'' || (unsigned char)c >= 0x80)
+            continue; /* "how's" -> "hows"; curly quotes are multi-byte */
+        if (wl >= 4) {
+            w[wl] = '\0';
+            bool filler = false;
+            for (size_t k = 0; k_filler[k] && !filler; k++)
+                filler = strcmp(w, k_filler[k]) == 0;
+            if (!filler)
+                memcpy(out[n++], w, wl + 1);
+        }
+        wl = 0;
+    }
+    return n;
+}
+
+bool hu_init_proposer_repeats_recent(const char *draft, size_t draft_len, const char (*recent)[160],
+                                     size_t recent_count) {
+    if (!draft || draft_len == 0 || !recent)
+        return false;
+    char a[REPEAT_MAX_WORDS][24];
+    size_t na = repeat_words(draft, draft_len, a);
+    if (na == 0)
+        return false;
+    for (size_t r = 0; r < recent_count; r++) {
+        char b[REPEAT_MAX_WORDS][24];
+        size_t nb = repeat_words(recent[r], strnlen(recent[r], 160), b);
+        if (nb == 0)
+            continue;
+        size_t shared = 0;
+        for (size_t i = 0; i < na; i++)
+            for (size_t j = 0; j < nb; j++)
+                if (strcmp(a[i], b[j]) == 0) {
+                    shared++;
+                    break;
+                }
+        size_t smaller = na < nb ? na : nb;
+        if (shared > 0 && shared * 2 >= smaller)
+            return true;
+    }
+    return false;
 }

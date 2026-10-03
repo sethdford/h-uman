@@ -661,9 +661,6 @@ static hu_error_t parse_memory(hu_allocator_t *a, hu_config_t *cfg, const hu_jso
             a->free(a->ctx, cfg->memory.sqlite_path, strlen(cfg->memory.sqlite_path) + 1);
         cfg->memory.sqlite_path = hu_strdup(a, sqlite_path);
     }
-    double max_ent = hu_json_get_number(obj, "max_entries", cfg->memory.max_entries);
-    if (max_ent >= 0 && max_ent <= 1000000)
-        cfg->memory.max_entries = (uint32_t)max_ent;
     cfg->memory.auto_save = hu_json_get_bool(obj, "auto_save", cfg->memory.auto_save);
     /* W15 envelope encryption opt-in. Default stays false unless the
      * user explicitly sets memory.encrypt_at_rest = true. */
@@ -1736,6 +1733,33 @@ hu_error_t hu_config_parse_json(hu_config_t *cfg, const char *content, size_t le
     hu_json_value_t *follow_up_watcher_obj = hu_json_object_get(root, "follow_up_watcher");
     if (follow_up_watcher_obj)
         parse_follow_up_watcher(a, cfg, follow_up_watcher_obj);
+
+    hu_json_value_t *privacy_obj = hu_json_object_get(root, "privacy");
+    if (privacy_obj && privacy_obj->type == HU_JSON_OBJECT) {
+        hu_json_value_t *lo = hu_json_object_get(privacy_obj, "local_only");
+        if (lo && lo->type == HU_JSON_BOOL) {
+            cfg->privacy.local_only_set = true;
+            cfg->privacy.local_only = lo->data.boolean;
+        }
+        hu_json_value_t *al = hu_json_object_get(privacy_obj, "local_only_allow");
+        if (al && al->type == HU_JSON_ARRAY) {
+            size_t n = al->data.array.len;
+            char **items = n ? (char **)a->alloc(a->ctx, n * sizeof(char *)) : NULL;
+            if (n && !items) {
+                hu_json_free(a, root);
+                return HU_ERR_OUT_OF_MEMORY;
+            }
+            size_t k = 0;
+            for (size_t i = 0; i < n; i++) {
+                const hu_json_value_t *it = al->data.array.items[i];
+                if (it && it->type == HU_JSON_STRING && it->data.string.ptr)
+                    items[k++] = hu_strndup(a, it->data.string.ptr, it->data.string.len);
+            }
+            cfg->privacy.local_only_allow_set = true;
+            cfg->privacy.local_only_allow = items;
+            cfg->privacy.local_only_allow_len = k;
+        }
+    }
 
     hu_json_value_t *reliability_obj = hu_json_object_get(root, "reliability");
     if (reliability_obj) {

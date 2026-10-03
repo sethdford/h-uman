@@ -65,6 +65,12 @@ hu_error_t hu_superhuman_commitment_store(void *sqlite_ctx, hu_allocator_t *allo
 hu_error_t hu_superhuman_commitment_list_due(void *sqlite_ctx, hu_allocator_t *alloc,
                                              int64_t now_ts, size_t limit,
                                              hu_superhuman_commitment_t **out, size_t *out_count);
+/* Every commitment recorded at or after since_ts, any status, newest first.
+ * Feeds the precision sample (`human commitments sample`). */
+hu_error_t hu_superhuman_commitment_list_recent(void *sqlite_ctx, hu_allocator_t *alloc,
+                                                int64_t since_ts, size_t limit,
+                                                hu_superhuman_commitment_t **out,
+                                                size_t *out_count);
 hu_error_t hu_superhuman_commitment_mark_followed_up(void *sqlite_ctx, int64_t id);
 void hu_superhuman_commitment_free(hu_allocator_t *alloc, hu_superhuman_commitment_t *arr,
                                    size_t count);
@@ -92,10 +98,18 @@ hu_error_t hu_superhuman_temporal_get_quiet_hours(void *sqlite_ctx, hu_allocator
  * Delayed follow-ups
  * ────────────────────────────────────────────────────────────────────────── */
 
+/* `who`/`who_len` (may be NULL/0): the owner signal fix-round F4 added,
+ * matching hu_superhuman_commitment_store's convention exactly. NULL or
+ * "me" mirrors `topic` verbatim (the owner's own words); "them" rephrases
+ * it to third person via hu_prospective_commitment_action before mirroring,
+ * skipping the mirror (logged) when that rephrasing is not safe. Passing
+ * the same who/topic/contact/deadline the paired hu_superhuman_commitment_
+ * store call used lets the Task 3 upsert collapse both into one row. */
 hu_error_t hu_superhuman_delayed_followup_schedule(void *sqlite_ctx, hu_allocator_t *alloc,
                                                    const char *contact_id, size_t contact_id_len,
                                                    const char *topic, size_t topic_len,
-                                                   int64_t scheduled_at);
+                                                   int64_t scheduled_at, const char *who,
+                                                   size_t who_len);
 hu_error_t hu_superhuman_delayed_followup_list_due(void *sqlite_ctx, hu_allocator_t *alloc,
                                                    int64_t now_ts, hu_delayed_followup_t **out,
                                                    size_t *out_count);
@@ -106,6 +120,11 @@ hu_error_t hu_superhuman_delayed_followup_mark_sent(void *sqlite_ctx, int64_t id
 hu_error_t hu_superhuman_delayed_followup_pending_exists(void *sqlite_ctx, const char *contact_id,
                                                          size_t contact_id_len, const char *topic,
                                                          size_t topic_len, bool *out_exists);
+/* Known gap 7: *owned = prospective memory v2 owns ledger row `id` (a
+ * delayed follow-up when `is_followup`, else a commitment) -- an open time
+ * twin exists (hu_prospective_repo_ledger_v2_owned). Read-only. */
+hu_error_t hu_superhuman_ledger_v2_owned(void *sqlite_ctx, bool is_followup, int64_t id,
+                                         bool *owned);
 void hu_superhuman_delayed_followup_free(hu_allocator_t *alloc, hu_delayed_followup_t *arr,
                                          size_t count);
 

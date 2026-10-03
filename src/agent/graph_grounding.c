@@ -1,8 +1,13 @@
 #include "human/agent/graph_grounding.h"
+#include "human/agent.h"
+#include "human/agent/model_router.h"
 #include "human/agent/world_model_bridge.h"
 #include "human/core/gate_mode.h"
+#include "human/core/log.h"
+#include "human/memory/context_relevance.h"
 #include "human/memory/graph.h"
 #include "human/memory/graph_state.h"
+#include "human/memory/name_extract.h"
 #include <ctype.h>
 #include <stdbool.h>
 #include <stdlib.h>
@@ -36,6 +41,33 @@ hu_graph_grounding_mode_t hu_graph_grounding_mode(void) {
     default:
         return HU_GRAPH_GROUNDING_OFF; /* "off" or any other value */
     }
+}
+
+hu_graph_grounding_fallback_mode_t hu_graph_grounding_contact_fallback_mode(void) {
+    /* Default OFF: the fallback changes what reaches the prompt, so it ships
+     * dark and advances only on a measurement (feature-gate-requires-
+     * measurement.md). SHADOW logs what it would inject on every tier. */
+    switch (hu_gate_mode_from_env("HU_GRAPH_GROUNDING_CONTACT_FALLBACK", HU_GATE_OFF)) {
+    case HU_GATE_LIVE:
+        return HU_GG_FALLBACK_LIVE;
+    case HU_GATE_SHADOW:
+        return HU_GG_FALLBACK_SHADOW;
+    default:
+        return HU_GG_FALLBACK_OFF;
+    }
+}
+
+hu_gate_mode_t hu_graph_grounding_self_facts_mode(void) {
+    /* Default OFF: owner facts reaching the prompt change what is sent. */
+    return hu_gate_mode_from_env("HU_GRAPH_GROUNDING_SELF_FACTS", HU_GATE_OFF);
+}
+
+hu_gate_mode_t hu_graph_names_mode(void) {
+    /* HU_GRAPH_NAMES activation gated on scripts/eval_name_grounding.py (live
+     * >= 15/40 real moments with a typed name, OFF unchanged) AND Seth's
+     * go-ahead (blind A/B or an explicit override): do not flip the default
+     * without that measurement. SHADOW composes both and injects OFF. */
+    return hu_gate_mode_from_env("HU_GRAPH_NAMES", HU_GATE_OFF);
 }
 
 /* ── Pure retrieval-scoring predicates ──────────────────────────────────── */
@@ -157,6 +189,52 @@ uint32_t hu_graph_ground_fingerprint(const char *content, size_t len) {
     return h;
 }
 
+bool hu_graph_ground_is_placeholder_name(const char *name, size_t name_len, const char *contact_id,
+                                         size_t contact_id_len) {
+    static const char *const k_placeholders[] = {"user", "assistant", "you",  "me",     "i",
+                                                 "we",   "they",      "them", "someone"};
+    if (!name || name_len == 0)
+        return true;
+    for (size_t k = 0; k < sizeof(k_placeholders) / sizeof(k_placeholders[0]); k++) {
+        size_t pl = strlen(k_placeholders[k]);
+        if (name_len == pl && strncasecmp(name, k_placeholders[k], pl) == 0)
+            return true;
+    }
+    if (contact_id && contact_id_len == name_len && memcmp(name, contact_id, name_len) == 0)
+        return true;
+    /* Phone-number shaped: only digits and + ( ) - . space, with >= 7 digits. */
+    size_t digits = 0;
+    for (size_t k = 0; k < name_len; k++) {
+        unsigned char c = (unsigned char)name[k];
+        if (isdigit(c))
+            digits++;
+        else if (!strchr("+()-. ", c))
+            return false;
+    }
+    return digits >= 7;
+}
+
+size_t hu_graph_ground_count_typed_names(const char *block, size_t len) {
+    static const char *const k_typed[] = {" (person)", " (place)", " (organization)", " (event)"};
+    size_t count = 0, start = 0;
+    while (block && start < len) {
+        const char *nl = memchr(block + start, '\n', len - start);
+        size_t end = nl ? (size_t)(nl - block) : len;
+        size_t line_len = end - start;
+        if (line_len > 2 && block[start] == '-' && block[start + 1] == ' ') {
+            for (size_t k = 0; k < sizeof(k_typed) / sizeof(k_typed[0]); k++) {
+                size_t sl = strlen(k_typed[k]);
+                if (line_len > 2 + sl && memcmp(block + end - sl, k_typed[k], sl) == 0) {
+                    count++;
+                    break;
+                }
+            }
+        }
+        start = end + 1;
+    }
+    return count;
+}
+
 /* ── Query-conditioned composition ──────────────────────────────────────── */
 
 #ifdef HU_ENABLE_SQLITE
@@ -203,12 +281,108 @@ static void gg_append_context_snippet(char *buf, size_t max_chars, size_t *len, 
     *len += n;
 }
 
+/* Top-k selection over scores[0..min(n, GG_SCORE_CAP)): indices of the k
+ * highest strictly-positive scores, best first. Consumes (zeroes) the picked
+ * scores. Shared by the lexical and contact-fallback seed paths. */
+static size_t gg_pick_top_k(double *scores, size_t n, size_t seeds[GG_TOP_K]) {
+    size_t count = 0;
+    for (size_t k = 0; k < GG_TOP_K; k++) {
+        size_t best = (size_t)-1;
+        double best_score = 0.0;
+        for (size_t i = 0; i < n && i < GG_SCORE_CAP; i++) {
+            if (scores[i] > best_score) {
+                best_score = scores[i];
+                best = i;
+            }
+        }
+        if (best == (size_t)-1)
+            break;
+        seeds[count++] = best;
+        scores[best] = 0.0; /* consume */
+    }
+    return count;
+}
+
+/* HU_GG_NAMES scoring over scores[0..min(n, GG_SCORE_CAP)): a non-nameable
+ * candidate never seeds, typed names outrank untyped ones at equal coverage,
+ * and one name renders once. Of two candidates whose names match
+ * case-insensitively (a legacy lowercase "salim" retyped PERSON beside
+ * "Salim"), the lower score is dropped; on a tie the Capitalized spelling,
+ * then the earlier row, is kept. */
+static void gg_names_rescore(const hu_graph_entity_t *cands, double *scores, size_t n) {
+    if (n > GG_SCORE_CAP)
+        n = GG_SCORE_CAP;
+    for (size_t i = 0; i < n; i++) {
+        const hu_graph_entity_t *e = &cands[i];
+        if (scores[i] <= 0.0)
+            continue;
+        if (!hu_name_entity_is_nameable(e->type, e->name, e->name_len))
+            scores[i] = 0.0;
+        else if (e->type != HU_ENTITY_UNKNOWN)
+            scores[i] += HU_GG_TYPED_NAME_BONUS;
+    }
+    for (size_t i = 0; i < n; i++) {
+        for (size_t j = i + 1; j < n && scores[i] > 0.0; j++) {
+            const hu_graph_entity_t *a = &cands[i], *b = &cands[j];
+            if (scores[j] <= 0.0 || !a->name || !b->name || a->name_len != b->name_len ||
+                strncasecmp(a->name, b->name, a->name_len) != 0)
+                continue;
+            bool keep_b = scores[j] > scores[i] ||
+                          (scores[j] == scores[i] && isupper((unsigned char)b->name[0]) &&
+                           !isupper((unsigned char)a->name[0]));
+            if (keep_b)
+                scores[i] = 0.0;
+            else
+                scores[j] = 0.0;
+        }
+    }
+}
+
+/* "Been talking about: a, b, c\n" from the contact's most recent TOPICs; the
+ * whole line or nothing within the cap. */
+static void gg_append_topic_line(hu_graph_t *g, hu_allocator_t *alloc, const char *contact_id,
+                                 size_t contact_id_len, char *buf, size_t max_chars, size_t *pos) {
+    hu_graph_entity_t *topics = NULL;
+    size_t tn = 0;
+    if (hu_graph_list_recent_entities_of_type(g, alloc, contact_id, contact_id_len, HU_ENTITY_TOPIC,
+                                              HU_GG_TOPIC_LINE_MAX, &topics, &tn) != HU_OK)
+        tn = 0;
+    static const char k_label[] = "Been talking about: ";
+    size_t start = *pos, written = 0;
+    bool ok = tn > 0 && gg_append(buf, max_chars, pos, k_label, sizeof(k_label) - 1);
+    for (size_t i = 0; ok && i < tn; i++) {
+        /* one line per block: a stored name with a line break is skipped rather
+         * than allowed to fabricate an extra "- name" line */
+        if (!topics[i].name || topics[i].name_len == 0 ||
+            memchr(topics[i].name, '\n', topics[i].name_len) ||
+            memchr(topics[i].name, '\r', topics[i].name_len))
+            continue;
+        if (written > 0)
+            ok = gg_append(buf, max_chars, pos, ", ", 2);
+        ok = ok && gg_append(buf, max_chars, pos, topics[i].name, topics[i].name_len);
+        written++;
+    }
+    ok = ok && written > 0 && gg_append(buf, max_chars, pos, "\n", 1);
+    if (!ok)
+        *pos = start;
+    if (topics)
+        hu_graph_entities_free(alloc, topics, tn);
+}
+
 #endif /* HU_ENABLE_SQLITE */
 
 hu_error_t hu_graph_ground_compose(hu_memory_loader_t *loader, const char *contact_id,
                                    size_t contact_id_len, const char *msg, size_t msg_len,
                                    size_t max_chars, char **out, size_t *out_len,
                                    size_t *out_matched_entities) {
+    return hu_graph_ground_compose_ex(loader, contact_id, contact_id_len, msg, msg_len, max_chars,
+                                      0, out, out_len, out_matched_entities);
+}
+
+hu_error_t hu_graph_ground_compose_ex(hu_memory_loader_t *loader, const char *contact_id,
+                                      size_t contact_id_len, const char *msg, size_t msg_len,
+                                      size_t max_chars, unsigned flags, char **out, size_t *out_len,
+                                      size_t *out_matched_entities) {
     if (out)
         *out = NULL;
     if (out_len)
@@ -283,28 +457,47 @@ hu_error_t hu_graph_ground_compose(hu_memory_loader_t *loader, const char *conta
         const hu_graph_entity_t *e = &cands[i];
         size_t words = hu_graph_ground_name_word_count(e->name, e->name_len);
         size_t hits = hu_graph_ground_entity_match_count(msg, msg_len, e->name, e->name_len);
-        scores[i] = hu_graph_ground_score(hits, words, e->mention_count, e->last_seen, now_ms);
+        bool partial = (flags & HU_GG_REQUIRE_FULL_NAME) && hits < words;
+        partial = partial || ((flags & HU_GG_NO_EMOTION_SEED) && e->type == HU_ENTITY_EMOTION);
+        scores[i] =
+            partial ? 0.0
+                    : hu_graph_ground_score(hits, words, e->mention_count, e->last_seen, now_ms);
     }
+    if (flags & HU_GG_NAMES)
+        gg_names_rescore(cands, scores, cand_count);
     size_t seeds[GG_TOP_K];
-    size_t seed_count = 0;
-    for (size_t k = 0; k < GG_TOP_K; k++) {
-        size_t best = (size_t)-1;
-        double best_score = 0.0;
+    size_t seed_count = gg_pick_top_k(scores, cand_count, seeds);
+    bool via_fallback = false;
+    if (seed_count == 0 && (flags & HU_GG_CONTACT_FALLBACK)) {
+        /* Lexical miss, fallback requested: seed from THIS contact's own
+         * entities, ranked by the same mention + recency terms the lexical
+         * score adds on top of coverage (coverage pinned at 1/1). Candidates
+         * are contact-scoped by hu_graph_list_entities, so nothing crosses
+         * contacts. Unlike the 2026-07-22 static summaries, this differs per
+         * contact and tracks recency. */
         for (size_t i = 0; i < cand_count && i < GG_SCORE_CAP; i++) {
-            if (scores[i] > best_score) {
-                best_score = scores[i];
-                best = i;
-            }
+            const hu_graph_entity_t *e = &cands[i];
+            /* EMOTION entities are never volunteered unprompted: the most-
+             * mentioned feeling ("heartbreak") would otherwise surface on
+             * every unrelated casual text. The lexical path still grounds
+             * on one when the contact names it. */
+            bool eligible = e->type != HU_ENTITY_EMOTION &&
+                            hu_graph_ground_name_word_count(e->name, e->name_len) > 0 &&
+                            !hu_graph_ground_is_placeholder_name(e->name, e->name_len, contact_id,
+                                                                 contact_id_len);
+            scores[i] = eligible
+                            ? hu_graph_ground_score(1, 1, e->mention_count, e->last_seen, now_ms)
+                            : 0.0;
         }
-        if (best == (size_t)-1)
-            break;
-        seeds[seed_count++] = best;
-        scores[best] = 0.0; /* consume */
+        if (flags & HU_GG_NAMES)
+            gg_names_rescore(cands, scores, cand_count);
+        seed_count = gg_pick_top_k(scores, cand_count, seeds);
+        via_fallback = seed_count > 0;
     }
     if (seed_count == 0) {
-        /* No lexical overlap with the graph: EMPTY injection. This is the
-         * intended behavior — better no grounding than the same generic
-         * community summaries on every turn (2026-07-22 shadow failure). */
+        /* No lexical overlap with the graph (and no fallback): EMPTY
+         * injection. Better no grounding than the same generic community
+         * summaries on every turn (2026-07-22 shadow failure). */
         hu_graph_entities_free(alloc, cands, cand_count);
         return HU_OK;
     }
@@ -390,6 +583,8 @@ hu_error_t hu_graph_ground_compose(hu_memory_loader_t *loader, const char *conta
         }
     }
 
+    if ((flags & HU_GG_NAMES) && pos > 0)
+        gg_append_topic_line(g, alloc, contact_id, contact_id_len, buf, max_chars, &pos);
     hu_graph_entities_free(alloc, cands, cand_count);
 
     if (pos == 0) {
@@ -409,9 +604,265 @@ hu_error_t hu_graph_ground_compose(hu_memory_loader_t *loader, const char *conta
     *out = exact;
     *out_len = pos;
     if (out_matched_entities)
-        *out_matched_entities = seed_count;
+        *out_matched_entities = via_fallback ? 0 : seed_count;
 #else
     (void)max_chars;
+    (void)flags;
 #endif
     return HU_OK;
+}
+
+/* SHADOW contract for grounding sub-gates: size + fingerprint only (never text). */
+static void gg_log_shadow(const char *what, size_t len, uint32_t fp, int tier) {
+    hu_log_info("graph_grounding", NULL, "%s shadow: %zu bytes tier=%d fp=%08x (not injected)",
+                what, len, tier, (unsigned)fp);
+}
+
+/* *ctx = *ctx + ("\n" if non-empty) + label + add. Takes ownership of add; on
+ * allocation failure keeps *ctx unchanged and drops add (fail-open). */
+static bool gg_append_labeled(hu_memory_loader_t *loader, char **ctx, size_t *ctx_len,
+                              const char *label, char *add, size_t add_len) {
+    hu_allocator_t *a = loader->alloc;
+    size_t lab = strlen(label), sep = *ctx_len > 0 ? 1 : 0;
+    size_t n = *ctx_len + sep + lab + add_len;
+    char *buf = a->alloc(a->ctx, n + 1);
+    if (buf) {
+        size_t pos = 0;
+        if (*ctx_len > 0) {
+            memcpy(buf, *ctx, *ctx_len);
+            pos = *ctx_len;
+            buf[pos++] = '\n';
+        }
+        memcpy(buf + pos, label, lab);
+        memcpy(buf + pos + lab, add, add_len);
+        buf[n] = '\0';
+        if (*ctx)
+            a->free(a->ctx, *ctx, *ctx_len + 1);
+        *ctx = buf;
+        *ctx_len = n;
+    }
+    a->free(a->ctx, add, add_len + 1);
+    return buf != NULL;
+}
+
+unsigned hu_graph_ground_turn_flags_from_env(void) {
+    unsigned f = 0;
+    switch (hu_graph_grounding_contact_fallback_mode()) {
+    case HU_GG_FALLBACK_LIVE:
+        f |= HU_GG_TURN_FALLBACK_LIVE;
+        break;
+    case HU_GG_FALLBACK_SHADOW:
+        f |= HU_GG_TURN_FALLBACK_SHADOW;
+        break;
+    default:
+        break;
+    }
+    hu_gate_mode_t self = hu_graph_grounding_self_facts_mode();
+    if (self == HU_GATE_LIVE)
+        f |= HU_GG_TURN_SELF_LIVE;
+    else if (self == HU_GATE_SHADOW)
+        f |= HU_GG_TURN_SELF_SHADOW;
+    hu_gate_mode_t names = hu_graph_names_mode();
+    if (names == HU_GATE_LIVE)
+        f |= HU_GG_TURN_NAMES_LIVE;
+    else if (names == HU_GATE_SHADOW)
+        f |= HU_GG_TURN_NAMES_SHADOW;
+    return f;
+}
+
+/* One composition pass. `seed_flags` (0 or HU_GG_NAMES) applies to the two
+ * contact composes, never to the owner facts, which keep their full-name rule. */
+static void gg_compose_turn_pass(hu_memory_loader_t *loader, const char *contact_id,
+                                 size_t contact_id_len, const char *msg, size_t msg_len,
+                                 unsigned turn_flags, unsigned seed_flags, char **out,
+                                 size_t *out_len, hu_graph_ground_turn_stats_t *st) {
+    hu_allocator_t *a = loader->alloc;
+    hu_graph_ground_compose_ex(loader, contact_id, contact_id_len, msg, msg_len, 0, seed_flags, out,
+                               out_len, &st->matched_entities);
+    /* Contact-anchored fallback on a lexical miss. Activation gated on a blind
+     * A/B: SHADOW measures and drops, LIVE adopts (the caller's tier gate
+     * still applies). Default OFF. */
+    if (*out_len == 0 && (turn_flags & (HU_GG_TURN_FALLBACK_SHADOW | HU_GG_TURN_FALLBACK_LIVE))) {
+        char *fb = NULL;
+        size_t fb_len = 0;
+        hu_graph_ground_compose_ex(loader, contact_id, contact_id_len, msg, msg_len, 0,
+                                   HU_GG_CONTACT_FALLBACK | seed_flags, &fb, &fb_len, NULL);
+        if (turn_flags & HU_GG_TURN_FALLBACK_LIVE) {
+            if (fb) {
+                *out = fb;
+                *out_len = fb_len;
+                st->via_fallback = true;
+            }
+        } else {
+            st->fallback_shadow = true;
+            st->fallback_shadow_bytes = fb_len;
+            st->fallback_shadow_fp = hu_graph_ground_fingerprint(fb, fb_len);
+            if (fb)
+                a->free(a->ctx, fb, fb_len + 1);
+        }
+    }
+    /* Counted before the owner block: an owner fact is not a contact's name. */
+    st->typed_names = hu_graph_ground_count_typed_names(*out, *out_len);
+    /* Owner ("self") facts the message names in full. Activation gated on a
+     * blind A/B, default OFF: SHADOW measures and drops; LIVE appends them
+     * under "About you:" so the model never mistakes them for the contact's. */
+    if (turn_flags & (HU_GG_TURN_SELF_SHADOW | HU_GG_TURN_SELF_LIVE)) {
+        char *sf = NULL;
+        size_t sf_len = 0;
+        hu_graph_ground_compose_ex(loader, "self", 4, msg, msg_len, 0, HU_GG_REQUIRE_FULL_NAME, &sf,
+                                   &sf_len, NULL);
+        if (turn_flags & HU_GG_TURN_SELF_LIVE) {
+            if (sf)
+                st->via_self = gg_append_labeled(loader, out, out_len, "About you:\n", sf, sf_len);
+        } else {
+            st->self_shadow = true;
+            st->self_shadow_bytes = sf_len;
+            st->self_shadow_fp = hu_graph_ground_fingerprint(sf, sf_len);
+            if (sf)
+                a->free(a->ctx, sf, sf_len + 1);
+        }
+    }
+}
+
+hu_error_t hu_graph_ground_compose_turn(hu_memory_loader_t *loader, const char *contact_id,
+                                        size_t contact_id_len, const char *msg, size_t msg_len,
+                                        unsigned turn_flags, char **out, size_t *out_len,
+                                        hu_graph_ground_turn_stats_t *stats) {
+    hu_graph_ground_turn_stats_t local;
+    hu_graph_ground_turn_stats_t *st = stats ? stats : &local;
+    memset(st, 0, sizeof(*st));
+    if (out)
+        *out = NULL;
+    if (out_len)
+        *out_len = 0;
+    if (!loader || !loader->alloc || !out || !out_len)
+        return HU_OK; /* fail-open */
+    /* HU_GRAPH_NAMES activation gated on scripts/eval_name_grounding.py plus
+     * Seth's go-ahead (see hu_graph_names_mode). OFF composes exactly as
+     * before; SHADOW composes LIVE too, measures it and injects OFF. */
+    bool names_live = (turn_flags & HU_GG_TURN_NAMES_LIVE) != 0;
+    gg_compose_turn_pass(loader, contact_id, contact_id_len, msg, msg_len, turn_flags,
+                         names_live ? HU_GG_NAMES : 0u, out, out_len, st);
+    if (!names_live && (turn_flags & HU_GG_TURN_NAMES_SHADOW)) {
+        hu_graph_ground_turn_stats_t live_st;
+        memset(&live_st, 0, sizeof(live_st));
+        char *live = NULL;
+        size_t live_len = 0;
+        gg_compose_turn_pass(loader, contact_id, contact_id_len, msg, msg_len, turn_flags,
+                             HU_GG_NAMES, &live, &live_len, &live_st);
+        st->names_shadow = true;
+        st->names_off_bytes = *out_len;
+        st->names_live_bytes = live_len;
+        st->names_live_typed = live_st.typed_names;
+        if (live)
+            loader->alloc->free(loader->alloc->ctx, live, live_len + 1);
+    }
+    return HU_OK;
+}
+
+/* HU_CONTEXT_RELEVANCE on a casual turn: recompose strictly (every word of an
+ * entity's name in the message, no EMOTION seeds) and, when LIVE keeps it,
+ * replace *ctx with that block. False = drop as before. */
+static bool gg_casual_relevant(hu_agent_t *agent, hu_memory_loader_t *loader, const char *msg,
+                               size_t msg_len, char **ctx, size_t *ctx_len) {
+    if (hu_context_relevance_mode() == HU_GATE_OFF)
+        return false;
+    char *strict = NULL;
+    size_t strict_len = 0, matched = 0;
+    hu_graph_ground_compose_ex(loader, agent->memory_session_id, agent->memory_session_id_len, msg,
+                               msg_len, 0, HU_GG_REQUIRE_FULL_NAME | HU_GG_NO_EMOTION_SEED, &strict,
+                               &strict_len, &matched);
+    if (!hu_context_relevance_graph(agent->alloc, &strict, &strict_len, strict ? matched : 0)) {
+        if (strict)
+            agent->alloc->free(agent->alloc->ctx, strict, strict_len + 1);
+        return false;
+    }
+    if (*ctx)
+        agent->alloc->free(agent->alloc->ctx, *ctx, *ctx_len + 1);
+    *ctx = strict;
+    *ctx_len = strict_len;
+    return true;
+}
+
+/* Graph grounding load, shared by BOTH turn paths (see agent.h). Composes
+ * QUERY-CONDITIONED graph context for the incoming message (entity-overlap
+ * scored, 1-hop; empty when nothing matches — see hu_graph_ground_compose)
+ * per the HU_GRAPH_GROUNDING gate: SHADOW logs size + relevance fingerprint
+ * and drops; ON (live) injects only on ANALYTICAL/DEEP turns, mirroring the
+ * RAG leg's live A/B verdict (2026-05-29: substantive +0.110, casual -0.078)
+ * — casual/unknown-tier turns log and drop the loaded context. */
+void hu_agent_load_graph_grounding(hu_agent_t *agent, void *loader_v, const char *msg,
+                                   size_t msg_len, char **graph_ctx, size_t *graph_ctx_len) {
+    if (!agent || !loader_v || !graph_ctx || !graph_ctx_len)
+        return;
+    hu_memory_loader_t *loader = (hu_memory_loader_t *)loader_v;
+    hu_graph_grounding_mode_t graph_mode = hu_graph_grounding_mode();
+    if (graph_mode == HU_GRAPH_GROUNDING_OFF || !agent->memory_session_id ||
+        agent->memory_session_id_len == 0)
+        return;
+    /* Lexical -> contact fallback -> owner facts, each behind its own gate
+     * (activation gated on a blind A/B, default OFF). The SAME composition
+     * backs `human memory ground --full`, so the probe measures exactly what
+     * this turn would inject before the tier gate below. */
+    hu_graph_ground_turn_stats_t st;
+    hu_graph_ground_compose_turn(loader, agent->memory_session_id, agent->memory_session_id_len,
+                                 msg, msg_len, hu_graph_ground_turn_flags_from_env(), graph_ctx,
+                                 graph_ctx_len, &st);
+    if (st.fallback_shadow)
+        gg_log_shadow("contact_fallback", st.fallback_shadow_bytes, st.fallback_shadow_fp,
+                      agent->turn_tier);
+    if (st.self_shadow)
+        gg_log_shadow("self_facts", st.self_shadow_bytes, st.self_shadow_fp, agent->turn_tier);
+    if (st.names_shadow)
+        hu_log_info("graph_grounding", NULL,
+                    "names shadow: off=%zu live=%zu bytes names=%zu (not injected)",
+                    st.names_off_bytes, st.names_live_bytes, st.names_live_typed);
+    size_t matched_entities = st.matched_entities;
+    bool via_fallback = st.via_fallback, via_self = st.via_self;
+    const char *drop_reason = NULL;
+    if (graph_mode == HU_GRAPH_GROUNDING_SHADOW) {
+        /* Shadow contract: size AND a relevance fingerprint (matched-entity
+         * count + content hash), so the pre-2026-07 failure signature (274
+         * events, 5 distinct sizes, constant content) is distinguishable
+         * from conversation-varying injection straight from the log. */
+        hu_log_info("graph_grounding", NULL,
+                    "shadow: %zu graph_context bytes matched=%zu fp=%08x (not injected)",
+                    *graph_ctx_len, matched_entities,
+                    (unsigned)hu_graph_ground_fingerprint(*graph_ctx, *graph_ctx_len));
+        drop_reason = "shadow";
+    } else if (graph_mode == HU_GRAPH_GROUNDING_ON && agent->turn_tier < (int)HU_TIER_ANALYTICAL &&
+               /* HU_CONTEXT_RELEVANCE LIVE keeps a strictly query-conditioned
+                * block (cut to the casual budget); the fallback is not one. */
+               !gg_casual_relevant(agent, loader, msg, msg_len, graph_ctx, graph_ctx_len)) {
+        hu_log_info("graph_grounding", NULL,
+                    "live: %zu bytes skipped for casual register (tier=%d)", *graph_ctx_len,
+                    agent->turn_tier);
+        drop_reason = "casual";
+    }
+    if (!drop_reason && *graph_ctx_len > 0)
+        /* LIVE injection is otherwise silent; this line is what makes the
+         * fallback / self-facts activation measurable (sizes only, no text). */
+        hu_log_info("graph_grounding", NULL,
+                    "live: injected %zu bytes tier=%d lexical=%zu fallback=%d self=%d fp=%08x",
+                    *graph_ctx_len, agent->turn_tier, matched_entities, via_fallback, via_self,
+                    (unsigned)hu_graph_ground_fingerprint(*graph_ctx, *graph_ctx_len));
+    if (drop_reason) {
+        if (*graph_ctx)
+            agent->alloc->free(agent->alloc->ctx, *graph_ctx, *graph_ctx_len + 1);
+        *graph_ctx = NULL;
+        *graph_ctx_len = 0;
+    }
+}
+
+bool hu_graph_grounding_log_rendered(size_t composed_len, size_t rendered_len) {
+    if (composed_len == 0)
+        return true;
+    if (rendered_len == 0) {
+        hu_log_warn("graph_grounding", NULL,
+                    "live: %zu composed bytes did NOT reach the prompt (0 rendered)", composed_len);
+        return false;
+    }
+    hu_log_info("graph_grounding", NULL, "live: rendered %zu prompt bytes for %zu composed",
+                rendered_len, composed_len);
+    return true;
 }

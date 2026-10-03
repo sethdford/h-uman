@@ -5,6 +5,7 @@
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/http.h"
+#include "human/core/time.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -167,6 +168,12 @@ hu_error_t hu_news_fetch_rss(hu_allocator_t *alloc, const char *feed_url, size_t
     memcpy(url_buf, feed_url, url_len);
     url_buf[url_len] = '\0';
 
+    /* A feed that refused us recently is not asked again yet (hnrss.org
+     * answered 429/502 107 times in a week of 30-minute polls). */
+    uint64_t now_ms = (uint64_t)hu_time_wall_ms();
+    if (hu_news_backoff_active(url_buf, now_ms))
+        return HU_ERR_IO;
+
     hu_http_response_t resp = {0};
     /* Publishers relocate feeds behind 301/307 and leave the old URL
      * redirecting for years; follow a few HTTPS hops instead of logging
@@ -174,6 +181,7 @@ hu_error_t hu_news_fetch_rss(hu_allocator_t *alloc, const char *feed_url, size_t
     hu_error_t err = hu_http_get_follow(alloc, url_buf, NULL, 3, &resp);
     if (err != HU_OK)
         return err;
+    hu_news_backoff_record(url_buf, (int)resp.status_code, now_ms);
     if (!resp.body || resp.status_code != 200) {
         hu_http_response_free(alloc, &resp);
         return HU_ERR_IO;
@@ -249,3 +257,70 @@ hu_error_t hu_news_fetch_rss(hu_allocator_t *alloc, const char *feed_url, size_t
 #else
 typedef int hu_news_stub_avoid_empty_tu;
 #endif /* HU_ENABLE_FEEDS */
+
+#ifdef HU_ENABLE_FEEDS
+/* ── Per-URL backoff ───────────────────────────────────────────────── */
+
+#define NEWS_BACKOFF_MIN_S (2u * 3600u)
+#define NEWS_BACKOFF_MAX_S (24u * 3600u)
+#define NEWS_BACKOFF_SLOTS 32
+
+static struct {
+    uint32_t hash; /* 0 = free */
+    uint64_t until_ms;
+    uint32_t step_s;
+} s_backoff[NEWS_BACKOFF_SLOTS];
+
+static uint32_t news_url_hash(const char *u) {
+    uint32_t h = 2166136261u;
+    for (; u && *u; u++)
+        h = (h ^ (uint8_t)*u) * 16777619u;
+    return h ? h : 1u;
+}
+
+uint32_t hu_news_backoff_secs(int status, uint32_t prev_secs) {
+    if (status != 429 && (status < 500 || status > 599))
+        return 0;
+    uint32_t next = prev_secs ? prev_secs * 2u : NEWS_BACKOFF_MIN_S;
+    if (next < NEWS_BACKOFF_MIN_S)
+        next = NEWS_BACKOFF_MIN_S;
+    return next > NEWS_BACKOFF_MAX_S ? NEWS_BACKOFF_MAX_S : next;
+}
+
+static int news_backoff_find(uint32_t h) {
+    for (int i = 0; i < NEWS_BACKOFF_SLOTS; i++)
+        if (s_backoff[i].hash == h)
+            return i;
+    return -1;
+}
+
+bool hu_news_backoff_active(const char *url, uint64_t now_ms) {
+    int i = news_backoff_find(news_url_hash(url));
+    return i >= 0 && now_ms < s_backoff[i].until_ms;
+}
+
+void hu_news_backoff_record(const char *url, int status, uint64_t now_ms) {
+    uint32_t h = news_url_hash(url);
+    int i = news_backoff_find(h);
+    uint32_t secs = hu_news_backoff_secs(status, i >= 0 ? s_backoff[i].step_s : 0);
+    if (secs == 0) { /* answered: forget any backoff */
+        if (i >= 0)
+            memset(&s_backoff[i], 0, sizeof(s_backoff[i]));
+        return;
+    }
+    if (i < 0) { /* a free slot, else the one expiring first */
+        i = 0;
+        for (int j = 0; j < NEWS_BACKOFF_SLOTS; j++) {
+            if (s_backoff[j].hash == 0) {
+                i = j;
+                break;
+            }
+            if (s_backoff[j].until_ms < s_backoff[i].until_ms)
+                i = j;
+        }
+    }
+    s_backoff[i].hash = h;
+    s_backoff[i].step_s = secs;
+    s_backoff[i].until_ms = now_ms + (uint64_t)secs * 1000u;
+}
+#endif

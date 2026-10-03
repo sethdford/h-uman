@@ -1,9 +1,11 @@
 /* Hurt-signal hand-off. Contract: include/human/daemon/hurt_handoff.h. */
 #include "human/core/allocator.h"
 #include "human/core/log.h"
+#include "human/core/log_redact.h"
 #include "human/core/process_util.h"
 #include "human/core/string.h"
 #include "human/daemon/hurt_handoff.h"
+#include "human/daemon/owner_notify.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <string.h>
@@ -171,21 +173,13 @@ static void hurt_notify_owner(const char *contact_name) {
     snprintf(body, sizeof(body),
              "%s may be hurt or worried about you. h-uman held its reply - text them yourself.",
              who);
-    static const char k_display[] =
-        "display notification (item 1 of argv) with title \"h-uman\" sound name \"default\"";
-    const char *argv[] = {
-        "/usr/bin/osascript", "-e", "on run argv", "-e", k_display, "-e", "end run", body, NULL};
-    hu_allocator_t alloc = hu_system_allocator();
-    hu_run_result_t r;
-    memset(&r, 0, sizeof(r));
-    hu_error_t err = hu_process_run(&alloc, argv, NULL, 4096, &r);
-    if (err != HU_OK || !r.success)
+    if (!hu_owner_notify_local(body))
         hu_log_warn("hurt_handoff", NULL,
-                    "owner notification failed (err=%d); the auto-reply was still held", (int)err);
-    hu_run_result_free(&alloc, &r);
+                    "owner notification failed; the auto-reply was still held");
 #else
     hu_log_warn("hurt_handoff", NULL,
-                "no owner notification on this platform; the auto-reply was held for %s", who);
+                "no owner notification on this platform; the auto-reply was held for %s",
+                HU_LOG_WHO_CSTR(who));
 #endif
 }
 

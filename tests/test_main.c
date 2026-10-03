@@ -22,8 +22,6 @@ void run_agent_modules_tests(void);
 void run_agent_definition_tests(void);
 void run_agent_git_tests(void);
 void run_agent_app_config_tests(void);
-void run_task_store_tests(void);
-void run_compaction_hierarchical_tests(void);
 void run_tot_recursive_tests(void);
 void run_agent_subsystems_tests(void);
 void run_crypto_tests(void);
@@ -69,13 +67,13 @@ void run_oauth_tests(void);
 void run_security_tests(void);
 void run_normalize_tests(void);
 void run_sensitivity_tests(void);
-void run_vault_aead_tests(void);
 void run_app_bundle_structure_tests(void);
 void run_pkg_builder_tests(void);
 void run_install_docs_tests(void);
 void run_sign_notarize_tests(void);
 void run_provider_tests(void);
 void run_provider_http_tests(void);
+void run_compatible_vision_tests(void); /* provider: learn a text-only server */
 void run_gemini_vertex_auth_tests(void);
 void run_ensemble_tests(void);
 void run_api_key_tests(void);
@@ -147,6 +145,7 @@ void run_slack_reactions_tests(void);
  * minimal-build / no-sqlite / cross-arm64 variants. */
 #ifdef HU_ENABLE_SQLITE
 void run_reaction_handler_e2e_tests(void);
+void run_outcome_join_tests(void);
 #endif
 void run_declarative_tools_tests(void);
 void run_skill_trust_tests(void);
@@ -162,12 +161,10 @@ void run_e2e_tests(void);
 void run_e2e_conversation_tests(void);
 void run_e2e_agent_loop_tests(void);
 void run_subsystems_tests(void);
-void run_onboard_state_tests(void);
-void run_onboard_dispatcher_tests(void);
-void run_onboard_step1_tests(void);
 void run_onboard_nextstep_tests(void);
 void run_onboard_aloop_tests(void);
 void run_config_parse_tests(void);
+void run_config_mutator_writes_tests(void);
 void run_config_migrate_tests(void);
 void run_adversarial_tests(void);
 void run_adversarial_detect_tests(void);
@@ -190,6 +187,7 @@ void run_mlx_local_voice_tests(void);
 void run_autonomy_tests(void);
 void run_retrieval_tests(void);
 void run_reranker_tests(void);
+void run_score_fusion_tests(void);
 void run_retrieval_contact_isolation_tests(void);
 void run_vector_tests(void);
 void run_vector_full_tests(void);
@@ -204,6 +202,9 @@ void run_process_util_tests(void);
 void run_prompt_tests(void);
 void run_prompt_trim_tests(void);
 void run_gate_mode_tests(void);
+void run_local_only_guard_tests(void);
+void run_local_only_config_tests(void);
+void run_local_only_voice_tests(void);
 void run_graph_grounding_tests(void);
 void run_uncertainty_tests(void);
 void run_tool_search_tests(void);
@@ -211,6 +212,7 @@ void run_persona_tests(void);
 void run_terseness_tests(void);
 void run_circadian_tests(void);
 void run_relationship_tests(void);
+void run_contact_stage_tests(void);
 void run_replay_tests(void);
 void run_style_clone_tests(void);
 void run_uncertainty_tests(void);
@@ -233,7 +235,6 @@ void run_moment_render_tests(void);
 void run_behavior_policy_tests(void);
 void run_behavior_dialog_act_tests(void);
 void run_behavior_affect_tests(void);
-void run_behavior_change_tests(void);
 void run_behavior_safety_tests(void);
 void run_behavior_prosocial_tests(void);
 void run_win_detect_tests(void);
@@ -254,7 +255,6 @@ void run_behavior_pressure_tests(void);
 void run_sycophancy_pack_tests(void);
 void run_user_sim_scenario_tests(void);
 void run_chronotype_tests(void);
-void run_lifecycle_tests(void);
 void run_observer_tests(void);
 void run_session_tests(void);
 void run_bus_tests(void);
@@ -266,6 +266,7 @@ void run_provider_all_tests(void);
 void run_chat_response_diag_tests(void);
 void run_channel_all_tests(void);
 void run_idempotency_tests(void);
+void run_preferences_tests(void);
 void run_idempotency_hula_integration_tests(void);
 void run_meta_common_tests(void);
 void run_channel_integration_tests(void);
@@ -310,11 +311,9 @@ void run_doctor_blind_ab_gate_tests(void);
 void run_outbound_sanitize_tests(void);
 void run_daemon_follow_up_watcher_tests(void);
 void run_cli_ctl_tests(void);
+void run_cli_help_tests(void);
 void run_doctor_local_voice_tests(void);
-void run_onboard_step_provider_tests(void);
 void run_cron_tests(void);
-void run_task_manager_tests(void);
-void run_task_tools_tests(void);
 void run_tool_ask_user_tests(void);
 void run_mcp_tests(void);
 void run_mcp_jsonrpc_tests(void);
@@ -331,7 +330,6 @@ void run_memory_engines_ext_tests(void);
 void run_memory_poisoning_tests(void);
 void run_runtime_tests(void);
 void run_runtime_bundle_tests(void);
-void run_channel_loop_tests(void);
 void run_util_modules_tests(void);
 void run_roadmap_tests(void);
 void run_new_features_tests(void);
@@ -347,6 +345,7 @@ void run_imessage_chatdb_fixture_tests(void);
 void run_imessage_replay_guard_tests(void);
 void run_chatdb_cursor_repo_sqlite_tests(void);
 void run_reliable_circuit_tests(void);
+void run_local_only_tests(void);
 void run_imessage_adversarial_tests(void);
 void run_imessage_non_allowlisted_tests(void);
 void run_imessage_rich_link_tests(void);
@@ -358,6 +357,14 @@ void run_imessage_action_telemetry_tests(void);
 void run_imessage_reply_pacing_tests(void);
 void run_imessage_threaded_reply_tests(void);
 void run_imessage_send_observer_tests(void);
+void run_imessage_voice_record_tests(void);
+void run_speech_text_tests(void);
+void run_speech_rewrite_tests(void);
+void run_speech_direction_tests(void);
+void run_opener_gate_tests(void);
+void run_voice_intent_tests(void);
+void run_voice_triggers_tests(void);
+void run_speech_perform_tests(void);
 void run_imessage_custom_tapback_tests(void);
 void run_imessage_action_facts_tests(void);
 void run_imessage_dispatcher_tests(void);
@@ -379,6 +386,7 @@ void run_context_ext_tests(void);
 void run_untested_modules_tests(void);
 void run_modules_coverage_tests(void);
 void run_coverage_new_tests(void);
+void run_calendar_tool_tests(void);
 void run_context_tests(void);
 void run_tavily_tests(void);
 void run_awareness_tests(void);
@@ -389,6 +397,7 @@ void run_input_guard_tests(void);
 void run_externalization_tests(void);
 void run_conversation_tests(void);
 void run_vision_tests(void);
+void run_local_vision_tests(void);
 void run_ab_response_tests(void);
 void run_event_extract_tests(void);
 void run_stm_tests(void);
@@ -399,6 +408,7 @@ void run_emotional_state_tests(void);
 void run_contact_style_overlay_tests(void);
 void run_graph_tests(void);
 void run_graph_ingest_tests(void);
+void run_name_extract_tests(void);
 void run_agent_facts_tests(void);
 void run_cli_memory_import_tests(void);
 void run_cli_commands_memory_print_tests(void);
@@ -407,12 +417,12 @@ void run_semantic_index_tests(void);
 void run_hybrid_reconstructive_tests(void);
 void run_semantic_recall_tests(void);
 void run_semantic_recall_register_tests(void);
+void run_context_relevance_tests(void);
 void run_embedder_http_tests(void);
 void run_w1_bitemporal_tests(void);
 void run_graph_state_tests(void);
 void run_wiki_page_tests(void);
 void run_w2_autodream_tests(void);
-void run_w3_multigraph_tests(void);
 void run_w4_verifier_tests(void);
 void run_w5_persona_deltas_tests(void);
 void run_persona_delta_observer_tests(void);
@@ -421,7 +431,6 @@ void run_signal_channel_wire_tests(void);
 void run_daemon_housekeeping_tests(void);
 void run_orphan_channel_audit_tests(void);
 void run_verifier_metrics_tests(void);
-void run_doctor_ws_consumer_tests(void);
 void run_output_validator_tests(void);
 void run_chain_failure_paths_tests(void);
 void run_agent_fail_path_regressions_tests(void);
@@ -435,6 +444,7 @@ void run_validator_chain_cache_tests(void);
 void run_daemon_e2e_validator_tests(void);
 void run_response_guard_tests(void);
 void run_response_guard_retry_tests(void);
+void run_reply_fragment_tests(void);
 void run_outbound_pipeline_tests(void);
 void run_outbound_strip_tests(void);
 void run_style_governor_tests(void);
@@ -444,6 +454,12 @@ void run_outbound_crosstalk_tests(void);
 /* Sprint 60 follow-up — SQLite-backed crosstalk lookup. Tests seed
  * the messages table directly via sqlite3, so source + tests are
  * gated by HU_ENABLE_SQLITE in CMakeLists.txt. Mirror that gate here. */
+void run_curiosity_gaps_tests(void);
+void run_agent_recall_provider_tests(void);
+void run_memory_loader_scope_tests(void);
+void run_imessage_send_route_tests(void); /* pure; every build */
+void run_confidence_boundary_tests(void);
+void run_personal_model_prompt_tests(void);
 #ifdef HU_ENABLE_SQLITE
 void run_boundary_repo_tests(void);
 void run_opinions_repo_tests(void);
@@ -451,15 +467,24 @@ void run_life_chapter_repo_tests(void);
 void run_proactive_decisions_repo_tests(void);
 void run_outbound_sends_repo_tests(void);
 void run_daemon_proactive_decline_tests(void);
+void run_unprompted_gate_tests(void);
 void run_daemon_proactive_reachability_tests(void);
 void run_daemon_contact_optout_tests(void);
+void run_daemon_name_catch_tests(void);
+void run_daemon_thread_context_tests(void);
 void run_daemon_hurt_handoff_tests(void);
 void run_daemon_dated_followup_tests(void);
 void run_contact_optout_repo_tests(void);
+void run_reminder_repo_tests(void);
+void run_job_queue_repo_tests(void);
+void run_person_dates_repo_tests(void);
 void run_daemon_outbound_bus_tests(void);
 void run_repo_util_sqlite_tests(void);
 void run_proactive_send_circuit_tests(void);
 void run_imessage_send_service_tests(void);
+void run_daemon_send_failure_tests(void);
+void run_daemon_job_queue_tests(void);
+void run_daemon_job_hold_tests(void);
 void run_social_graph_repo_tests(void);
 void run_self_awareness_repo_tests(void);
 void run_feed_items_repo_tests(void);
@@ -497,8 +522,25 @@ void run_persona_eval_tests(void);
 void run_agent_tests(void); /* Sprint 46 R5.3 carryover */
 void run_lean_head_tests(void);
 void run_reply_prompt_tests(void);
-void run_agent_turn_state_tests(void);             /* #26: per-turn state tracking */
-void run_agent_turn_transport_tests(void);         /* M4 follow-up: transport-error fast-fail */
+void run_length_policy_tests(void);
+void run_agent_turn_state_tests(void);            /* #26: per-turn state tracking */
+void run_agent_turn_transport_tests(void);        /* M4 follow-up: transport-error fast-fail */
+void run_turn_recording_provider_tests(void);     /* agent-turn carve: recording provider */
+void run_agent_turn_characterization_tests(void); /* agent-turn carve: golden corpus */
+void run_turn_ctx_tests(void);                    /* agent-turn carve: per-turn context + wrapper */
+void run_turn_retrieve_tests(void);               /* agent-turn carve: S3 retrieval stage */
+void run_turn_perceive_tests(void);               /* agent-turn carve: S2 perception stage */
+void run_turn_entry_tests(void);                  /* agent-turn carve: S0 entry stage */
+void run_turn_silence_tests(void);                /* agent-turn carve: S8 silence stage */
+void run_turn_context_tests(void);                /* agent-turn carve: S4 context builders */
+void run_turn_tools_tests(void);                  /* agent-turn carve: S16 tool dispatch */
+void run_turn_plan_tests(void);                   /* agent-turn: [ACTIVE_PLAN] resume */
+void run_turn_tail_tests(void);                   /* agent-turn carve: S17-S18 iteration tail */
+void run_agent_turn_history_window_tests(void);   /* agent-turn: short-history scan windows */
+void run_reask_tests(void);                       /* agent-turn: re-ask predicate */
+void run_empty_retry_tests(void);                 /* agent-turn: retry a discarded draft */
+void run_spoken_turn_tests(void);                 /* voice: latency-first prompt profile */
+void run_turn_sources_tests(void);                /* agent-turn carve: source-presence pins */
 void run_agent_llm_latency_wall_clock_tests(void); /* M3 latency_ms measures wall clock */
 void run_agent_turn_request_overrides_tests(void); /* G11: per-turn override parity */
 void run_agent_max_tokens_resolve_tests(void);     /* Task 13: HU_MAX_TOKENS_RESOLVE gate parity */
@@ -529,7 +571,6 @@ void run_m3_frontier_mlx_dispatch_tests(void);
  * internal-#ifdef-wrap-with-stub-runner pattern so the runner symbol
  * resolves in both HU_ENABLE_SELF_MODEL=ON and =OFF builds. */
 void run_self_model_behavior_log_tests(void);
-void run_action_directives_tests(void);
 /* Spec 2026-05-19 self-model-scaffold — Phases B/C/D/E. Same gate
  * pattern as Phase A (stub runner under HU_ENABLE_SELF_MODEL=OFF). */
 void run_self_model_phase_bcde_tests(void);
@@ -570,6 +611,7 @@ void run_calibration_tests(void);
 void run_behavioral_clone_tests(void);
 void run_governor_tests(void);
 void run_model_router_tests(void);
+void run_local_only_route_tests(void);
 void run_model_router_health_tests(void);
 void run_cp_admin_tests(void);
 void run_humanness_context_tests(void);
@@ -578,8 +620,9 @@ void run_adversarial_turing_tests(void);
 void run_arbitrator_tests(void);
 void run_salience_tests(void);
 void run_hard_moment_tests(void);
+void run_turn_moment_tests(void);
+void run_humanness_hedge_turn_tests(void);
 void run_planning_tests(void);
-void run_rel_dynamics_tests(void);
 void run_emotional_residue_tests(void);
 void run_consolidation_engine_tests(void);
 void run_conv_goals_tests(void);
@@ -777,7 +820,6 @@ void run_anti_sycophancy_tests(void);
 void run_mutual_tom_tests(void);
 void run_opinion_history_tests(void);
 void run_self_improve_loop_tests(void);
-void run_a2a_tests(void);
 void run_gvr_tests(void);
 void run_provider_degradation_tests(void);
 void run_apple_provider_tests(void);
@@ -805,7 +847,27 @@ void run_state_file_tests(void);
 void run_daemon_followup_sched_tests(void);
 void run_daemon_rich_media_tests(void);
 void run_daemon_voice_reply_tests(void);
+void run_daemon_voice_first_tests(void);
+void run_daemon_expressive_tests(void);
+void run_daemon_spontaneity_tests(void);
+void run_daemon_share_queue_tests(void);
+void run_daemon_reminders_tests(void);
+void run_daemon_briefing_tests(void);
+void run_daemon_person_dates_tests(void);
+void run_commitment_sample_tests(void);
+void run_agent_fit_history_tests(void);
+void run_history_budget_tests(void);
 void run_prospective_tests(void);
+void run_prospective_repo_sqlite_tests(void);
+void run_prospective_policy_tests(void);
+void run_chat_oneshot_tests(void);
+void run_daemon_prospective_time_tests(void);
+void run_prospective_v2_tests(void);
+void run_cli_prospective_tests(void);
+void run_replay_turn_tests(void);
+void run_cli_replay_tests(void);
+void run_daemon_outbound_sanitize_tests(void);
+void run_daemon_prospective_tests(void);
 void run_eval_score_tests(void);
 void run_corrective_rag_tests(void);
 void run_adaptive_rag_tests(void);
@@ -823,6 +885,7 @@ void run_sota_adversarial_tests(void);
 void run_otel_tests(void);
 void run_cot_audit_tests(void);
 void run_moderation_tests(void);
+void run_self_harm_tests(void);
 void run_companion_safety_tests(void);
 void run_code_sandbox_tests(void);
 void run_computer_use_tests(void);
@@ -889,6 +952,9 @@ void run_daemon_proactive_tests(void);
 void run_reply_delay_model_tests(void);
 void run_daemon_promise_keeper_tests(void);
 void run_daemon_insight_overuse_tests(void);
+void run_daemon_proposer_context_tests(void);
+void run_daemon_grief_decay_tests(void);
+void run_daemon_commitment_guard_tests(void);
 void run_daemon_config_reload_tests(void);
 void run_daemon_identity_graph_tests(void);
 void run_daemon_reply_fallback_tests(void);
@@ -899,6 +965,9 @@ void run_daemon_reactive_context_tests(void);
 void run_consecutive_limiter_tests(void);
 void run_proactive_policy_tests(void);
 void run_daemon_director_tests(void);
+void run_daemon_director_local_only_tests(void);
+void run_director_v2_tests(void);
+void run_director_tapback_tests(void);
 /* Sprint 59 Phase C — test seeds feed_items via sqlite3 directly so the
  * test source is gated by HU_ENABLE_SQLITE in CMakeLists.txt. Mirror that
  * gate here so the forward decl + call site don't reference a missing
@@ -907,9 +976,7 @@ void run_daemon_director_tests(void);
 void run_daemon_proactive_feed_scope_tests(void);
 #endif
 void run_daemon_trust_tests(void);
-void run_cp_tasks_tests(void);
 void run_cp_canvas_tests(void);
-void run_vector_retrieval_remote_tests(void);
 void run_anticipatory_state_tests(void);
 void run_canvas_tool_tests(void);
 void run_canvas_e2e_tests(void);
@@ -931,11 +998,11 @@ void run_fact_extract_llm_tests(void);
 void run_fact_extract_tests(void);
 void run_personal_model_tests(void);
 void run_personal_model_llm_extract_tests(void);
+void run_llm_purpose_tests(void);
+void run_post_send_defer_tests(void);
 void run_personal_model_atomic_save_tests(void);
 void run_personal_model_per_contact_tests(void);
 #ifdef HU_ENABLE_SQLITE
-void run_cross_channel_acl_tests(void);
-void run_cross_channel_pipeline_tests(void);
 void run_reflection_schema_tests(void);
 #endif
 void run_reflection_storage_tests(void);                 /* T2: stub when SQLite off */
@@ -976,6 +1043,7 @@ void run_persona_encryption_tests(void);
 void run_persona_directive_channels_tests(void);
 void run_persona_overlay_render_tests(void);
 void run_style_card_tests(void);
+void run_learned_style_tests(void);
 void run_card_file_tests(void);
 void run_emotion_card_tests(void);
 #if defined(HU_HAS_IMESSAGE) && defined(HU_HAS_TELEGRAM)
@@ -1121,13 +1189,12 @@ int main(int argc, char **argv) {
     run_allocator_tests();
     run_data_loader_tests();
     run_idempotency_tests();
+    run_preferences_tests();
     run_idempotency_hula_integration_tests();
     run_agent_modules_tests();
     run_agent_definition_tests();
     run_agent_git_tests();
     run_agent_app_config_tests();
-    run_task_store_tests();
-    run_compaction_hierarchical_tests();
     run_tot_recursive_tests();
     run_agent_subsystems_tests();
     run_crypto_tests();
@@ -1173,13 +1240,13 @@ int main(int argc, char **argv) {
     run_security_tests();
     run_normalize_tests();
     run_sensitivity_tests();
-    run_vault_aead_tests();
     run_app_bundle_structure_tests();
     run_pkg_builder_tests();
     run_install_docs_tests();
     run_sign_notarize_tests();
     run_provider_tests();
     run_provider_http_tests();
+    run_compatible_vision_tests();
     run_gemini_vertex_auth_tests();
     run_ensemble_tests();
     run_api_key_tests();
@@ -1221,6 +1288,7 @@ int main(int argc, char **argv) {
     run_slack_reactions_tests();
 #ifdef HU_ENABLE_SQLITE
     run_reaction_handler_e2e_tests();
+    run_outcome_join_tests();
 #endif
     run_declarative_tools_tests();
     run_skill_trust_tests();
@@ -1238,12 +1306,10 @@ int main(int argc, char **argv) {
     run_e2e_conversation_tests();
     run_e2e_agent_loop_tests();
     run_subsystems_tests();
-    run_onboard_state_tests();
-    run_onboard_dispatcher_tests();
-    run_onboard_step1_tests();
     run_onboard_nextstep_tests();
     run_onboard_aloop_tests();
     run_config_parse_tests();
+    run_config_mutator_writes_tests();
     run_config_migrate_tests();
     run_adversarial_tests();
     run_adversarial_detect_tests();
@@ -1267,6 +1333,7 @@ int main(int argc, char **argv) {
     run_autonomy_tests();
     run_retrieval_tests();
     run_reranker_tests();
+    run_score_fusion_tests();
     run_retrieval_contact_isolation_tests();
     run_vector_tests();
     run_vector_full_tests();
@@ -1281,6 +1348,9 @@ int main(int argc, char **argv) {
     run_prompt_tests();
     run_prompt_trim_tests();
     run_gate_mode_tests();
+    run_local_only_guard_tests();
+    run_local_only_config_tests();
+    run_local_only_voice_tests();
     run_graph_grounding_tests();
     run_uncertainty_tests();
     run_tool_search_tests();
@@ -1288,6 +1358,7 @@ int main(int argc, char **argv) {
     run_terseness_tests();
     run_circadian_tests();
     run_relationship_tests();
+    run_contact_stage_tests();
     run_replay_tests();
     run_style_clone_tests();
     run_uncertainty_tests();
@@ -1310,7 +1381,6 @@ int main(int argc, char **argv) {
     run_behavior_policy_tests();
     run_behavior_dialog_act_tests();
     run_behavior_affect_tests();
-    run_behavior_change_tests();
     run_behavior_safety_tests();
     run_behavior_prosocial_tests();
     run_win_detect_tests();
@@ -1331,7 +1401,6 @@ int main(int argc, char **argv) {
     run_sycophancy_pack_tests();
     run_user_sim_scenario_tests();
     run_chronotype_tests();
-    run_lifecycle_tests();
     run_observer_tests();
     run_session_tests();
     run_bus_tests();
@@ -1385,8 +1454,8 @@ int main(int argc, char **argv) {
     run_outbound_sanitize_tests();
     run_daemon_follow_up_watcher_tests();
     run_cli_ctl_tests();
+    run_cli_help_tests();
     run_doctor_local_voice_tests();
-    run_onboard_step_provider_tests();
     run_cron_tests();
     run_mcp_tests();
     run_mcp_jsonrpc_tests();
@@ -1402,7 +1471,6 @@ int main(int argc, char **argv) {
     run_memory_poisoning_tests();
     run_runtime_tests();
     run_runtime_bundle_tests();
-    run_channel_loop_tests();
     run_util_modules_tests();
     run_roadmap_tests();
     run_new_features_tests();
@@ -1418,6 +1486,7 @@ int main(int argc, char **argv) {
     run_imessage_replay_guard_tests();
     run_chatdb_cursor_repo_sqlite_tests();
     run_reliable_circuit_tests();
+    run_local_only_tests();
     run_imessage_adversarial_tests();
     run_imessage_non_allowlisted_tests();
     run_imessage_rich_link_tests();
@@ -1430,6 +1499,14 @@ int main(int argc, char **argv) {
     run_imessage_reply_pacing_tests();
     run_imessage_threaded_reply_tests();
     run_imessage_send_observer_tests();
+    run_imessage_voice_record_tests();
+    run_speech_text_tests();
+    run_speech_rewrite_tests();
+    run_speech_direction_tests();
+    run_opener_gate_tests();
+    run_voice_intent_tests();
+    run_voice_triggers_tests();
+    run_speech_perform_tests();
     run_imessage_custom_tapback_tests();
     run_imessage_action_facts_tests();
     run_imessage_dispatcher_tests();
@@ -1451,6 +1528,7 @@ int main(int argc, char **argv) {
     run_untested_modules_tests();
     run_modules_coverage_tests();
     run_coverage_new_tests();
+    run_calendar_tool_tests();
     run_context_tests();
     run_tavily_tests();
     run_awareness_tests();
@@ -1461,6 +1539,7 @@ int main(int argc, char **argv) {
     run_externalization_tests();
     run_conversation_tests();
     run_vision_tests();
+    run_local_vision_tests();
     run_ab_response_tests();
     run_event_extract_tests();
     run_stm_tests();
@@ -1471,6 +1550,7 @@ int main(int argc, char **argv) {
     run_contact_style_overlay_tests();
     run_graph_tests();
     run_graph_ingest_tests();
+    run_name_extract_tests();
     run_agent_facts_tests();
     run_cli_memory_import_tests();
     run_cli_commands_memory_print_tests();
@@ -1479,12 +1559,12 @@ int main(int argc, char **argv) {
     run_hybrid_reconstructive_tests();
     run_semantic_recall_tests();
     run_semantic_recall_register_tests();
+    run_context_relevance_tests();
     run_embedder_http_tests();
     run_w1_bitemporal_tests();
     run_graph_state_tests();
     run_wiki_page_tests();
     run_w2_autodream_tests();
-    run_w3_multigraph_tests();
     run_w4_verifier_tests();
     run_w5_persona_deltas_tests();
     run_persona_delta_observer_tests();
@@ -1493,7 +1573,6 @@ int main(int argc, char **argv) {
     run_daemon_housekeeping_tests();
     run_orphan_channel_audit_tests();
     run_verifier_metrics_tests();
-    run_doctor_ws_consumer_tests();
     run_output_validator_tests();
     run_chain_failure_paths_tests();
     run_agent_fail_path_regressions_tests();
@@ -1507,12 +1586,19 @@ int main(int argc, char **argv) {
     run_daemon_e2e_validator_tests();
     run_response_guard_tests();
     run_response_guard_retry_tests();
+    run_reply_fragment_tests();
     run_outbound_pipeline_tests();
     run_outbound_strip_tests();
     run_style_governor_tests();
     run_outbound_shape_tests();
     run_outbound_echo_tests();
     run_outbound_crosstalk_tests();
+    run_curiosity_gaps_tests();
+    run_agent_recall_provider_tests();
+    run_memory_loader_scope_tests();
+    run_imessage_send_route_tests();
+    run_confidence_boundary_tests();
+    run_personal_model_prompt_tests();
 #ifdef HU_ENABLE_SQLITE
     run_boundary_repo_tests();
     run_opinions_repo_tests();
@@ -1520,15 +1606,24 @@ int main(int argc, char **argv) {
     run_proactive_decisions_repo_tests();
     run_outbound_sends_repo_tests();
     run_daemon_proactive_decline_tests();
+    run_unprompted_gate_tests();
     run_daemon_proactive_reachability_tests();
     run_daemon_contact_optout_tests();
+    run_daemon_name_catch_tests();
+    run_daemon_thread_context_tests();
     run_daemon_hurt_handoff_tests();
     run_daemon_dated_followup_tests();
     run_contact_optout_repo_tests();
+    run_reminder_repo_tests();
+    run_job_queue_repo_tests();
+    run_person_dates_repo_tests();
     run_daemon_outbound_bus_tests();
     run_repo_util_sqlite_tests();
     run_proactive_send_circuit_tests();
     run_imessage_send_service_tests();
+    run_daemon_send_failure_tests();
+    run_daemon_job_queue_tests();
+    run_daemon_job_hold_tests();
     run_social_graph_repo_tests();
     run_self_awareness_repo_tests();
     run_feed_items_repo_tests();
@@ -1559,10 +1654,29 @@ int main(int argc, char **argv) {
     run_agent_tests();
     run_lean_head_tests();
     run_reply_prompt_tests();
+    run_length_policy_tests();
     /* #26: per-turn state tracking unit tests (tool_count, hash, registers) */
     run_agent_turn_state_tests();
     /* M4 follow-up: transport-error fast-fail in agent_turn tool-loop */
     run_agent_turn_transport_tests();
+    /* agent-turn carve: recording provider + scrubber behind the golden corpus */
+    run_turn_recording_provider_tests();
+    /* agent-turn carve: golden characterization of hu_agent_turn (PR 0) */
+    run_agent_turn_characterization_tests();
+    run_turn_ctx_tests();
+    run_turn_retrieve_tests();
+    run_turn_perceive_tests();
+    run_turn_entry_tests();
+    run_turn_silence_tests();
+    run_turn_context_tests();
+    run_turn_tools_tests();
+    run_turn_tail_tests();
+    run_turn_plan_tests();
+    run_agent_turn_history_window_tests();
+    run_reask_tests();
+    run_empty_retry_tests();
+    run_spoken_turn_tests();
+    run_turn_sources_tests();
     /* M3 live-fire fix: provider latency_ms must span the blocking round trip */
     run_agent_llm_latency_wall_clock_tests();
     /* G11: per-turn request override parity helper (G5 regression guard) */
@@ -1595,7 +1709,6 @@ int main(int argc, char **argv) {
     run_m3_frontier_mlx_dispatch_tests();
     /* Spec 2026-05-19 self-model-scaffold — runs in both flag variants. */
     run_self_model_behavior_log_tests();
-    run_action_directives_tests();
     run_self_model_phase_bcde_tests();
 #ifdef HU_ENABLE_LEARNING
     run_w16_evaluation_tests();
@@ -1633,6 +1746,7 @@ int main(int argc, char **argv) {
     run_behavioral_clone_tests();
     run_governor_tests();
     run_model_router_tests();
+    run_local_only_route_tests();
     run_model_router_health_tests();
     run_cp_admin_tests();
     run_humanness_context_tests();
@@ -1641,8 +1755,9 @@ int main(int argc, char **argv) {
     run_arbitrator_tests();
     run_salience_tests();
     run_hard_moment_tests();
+    run_turn_moment_tests();
+    run_humanness_hedge_turn_tests();
     run_planning_tests();
-    run_rel_dynamics_tests();
 #ifdef HU_ENABLE_SQLITE
     run_emotional_residue_tests();
     run_consolidation_engine_tests();
@@ -1822,7 +1937,6 @@ int main(int argc, char **argv) {
     run_mutual_tom_tests();
     run_opinion_history_tests();
     run_self_improve_loop_tests();
-    run_a2a_tests();
     run_gvr_tests();
     run_provider_degradation_tests();
     run_apple_provider_tests();
@@ -1850,7 +1964,27 @@ int main(int argc, char **argv) {
     run_daemon_followup_sched_tests();
     run_daemon_rich_media_tests();
     run_daemon_voice_reply_tests();
+    run_daemon_voice_first_tests();
+    run_daemon_expressive_tests();
+    run_daemon_spontaneity_tests();
+    run_daemon_share_queue_tests();
+    run_daemon_reminders_tests();
+    run_daemon_briefing_tests();
+    run_daemon_person_dates_tests();
+    run_commitment_sample_tests();
+    run_agent_fit_history_tests();
+    run_history_budget_tests();
     run_prospective_tests();
+    run_prospective_repo_sqlite_tests();
+    run_prospective_policy_tests();
+    run_daemon_prospective_time_tests();
+    run_prospective_v2_tests();
+    run_cli_prospective_tests();
+    run_replay_turn_tests();
+    run_cli_replay_tests();
+    run_daemon_outbound_sanitize_tests();
+    run_daemon_prospective_tests();
+    run_chat_oneshot_tests();
     run_eval_score_tests();
     run_corrective_rag_tests();
     run_adaptive_rag_tests();
@@ -1868,6 +2002,7 @@ int main(int argc, char **argv) {
     run_otel_tests();
     run_cot_audit_tests();
     run_moderation_tests();
+    run_self_harm_tests();
     run_companion_safety_tests();
     run_code_sandbox_tests();
     run_computer_use_tests();
@@ -1926,8 +2061,6 @@ int main(int argc, char **argv) {
     run_adversarial_integration_tests();
     run_config_reload_tests();
     run_plugin_hooks_tests();
-    run_task_manager_tests();
-    run_task_tools_tests();
     run_tool_ask_user_tests();
     run_approval_gate_tests();
     run_workflow_commands_tests();
@@ -1941,6 +2074,9 @@ int main(int argc, char **argv) {
     run_reply_delay_model_tests();
     run_daemon_promise_keeper_tests();
     run_daemon_insight_overuse_tests();
+    run_daemon_proposer_context_tests();
+    run_daemon_grief_decay_tests();
+    run_daemon_commitment_guard_tests();
     run_daemon_config_reload_tests();
     run_daemon_identity_graph_tests();
     run_daemon_reply_fallback_tests();
@@ -1951,13 +2087,14 @@ int main(int argc, char **argv) {
     run_consecutive_limiter_tests();
     run_proactive_policy_tests();
     run_daemon_director_tests();
+    run_daemon_director_local_only_tests();
+    run_director_v2_tests();
+    run_director_tapback_tests();
 #ifdef HU_ENABLE_SQLITE
     run_daemon_proactive_feed_scope_tests();
 #endif
     run_daemon_trust_tests();
-    run_cp_tasks_tests();
     run_cp_canvas_tests();
-    run_vector_retrieval_remote_tests();
     run_background_registry_tests();
     run_consistency_tests();
     run_mlx_stream_utf8_tests();
@@ -1974,11 +2111,11 @@ int main(int argc, char **argv) {
     run_fact_extract_tests();
     run_personal_model_tests();
     run_personal_model_llm_extract_tests();
+    run_llm_purpose_tests();
+    run_post_send_defer_tests();
     run_personal_model_atomic_save_tests();
     run_personal_model_per_contact_tests();
 #ifdef HU_ENABLE_SQLITE
-    run_cross_channel_acl_tests();
-    run_cross_channel_pipeline_tests();
     run_reflection_schema_tests();
 #endif
     run_reflection_storage_tests();                 /* T2: stubbed-out when SQLite off */
@@ -2019,6 +2156,7 @@ int main(int argc, char **argv) {
     run_persona_directive_channels_tests();
     run_persona_overlay_render_tests();
     run_style_card_tests();
+    run_learned_style_tests();
     run_card_file_tests();
     run_emotion_card_tests();
 #if defined(HU_HAS_IMESSAGE) && defined(HU_HAS_TELEGRAM)

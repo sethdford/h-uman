@@ -19,3 +19,17 @@ void hu_imessage_send_observer_notify(const hu_imessage_sent_event_t *ev) {
         return;
     g_observer(g_observer_user, ev);
 }
+
+static hu_imessage_send_failure_fn g_failure = NULL;
+static void *g_failure_user = NULL;
+
+void hu_imessage_send_failure_observer_set(hu_imessage_send_failure_fn fn, void *user) {
+    g_failure = fn;
+    g_failure_user = fn ? user : NULL;
+}
+
+void hu_imessage_send_failure_notify(const hu_imessage_send_failed_event_t *ev) {
+    if (!g_failure || !ev || !ev->handle || ev->handle_len == 0)
+        return;
+    g_failure(g_failure_user, ev);
+}

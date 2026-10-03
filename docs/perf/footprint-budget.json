@@ -1,0 +1,33 @@
+{
+  "about": "Policy for h-uman's footprint: which build the published numbers describe, the hard budgets CI enforces, and when a fresh measurement should refresh the docs. Measurements live in footprint.json; scripts/footprint.py joins the two. Units: bytes, and SI megabytes (1 MB = 1,000,000 bytes) wherever a claim says MB.",
+  "primary_build": "release-size",
+  "full_build": "release-preset",
+  "builds": {
+    "release-size": "MinSizeRel + LTO, all channels, sqlite-vec OFF. The exact configuration of the release-size job in .github/workflows/ci.yml, so CI re-measures what the docs describe on every main push.",
+    "release-preset": "`cmake --preset release` (adds sqlite-vec, ML, embedded model, Cartesia, cron, feeds, update). What a user building the full release gets. Measured locally; CI does not build it."
+  },
+  "budgets": {
+    "binary_bytes": {
+      "build": "release-size",
+      "max": 3072000,
+      "since": "2026-10-02",
+      "why": "3000 KB. Raised from 2800 KB after a linker-map audit of the 2,942,816-byte binary (2026-10-02, MinSizeRel+LTO, release-size config): __text 2,053,828 (1809 KB at the 2026-09-20 audit), __cstring 560,490 (512 KB); the growth is product code spread over the reply path and new features (hu_service_run 53 KB, agent_turn_run 41 KB, persona 78 KB, conversation 52 KB, prospective v2, reminders, person dates, proposer context, briefing), no single module to cut. The only non-product code is the eval CLI (~26 KB), which the nightly scripts call through the installed binary. Before that: 2600 -> 2800 KB on 2026-09-20 (PR #424). Raise only with a measurement, never to make a red run green."
+    },
+    "version_peak_rss_bytes": {
+      "build": "release-size",
+      "max": 8000000,
+      "since": "2026-03",
+      "why": "8 MB, the long-standing 'Max Allowed' peak RSS of `human --version` in docs/standards/engineering/performance.md. It was never enforced anywhere until this file."
+    },
+    "startup_ms_median": {
+      "build": "release-size",
+      "max": 100,
+      "since": "2026-03",
+      "why": "100 ms, the long-standing 'Max Allowed' cold start in docs/standards/engineering/performance.md. Checked on the median of 20 warm runs, because a single sample on a shared CI runner is noise."
+    }
+  },
+  "heal": {
+    "approx_tolerance": 0.05,
+    "why": "A published '~N' or 'X.Y MB' value is refreshed when it is more than 5% away from a fresh measurement. That is a third of the 15% drift tolerance the binary-size claims were gated at before this file existed, so the docs refresh well before any claim is badly off. Bounds ('<9 MB') and ranges ('4-6 ms') refresh the moment a fresh measurement falls outside them. Nothing refreshes for noise inside those limits, which is what keeps the heal loop from opening a PR on every commit."
+  }
+}

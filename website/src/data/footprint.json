@@ -1,0 +1,30 @@
+{
+  "_generated_by": "scripts/footprint.py sync; do not edit. Source: docs/perf/footprint.json",
+  "text": {
+    "binary_kb": "~2760 KB",
+    "binary_mb": "~3 MB",
+    "budget_binary_kb": "3000 KB",
+    "budget_startup_ms": "100 ms",
+    "budget_version_rss_mb": "8 MB",
+    "full_binary_bytes": "3,327,168",
+    "full_binary_mb": "3.3 MB",
+    "full_idle_rss_mb": "8.8 MB",
+    "full_measured_date": "2026-09-29",
+    "idle_rss_bound": "<9 MB",
+    "idle_rss_mb": "8.6 MB",
+    "measured_date": "2026-09-29",
+    "measured_platform": "macOS arm64",
+    "measured_rev": "a0641b4dd",
+    "startup_bound": "<6 ms",
+    "startup_range": "3–6 ms",
+    "text_kb": "1915 KB",
+    "version_rss_bound": "<7 MB",
+    "version_rss_mb": "6.9 MB"
+  },
+  "measured": {
+    "binary_mb": 2.83,
+    "idle_rss_mb": 8.59,
+    "version_rss_mb": 6.93,
+    "startup_ms_median": 4.21
+  }
+}

@@ -14,13 +14,17 @@
 ─────────────────────────────────────────────────────────────────── */
 @supports (animation-timeline: view()) {
   .hu-scroll-reveal {
-    animation: hu-scroll-entrance linear both;
+    animation-name: hu-scroll-entrance;
+    animation-timing-function: linear;
+    animation-fill-mode: both;
     animation-timeline: view();
     animation-range: entry 0% entry 30%;
   }
 
   .hu-scroll-reveal-stagger > * {
-    animation: hu-scroll-entrance linear both;
+    animation-name: hu-scroll-entrance;
+    animation-timing-function: linear;
+    animation-fill-mode: both;
     animation-timeline: view();
     animation-range: entry 0% entry 30%;
   }
@@ -42,7 +46,9 @@
 ─────────────────────────────────────────────────────────────────── */
 @supports (animation-timeline: scroll()) {
   .hu-scroll-progress {
-    animation: hu-scroll-grow linear both;
+    animation-name: hu-scroll-grow;
+    animation-timing-function: linear;
+    animation-fill-mode: both;
     animation-timeline: scroll(nearest block);
   }
 
@@ -61,7 +67,9 @@
 ─────────────────────────────────────────────────────────────────── */
 @supports (animation-timeline: scroll()) {
   .hu-parallax-subtle {
-    animation: hu-parallax-shift linear both;
+    animation-name: hu-parallax-shift;
+    animation-timing-function: linear;
+    animation-fill-mode: both;
     animation-timeline: scroll(nearest block);
     animation-range: cover 0% cover 100%;
   }
@@ -82,7 +90,9 @@
 ─────────────────────────────────────────────────────────────────── */
 @supports (animation-timeline: view()) {
   .hu-chapter-reveal {
-    animation: hu-chapter-reveal linear both;
+    animation-name: hu-chapter-reveal;
+    animation-timing-function: linear;
+    animation-fill-mode: both;
     animation-timeline: view();
     animation-range: entry 0% entry 40%;
   }
@@ -106,7 +116,9 @@
 ─────────────────────────────────────────────────────────────────── */
 @supports (animation-timeline: view()) {
   .hu-data-cascade > * {
-    animation: hu-data-point-enter linear both;
+    animation-name: hu-data-point-enter;
+    animation-timing-function: linear;
+    animation-fill-mode: both;
     animation-timeline: view();
     animation-range: entry 0% entry 30%;
   }
@@ -128,7 +140,9 @@
 ─────────────────────────────────────────────────────────────────── */
 @supports (animation-timeline: view()) {
   .hu-connection-draw {
-    animation: hu-stroke-draw linear both;
+    animation-name: hu-stroke-draw;
+    animation-timing-function: linear;
+    animation-fill-mode: both;
     animation-timeline: view();
     animation-range: entry 0% entry 50%;
   }
@@ -148,7 +162,9 @@
 ─────────────────────────────────────────────────────────────────── */
 @supports (animation-timeline: scroll()) {
   .hu-parallax-deep {
-    animation: hu-parallax-deep-shift linear both;
+    animation-name: hu-parallax-deep-shift;
+    animation-timing-function: linear;
+    animation-fill-mode: both;
     animation-timeline: scroll(nearest block);
     animation-range: cover 0% cover 100%;
   }

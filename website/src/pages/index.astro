@@ -3,6 +3,8 @@ import "../styles/global.css";
 import Nav from "../components/Nav.astro";
 import AnimatedLogo from "../components/AnimatedLogo.astro";
 import InstallSection from "../components/InstallSection.astro";
+// Footprint numbers are generated from docs/perf/footprint.json by scripts/footprint.py.
+import fp from "../data/footprint.json";
 
 const rawBase = import.meta.env.BASE_URL;
 const base = rawBase.endsWith("/") ? rawBase : rawBase + "/";
@@ -115,7 +117,7 @@ const tools = [
     <meta property="og:title" content="h-uman — almost human." />
     <meta
       property="og:description"
-      content="Autonomous AI agent runtime. ~1.7 MB binary. 50+ providers. 38 channels. 83+ tools. Zero dependencies. Pure C."
+      content={`Autonomous AI agent runtime. ${fp.text.binary_mb} binary. 50+ providers. 38 channels. 83+ tools. Zero dependencies. Pure C.`}
     />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://h-uman.ai/" />
@@ -129,7 +131,7 @@ const tools = [
     <meta name="twitter:title" content="h-uman — almost human." />
     <meta
       name="twitter:description"
-      content="Autonomous AI agent runtime. ~1.7 MB binary. 50+ providers. 38 channels. 83+ tools. Zero dependencies. Pure C."
+      content={`Autonomous AI agent runtime. ${fp.text.binary_mb} binary. 50+ providers. 38 channels. 83+ tools. Zero dependencies. Pure C.`}
     />
     <meta name="twitter:image" content="https://h-uman.ai/og-image.png" />
 
@@ -393,8 +395,8 @@ const tools = [
               decoding="async"
             />
             <img
-              src="https://img.shields.io/badge/binary-1%2C750_KB-7AB648?style=flat-square"
-              alt="Binary size: 1,750 KB"
+              src={`https://img.shields.io/badge/binary-${encodeURIComponent(fp.text.binary_kb).replace(/%20/g, "_")}-7AB648?style=flat-square`}
+              alt={`Binary size: ${fp.text.binary_kb}`}
               height="20"
               style="aspect-ratio: auto;"
               loading="lazy"
@@ -1312,7 +1314,7 @@ const tools = [
                 class="text-xs font-mono"
                 style="color: var(--color-text-tertiary)"
               >
-                &lt;6 MB RAM
+                {fp.text.idle_rss_bound} RAM
               </div>
             </div>
 
@@ -1431,7 +1433,7 @@ const tools = [
                 class="text-xs font-mono"
                 style="color: var(--color-text-tertiary)"
               >
-                &lt;30 ms boot
+                {fp.text.startup_bound} boot
               </div>
             </div>
 
@@ -2471,7 +2473,10 @@ const tools = [
               [
                 {
                   metric: "Binary Size",
-                  human: { val: 1.75, label: "1.7 MB" },
+                  human: {
+                    val: fp.measured.binary_mb,
+                    label: fp.text.binary_mb,
+                  },
                   others: [
                     { name: "Claude Code", val: 200, label: "~200 MB" },
                     { name: "OpenAI Codex", val: 50, label: "~50 MB" },
@@ -2480,8 +2485,11 @@ const tools = [
                   maxVal: 200,
                 },
                 {
-                  metric: "Peak RAM",
-                  human: { val: 6, label: "<6 MB" },
+                  metric: "RAM",
+                  human: {
+                    val: fp.measured.idle_rss_mb,
+                    label: `${fp.text.idle_rss_bound} idle`,
+                  },
                   others: [
                     { name: "Claude Code", val: 300, label: "~300 MB" },
                     { name: "OpenAI Codex", val: 100, label: "~100 MB" },

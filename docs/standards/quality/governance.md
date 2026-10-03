@@ -105,7 +105,7 @@ cmake --build build-release -j$(sysctl -n hw.ncpu 2>/dev/null || nproc)
 
 | Gate          | Threshold                                      |
 | ------------- | ---------------------------------------------- |
-| Binary size   | No unexplained growth beyond ~1696 KB baseline |
+| Binary size   | Within the <!-- fp:budget_binary_kb -->3000 KB<!-- /fp --> budget (now <!-- fp:binary_kb -->~2760 KB<!-- /fp -->) |
 | Clean compile | Zero warnings under release flags              |
 
 ### Test Quality

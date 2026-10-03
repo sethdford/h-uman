@@ -70,6 +70,14 @@ hu_quality_score_t hu_conversation_evaluate_quality(const char *response, size_t
                                                     const hu_channel_history_entry_t *entries,
                                                     size_t count, uint32_t max_chars);
 
+/* As above. cap_from_stats: max_chars came from HU_LENGTH_POLICY=live for a
+ * contact with measured reply stats (agent->response_limit_tight != 0); only
+ * then may a reply inside the cap keep full brevity marks. */
+hu_quality_score_t
+hu_conversation_evaluate_quality_capped(const char *response, size_t response_len,
+                                        const hu_channel_history_entry_t *entries, size_t count,
+                                        uint32_t max_chars, bool cap_from_stats);
+
 /* Honesty guardrail: detect "did you do X?" questions and inject honest context.
  * Returns a context string if an honesty injection is needed, NULL otherwise.
  * Caller owns returned string; free with strlen(result) + 1 bytes. */
@@ -312,6 +320,9 @@ size_t hu_conversation_split_response(hu_allocator_t *alloc, const char *respons
  * Use for max_response_chars to match response length within ~1.5x ratio. */
 int hu_conversation_max_response_chars(size_t incoming_len);
 
+/* The configured upper clamp of the two functions above (behavior.max_response_chars). */
+uint32_t hu_conversation_max_response_chars_ceiling(void);
+
 /* Like hu_conversation_max_response_chars, but scales length with relationship warmth
  * (session stage + optional persona contact hints). Group threads should pass contact=NULL
  * and rely on the caller forcing plain max for is_group. */
@@ -341,6 +352,14 @@ size_t hu_conversation_calibrate_length_for_contact(const char *last_msg, size_t
                                                     const hu_contact_profile_t *contact,
                                                     hu_relationship_stage_t session_stage,
                                                     char *buf, size_t cap);
+
+/* The no-history calibration with a known turn cap: when turn_cap > 0 the
+ * "Target" it states is that cap (the RESPONSE LIMIT under HU_LENGTH_POLICY);
+ * 0 keeps today's formula. */
+size_t hu_conversation_calibrate_length_capped(const char *last_msg, size_t last_msg_len,
+                                               bool is_group, const hu_contact_profile_t *contact,
+                                               hu_relationship_stage_t session_stage,
+                                               uint32_t turn_cap, char *buf, size_t cap);
 
 /* ── Texting style analysis ───────────────────────────────────────────── */
 
@@ -807,6 +826,10 @@ size_t hu_conversation_build_cold_restart_hint(const hu_channel_history_entry_t 
  * Only call for from_me=true messages. Returns HU_REACTION_NONE most of the time. */
 hu_reaction_type_t hu_conversation_classify_self_reaction(const char *msg, size_t msg_len,
                                                           uint32_t seed);
+/* The classification half of the above, without the ~2% roll: which
+ * reaction the message would carry (HAHA / EMPHASIS) or NONE when it is not
+ * self-reaction material. HU_SPONTANEITY decides WHEN from learned rates. */
+hu_reaction_type_t hu_conversation_self_reaction_kind(const char *msg, size_t msg_len);
 
 /* ── Group chat participant mention ──────────────────────────────────── */
 
@@ -968,6 +991,21 @@ size_t hu_conversation_flush_scheduled_for(uint64_t now_ms, const char *channel_
                                            char *out_channel, size_t channel_cap, char *out_message,
                                            size_t message_cap);
 
+/* Tagged scheduling: `kind` is a hu_unprompted_kind_t (human/daemon/unprompted_gate.h).
+ * 0 = owner-scheduled (the _on/_for API above). A non-zero kind marks an
+ * UNPROMPTED send (e.g. the read-no-reply bump) so the delivery side runs the
+ * unprompted gate stack at send time; it is persisted as "kind" in
+ * scheduled.json only when non-zero, so untagged files are unchanged. */
+hu_error_t hu_conversation_schedule_message_kind(const char *contact_id, size_t cid_len,
+                                                 const char *channel_name, size_t ch_len,
+                                                 const char *message, size_t msg_len,
+                                                 uint64_t deliver_at_ms, uint8_t kind);
+size_t hu_conversation_flush_scheduled_kind(uint64_t now_ms, const char *channel_filter,
+                                            size_t filter_len, char *out_contact,
+                                            size_t contact_cap, char *out_channel,
+                                            size_t channel_cap, char *out_message,
+                                            size_t message_cap, uint8_t *out_kind);
+
 /* Persist scheduled messages to a JSON file. Load restores on startup. */
 hu_error_t hu_conversation_sched_save(const char *path, size_t path_len);
 hu_error_t hu_conversation_sched_load(const char *path, size_t path_len);
@@ -988,6 +1026,7 @@ typedef struct hu_sched_slot {
     size_t msg_len;
     uint64_t deliver_at_ms;
     bool active;
+    uint8_t kind; /* hu_unprompted_kind_t; 0 = owner-scheduled */
 } hu_sched_slot_t;
 
 /* Access a scheduled slot by index (0..HU_SCHED_MAX-1). Returns NULL if out of range. */

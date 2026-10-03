@@ -6,6 +6,7 @@ and the Tier-1 proxy decision. eval_blinded_ab.py (proxy) and
 blind_ab/score.py (human) write their halves through write_*_half().
 """
 import json
+import math
 import os
 import time
 
@@ -18,27 +19,138 @@ DEFAULT_FAIL_UNDER = 45.0
 DEFAULT_MAX_REGRESSION = 5.0
 HUMAN_STALE_DAYS = 30
 
+# The gate decides at 45 % and the model's target is 50 %, so the measurement
+# must resolve 5 pp to mean anything -- a 95 % half-width of 5 pp needs n >= 384
+# at p = 0.5. 400 is that, rounded. Trials the nightly proxy run judges; raised
+# 50 -> 400 on 2026-09-20 (see proxy_gate_decision). This spends evidence
+# already collected -- data/imessage/ground_truth.jsonl holds 689 pairs while
+# the run sampled 50 of them -- so it costs judge calls and local generation
+# time, not new data.
+DEFAULT_MAX_TRIALS = 400
+
+# A 95 % half-width wider than this cannot separate the floor (45 %) from the
+# target (50 %), so "no evidence of harm" carries no information and the verdict
+# is ADVISORY instead of PASS. Tied to DEFAULT_MAX_REGRESSION deliberately: the
+# resolution the gate needs IS the size of the drop it is built to notice.
+MAX_CI_HALF_WIDTH_PP = DEFAULT_MAX_REGRESSION
+
+
+def wilson(k, n, z=1.96):
+    """95% Wilson score interval for a binomial proportion.
+
+    Canonical home for this project's binomial CI: blind_ab/score.py (the human
+    tier) imports it from here so both tiers quantify uncertainty the same way.
+    They did not until 2026-09-20 -- the human tier gated on a Wilson bound
+    ("detection <= 0.60 AND Wilson lower <= 0.55") while the proxy tier below
+    compared a bare point estimate to a fixed floor.
+    """
+    if n == 0:
+        return (0.0, 0.0, 0.0)
+    p = k / n
+    d = 1 + z * z / n
+    centre = (p + z * z / (2 * n)) / d
+    half = (z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n))) / d
+    return (p, max(0.0, centre - half), min(1.0, centre + half))
+
+
+def fool_rate_ci(fool_rate, n):
+    """(lo, hi) 95% Wilson bounds in PERCENT for a fool_rate given in percent.
+
+    Returns the vacuous (0.0, 100.0) when n == 0. An absent measurement
+    constrains nothing, and saying so out loud is what stops a missing number
+    from reading as a confident one -- see
+    .claude/rules/no-number-without-a-measurement.md, "Distinguish 0 from
+    absent".
+    """
+    if not n:
+        return (0.0, 100.0)
+    _p, lo, hi = wilson(int(round(fool_rate / 100.0 * n)), n)
+    return (lo * 100.0, hi * 100.0)
+
 
 def proxy_gate_decision(fool_rate, n_real_pairs, baseline,
                         fail_under=DEFAULT_FAIL_UNDER,
                         max_regression=DEFAULT_MAX_REGRESSION,
-                        enforce_min_pairs=ENFORCE_MIN_PAIRS):
-    """Return (mode, verdict, should_fail).
+                        enforce_min_pairs=ENFORCE_MIN_PAIRS,
+                        n_trials=None,
+                        max_ci_half_width=MAX_CI_HALF_WIDTH_PP):
+    """Return (mode, verdict, should_fail), deciding on a CI not a point estimate.
 
     mode: 'ENFORCING' if enough real pairs else 'ADVISORY'.
-    verdict: 'PASS'|'FAIL' when ENFORCING, else 'ADVISORY'.
-    should_fail: True only when ENFORCING and (below floor OR regressed).
+    verdict: 'PASS'|'FAIL' when ENFORCING and the interval is decisive,
+             else 'ADVISORY'.
+    should_fail: True only when ENFORCING and CONFIDENTLY below floor/regressed.
+
+    Why an interval, and not the `fool_rate < fail_under` this used until
+    2026-09-20: the floor is 45.0 % and the run judged 50 trials, so the
+    binomial SE is ~7.1 pp while the ENTIRE decision boundary (fail_under up to
+    baseline) is 5 pp wide -- narrower than one standard error. Simulated over
+    4000 draws, a model that is PERFECTLY indistinguishable (true 50 %) failed
+    the point-estimate rule 24.8 % of the time.
+
+    That is measured, not hypothetical. The nightly read 42.0 % FAIL on 09-19
+    and 46.0 % PASS on 09-20 off the SAME adapter and the SAME judge; W16 stayed
+    red 5 days and four separate triage passes blamed staleness instead. A gate
+    that red-lights a healthy model one night in four teaches everyone to ignore
+    it, which is exactly what happened.
+
+    The rule is now an evidence-of-harm test, in three steps (see the body):
+    FAIL only when the 95 % Wilson interval lies ENTIRELY on the bad side; PASS
+    when the run was precise enough to have caught harm and did not; ADVISORY in
+    between. Same 4000-draw simulation, false alarm on a true-50 % model:
+    24.8 % -> 0.5 % at n=50, and 0.0 % at n=400.
+
+    PASS deliberately does NOT require proving the rate exceeds the floor. The
+    floor is a red line not to fall below, not a target to clear, and requiring
+    ci_lo >= fail_under makes PASS unreachable: a PERFECTLY indistinguishable
+    model (true 50 %) has ci_lo 44.4 at n=300 and would sit at ADVISORY forever.
+    That was a real bug in the first draft of this change, found by asking what
+    the new rule does to a perfect model -- the same question that exposed the
+    old one.
+
+    This is safe ONLY because DEFAULT_MAX_TRIALS rose to 400 in the same change,
+    and that coupling is the crux. The interval rule alone would make the gate
+    quiet AND blind: at n=50 it catches a true 35 % regression just 29.2 % of
+    the time, and its half-width (13.3 pp) cannot separate the 45 % floor from
+    the 50 % target at all. Lower either number without the other and this gate
+    stops being evidence -- drop n and it goes blind, drop the interval and it
+    goes back to crying wolf.
+
+    An interval that STRADDLES the floor gets verdict ADVISORY -- not enough
+    evidence to decide. It is not PASS, and compute_effective_verdict will not
+    promote on it.
+
+    Note the two axes are deliberately separate, and conflating them is a live
+    trap. `mode` answers "was this a REAL enforcing-grade measurement?" and stays
+    ENFORCING for a straddle, because the run did happen at full sample size.
+    `verdict` answers "what did it decide?". check_measurement_freshness.py
+    treats proxy mode == ADVISORY as "no real measurement recorded" (dry runs
+    write that), so returning ADVISORY mode here would make a perfectly good
+    300-trial run invisible to the freshness gate and keep W16 red forever --
+    the exact failure this change exists to end.
     """
     if n_real_pairs < enforce_min_pairs:
         return "ADVISORY", "ADVISORY", False
-    below_floor = fool_rate < fail_under
-    regressed = (
-        baseline is not None
-        and baseline.get("fool_rate") is not None
-        and (baseline["fool_rate"] - fool_rate) > max_regression
-    )
+
+    n = n_trials or n_real_pairs
+    ci_lo, ci_hi = fool_rate_ci(fool_rate, n)
+    base = (baseline or {}).get("fool_rate")
+
+    # 1. Evidence of harm wins at ANY n: even the optimistic bound misses the
+    #    floor, or clears the regression allowance. A small sample can still
+    #    prove a model is bad; it just cannot prove one is good.
+    below_floor = ci_hi < fail_under
+    regressed = base is not None and ci_hi < (base - max_regression)
     if below_floor or regressed:
         return "ENFORCING", "FAIL", True
+
+    # 2. No evidence of harm -- but that only means something if the run could
+    #    have SEEN harm. Absence of evidence is evidence of absence only when
+    #    the measurement had the resolution to tell them apart.
+    if (ci_hi - ci_lo) / 2.0 > max_ci_half_width:
+        return "ENFORCING", "ADVISORY", False
+
+    # 3. Powered, and nothing indicts it.
     return "ENFORCING", "PASS", False
 
 

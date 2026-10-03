@@ -1,3 +1,4 @@
+#include "human/context/conversation.h"
 #include "human/inspiration.h"
 #include "test_framework.h"
 #include <string.h>
@@ -22,6 +23,29 @@ static void test_inspiration_system_prompt_differs_per_medium(void) {
     const char *t = hu_inspiration_system_prompt(HU_INSPIRATION_TIKTOK);
     HU_ASSERT(m && y && t);
     HU_ASSERT(strcmp(m, y) != 0 && strcmp(y, t) != 0);
+}
+
+/* 2026-09-29: "the user's own voice" read as the contact's. Lexi wrote "U just
+ * happen to spoil me" and the song caption went out as "yeah u def my sugar
+ * daddy" — her line, from Seth's phone. Every medium names the sides. */
+static void test_inspiration_system_prompt_says_whose_voice(void) {
+    hu_inspiration_medium_t media[] = {HU_INSPIRATION_MUSIC, HU_INSPIRATION_YOUTUBE,
+                                       HU_INSPIRATION_TIKTOK};
+    for (size_t i = 0; i < 3; i++) {
+        const char *p = hu_inspiration_system_prompt(media[i]);
+        HU_ASSERT_NULL(strstr(p, "user's"));
+        HU_ASSERT_NOT_NULL(strstr(p, "you texting them"));
+    }
+}
+
+static void test_music_prompt_names_the_sender(void) {
+    char out[256];
+    const char *in = "Trust me daddy im used to working my entire life. U just happen to spoil me";
+    size_t len = hu_conversation_build_music_prompt(in, strlen(in), out, sizeof(out));
+    HU_ASSERT_TRUE(len > 0);
+    HU_ASSERT_NOT_NULL(strstr(out, "Their last text to you"));
+    HU_ASSERT_NOT_NULL(strstr(out, "never a line in theirs"));
+    HU_ASSERT_NOT_NULL(strstr(out, "spoil me"));
 }
 
 static void test_inspiration_tiktok_tag_url_basic(void) {
@@ -61,6 +85,8 @@ void run_inspiration_tests(void) {
     HU_RUN_TEST(test_inspiration_voice_hint_includes_formality_and_traits);
     HU_RUN_TEST(test_inspiration_voice_hint_neutral_when_absent);
     HU_RUN_TEST(test_inspiration_system_prompt_differs_per_medium);
+    HU_RUN_TEST(test_inspiration_system_prompt_says_whose_voice);
+    HU_RUN_TEST(test_music_prompt_names_the_sender);
     HU_RUN_TEST(test_inspiration_tiktok_tag_url_basic);
     HU_RUN_TEST(test_inspiration_tiktok_tag_url_multiword_collapses);
     HU_RUN_TEST(test_inspiration_pick_medium_routes_and_falls_back);

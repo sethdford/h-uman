@@ -37,7 +37,67 @@ void hu_style_card_default(hu_style_card_t *out) {
     out->emoji_rate = 0.126;
     out->n = 0;
     out->substantive_agreement_opener_rate = -1.0;
+    out->laugh_rate = -1.0; /* optional axis: absent renders nothing */
+    out->second_beat_rate = -1.0;
+    /* Entity casing: -1 = axis absent. A card without it leaves the
+     * governor's action D inert, which is the pre-2026-09-22 behaviour. */
+    out->entity_cap_rate = -1.0;
+    out->entity_token_count = 0;
     out->from_card = false;
+}
+
+/* Parse the optional entity_casing block:
+ *   "entity_casing": {"rate": 0.266, "n_mentions": 252,
+ *                     "tokens": [{"token":"vanguard","cap_rate":0.9,"n":10}, ...]}
+ * Malformed or absent leaves entity_cap_rate at -1 and the table empty —
+ * never fails the card, same contract as substantive_reply. Tokens are
+ * accepted only when lowercase-clean, short enough to store, and backed by
+ * >= HU_STYLE_CARD_ENTITY_MIN_MENTIONS mentions; the rest are dropped. */
+static void read_entity_casing(const hu_json_value_t *root, hu_style_card_t *card) {
+    const hu_json_value_t *ec = hu_json_object_get(root, "entity_casing");
+    if (!ec || ec->type != HU_JSON_OBJECT)
+        return;
+    double rate = hu_json_get_number(ec, "rate", -1.0);
+    if (!(rate >= 0.0 && rate <= 1.0))
+        return;
+    card->entity_cap_rate = rate;
+
+    const hu_json_value_t *toks = hu_json_object_get(ec, "tokens");
+    if (!toks || toks->type != HU_JSON_ARRAY)
+        return;
+    for (size_t i = 0; i < toks->data.array.len; i++) {
+        if (card->entity_token_count >= HU_STYLE_CARD_MAX_ENTITY_TOKENS)
+            break;
+        const hu_json_value_t *item = toks->data.array.items[i];
+        if (!item || item->type != HU_JSON_OBJECT)
+            continue;
+        const char *tok = hu_json_get_string(item, "token");
+        double cap = hu_json_get_number(item, "cap_rate", -1.0);
+        double n = hu_json_get_number(item, "n", 0.0);
+        if (!tok || !tok[0] || !(cap >= 0.0 && cap <= 1.0) ||
+            n < (double)HU_STYLE_CARD_ENTITY_MIN_MENTIONS)
+            continue;
+        size_t tl = strlen(tok);
+        if (tl == 0 || tl >= HU_STYLE_CARD_ENTITY_TOKEN_CAP)
+            continue;
+        /* Lowercase ASCII letters only: the governor matches against
+         * already-lowercased text, so a token carrying a capital or a space
+         * could never match and would silently do nothing. */
+        bool clean = true;
+        for (size_t c = 0; c < tl; c++) {
+            if (!((tok[c] >= 'a' && tok[c] <= 'z') || tok[c] == '\'')) {
+                clean = false;
+                break;
+            }
+        }
+        if (!clean)
+            continue;
+        hu_style_entity_token_t *slot = &card->entity_tokens[card->entity_token_count++];
+        memcpy(slot->token, tok, tl);
+        slot->token[tl] = '\0';
+        slot->cap_rate = cap;
+        slot->n = (unsigned)n;
+    }
 }
 
 /* Read axes.<name>.value; false when absent or outside [0, 1]. */
@@ -93,6 +153,12 @@ hu_error_t hu_style_card_parse(hu_allocator_t *alloc, const char *json, size_t l
                 card.substantive_agreement_opener_rate = (ag >= 0.0 && ag <= 1.0) ? ag : -1.0;
             }
         }
+        read_entity_casing(root, &card);
+        /* Optional: cards measured before 2026-09-30 have no laugh axis. */
+        if (!read_axis(axes, "laugh_rate", &card.laugh_rate))
+            card.laugh_rate = -1.0;
+        if (!read_axis(axes, "second_beat_rate", &card.second_beat_rate))
+            card.second_beat_rate = -1.0;
         card.from_card = true;
         *out = card;
         err = HU_OK;
@@ -181,6 +247,10 @@ hu_error_t hu_style_card_render_substantive_rule(const hu_style_card_t *card, ch
     return HU_OK;
 }
 
+hu_gate_mode_t hu_style_second_beat_mode(void) {
+    return hu_gate_mode_from_env("HU_STYLE_SECOND_BEAT", HU_GATE_OFF);
+}
+
 hu_gate_mode_t hu_substantive_register_mode(void) {
     return hu_gate_mode_from_env("HU_SUBSTANTIVE_REGISTER", HU_GATE_OFF);
 }
@@ -204,13 +274,32 @@ hu_error_t hu_style_card_render_casual_rules(const hu_style_card_t *card, char *
     fmt_rate(card->question_rate, question, sizeof(question));
     fmt_rate(card->emoji_rate, emoji, sizeof(emoji));
     fmt_rate(card->exclamation_rate, exclaim, sizeof(exclaim));
+    /* Laugh tokens, when measured: the twin opened with a reflex "Lol" in 14%
+     * of its texts over a week against Seth's 3% (2026-09-30). */
+    char laugh[96] = "";
+    if (card->laugh_rate >= 0.0) {
+        char lr[40];
+        fmt_rate(card->laugh_rate, lr, sizeof(lr));
+        snprintf(laugh, sizeof(laugh), " \"lol\"/\"haha\" %s, never as a reflex opener.", lr);
+    }
+    /* Second beat, A/B-gated: 50% of Seth's replies add a second thought,
+     * 35% of the twin's (2026-10-02); the twin's questions trail his too. */
+    char beat[160] = "";
+    if (card->second_beat_rate >= 0.0 && hu_style_second_beat_mode() == HU_GATE_LIVE) {
+        char br[40];
+        fmt_rate(card->second_beat_rate, br, sizeof(br));
+        snprintf(beat, sizeof(beat),
+                 " A second beat (a quick follow-up question or one more detail, on its own "
+                 "line) in %s.",
+                 br);
+    }
     int n = snprintf(buf, cap,
                      "2. Normal capitalization (your phone capitalizes for you; a lowercase "
                      "start is %s); CAPS only when SHOUTING. About %d%% of your texts have "
                      "no period at the end — stop like a real text. Question marks only "
-                     "when actually asking (%s). Emoji %s, exclamation points %s.\n",
+                     "when actually asking (%s). Emoji %s, exclamation points %s.%s%s\n",
                      lower, (int)lround(card->no_terminal_punct_rate * 100.0), question, emoji,
-                     exclaim);
+                     exclaim, laugh, beat);
     if (n < 0 || (size_t)n + 1 > cap)
         return HU_ERR_OUT_OF_MEMORY;
     if (out_len)

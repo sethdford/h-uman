@@ -4,13 +4,25 @@
  * See include/human/core/io_secure.h for the rationale and contract.
  */
 
+/* Before ANY include: glibc under -std=c11 hides mkstemp / fchmod / fsync /
+ * O_CLOEXEC unless POSIX 2008 is requested (macOS exposes them anyway, which
+ * is why only the Linux builds caught this). Same pattern as local_tts.c. */
+#ifndef _DEFAULT_SOURCE
+#define _DEFAULT_SOURCE
+#endif
+
 #include "human/core/io_secure.h"
 
 #include <stdbool.h>
 #include <string.h>
 
+#include <errno.h>
+#include <stdio.h>
+#include <stdlib.h> /* mkstemp: glibc declares it only here (macOS also has it in unistd.h) */
+
 #ifndef _WIN32
 #include <fcntl.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #endif
 
@@ -19,6 +31,8 @@
  * percent-encoded variant. Conservative — we accept the false-positive
  * cost of rejecting files literally named "..something" because no
  * h-uman code path writes such files. */
+#define HU_IO_ATOMIC_PATH_MAX 4096
+
 static bool path_has_traversal(const char *path) {
     return path == NULL || strstr(path, "..") != NULL || strstr(path, "%2e") != NULL ||
            strstr(path, "%2E") != NULL;
@@ -30,10 +44,10 @@ static bool path_has_traversal(const char *path) {
 #ifndef _WIN32
 static int posix_mode_for(hu_io_perm_t perm) {
     switch (perm) {
-        case HU_IO_PERM_SECRET:
-            return 0600;
-        case HU_IO_PERM_USER:
-            return 0644;
+    case HU_IO_PERM_SECRET:
+        return 0600;
+    case HU_IO_PERM_USER:
+        return 0644;
     }
     /* Unreachable under -Wswitch-enum but the compiler doesn't know
      * that — return the more restrictive choice on any unknown value
@@ -41,6 +55,19 @@ static int posix_mode_for(hu_io_perm_t perm) {
     return 0600;
 }
 #endif
+
+hu_error_t hu_io_secure_open_read(const char *path, FILE **out) {
+    if (!out)
+        return HU_ERR_INVALID_ARGUMENT;
+    *out = NULL;
+    if (path_has_traversal(path))
+        return HU_ERR_INVALID_ARGUMENT;
+    FILE *f = fopen(path, "rb");
+    if (!f)
+        return errno == ENOENT ? HU_ERR_NOT_FOUND : HU_ERR_IO;
+    *out = f;
+    return HU_OK;
+}
 
 hu_error_t hu_io_secure_open(const char *path, hu_io_perm_t perm, const char *mode, FILE **out) {
     if (!out)
@@ -82,5 +109,91 @@ hu_error_t hu_io_secure_open(const char *path, hu_io_perm_t perm, const char *mo
     }
     *out = f;
     return HU_OK;
+#endif
+}
+
+hu_error_t hu_io_secure_write_atomic(const char *path, hu_io_perm_t perm, const void *data,
+                                     size_t len) {
+    if (!path || (!data && len > 0) || path_has_traversal(path))
+        return HU_ERR_INVALID_ARGUMENT;
+    char tmp[HU_IO_ATOMIC_PATH_MAX];
+    int n = snprintf(tmp, sizeof(tmp), "%s.tmp.XXXXXX", path);
+    if (n < 0 || (size_t)n >= sizeof(tmp))
+        return HU_ERR_INVALID_ARGUMENT;
+
+#ifdef _WIN32
+    /* No mkstemp / fsync / atomic replace-rename on this fallback path.
+     * Still never truncate the target in place: write the temp copy fully,
+     * then swap it in. */
+    (void)perm;
+    memcpy(tmp + n - 6, "win000", 6);
+    FILE *f = fopen(tmp, "wb");
+    if (!f)
+        return HU_ERR_IO;
+    bool ok = len == 0 || fwrite(data, 1, len, f) == len;
+    ok = (fclose(f) == 0) && ok;
+    if (!ok || (remove(path) != 0 && errno != ENOENT) || rename(tmp, path) != 0) {
+        (void)remove(tmp);
+        return HU_ERR_IO;
+    }
+    return HU_OK;
+#else
+    const unsigned char *p = (const unsigned char *)data;
+    size_t left = len;
+    int fd = mkstemp(tmp);
+    if (fd < 0)
+        return HU_ERR_IO;
+    /* mkstemp creates 0600; widen only when the caller asked for 0644. */
+    if (fchmod(fd, (mode_t)posix_mode_for(perm)) != 0)
+        goto fail;
+    while (left > 0) {
+        ssize_t w = write(fd, p, left);
+        if (w < 0 && errno == EINTR)
+            continue;
+        if (w < 0)
+            goto fail;
+        p += w;
+        left -= (size_t)w;
+    }
+    /* fsync before rename: otherwise a crash can leave the NEW name
+     * pointing at an empty file on filesystems that reorder metadata. */
+    if (fsync(fd) != 0)
+        goto fail;
+    int closed = close(fd);
+    fd = -1;
+    if (closed != 0 || rename(tmp, path) != 0)
+        goto fail;
+    hu_io_secure_sync_parent_dir(path);
+    return HU_OK;
+
+fail:
+    if (fd >= 0)
+        close(fd);
+    (void)unlink(tmp);
+    return HU_ERR_IO;
+#endif
+}
+
+void hu_io_secure_sync_parent_dir(const char *path) {
+#ifdef _WIN32
+    (void)path;
+#else
+    char dir[HU_IO_ATOMIC_PATH_MAX];
+    size_t n = path ? strlen(path) : sizeof(dir);
+    if (n >= sizeof(dir))
+        return;
+    memcpy(dir, path, n + 1);
+    char *slash = strrchr(dir, '/');
+    if (!slash)
+        return;
+    if (slash == dir)
+        slash[1] = '\0';
+    else
+        *slash = '\0';
+    int fd = open(dir, O_RDONLY | O_CLOEXEC);
+    if (fd < 0)
+        return;
+    (void)fsync(fd);
+    close(fd);
 #endif
 }

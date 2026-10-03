@@ -58,7 +58,7 @@ echo "ok: installed $INSTALLED_SHA contains $MY_COMMIT and is on origin/main"
 # 3. Optional content markers introduced by my change.
 for m in "${MARKERS[@]:-}"; do
     [ -z "$m" ] && continue
-    n="$(strings -a "$BIN" | grep -cF "$m" || true)"
+    n="$(strings -a "$BIN" | grep -cF -- "$m" || true)"
     [ "$n" -ge 1 ] || fail "marker not in installed binary: '$m'"
     echo "ok: marker present (x$n): '$m'"
 done

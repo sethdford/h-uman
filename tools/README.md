@@ -29,3 +29,12 @@ pointed at the live `~/.human/memory.db`. `dump_prompt.c` and `extract_yield.c`
 are read-only with respect to production state, but `extract_yield.c` issues
 real requests to whatever `base_url` you give it — point it at a spare server
 (`:8743`), not the live `:8741`.
+
+## Install-time helpers
+
+Unlike the instruments above, these ship: `scripts/install-human-daemon.sh` builds them.
+
+| Dir | What | Docs |
+|---|---|---|
+| `calendar-free-busy/` | Swift/EventKit helper printing owner free/busy JSON (busy intervals only, no titles or attendees) for `HU_COMMITMENT_GUARD`. `build.sh` is a no-op off macOS. | `docs/guides/commitment-guard.md` |
+| `hu-vision-ocr/` | Swift/Apple Vision helper printing an image's OCR lines + scene labels as JSON, the authoritative text for `HU_LOCAL_VISION`. Built by `scripts/install-local-vision.sh` (not the daemon installer); `build.sh` is a no-op off macOS. | `docs/guides/local-vision.md` |

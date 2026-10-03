@@ -6,21 +6,26 @@
 #include "human/channels/imessage_caps.h"     /* native capability gate (T0.4) */
 #include "human/channels/imessage_reply.h"
 #include "human/channels/imessage_send_observer.h" /* send provenance */
+#include "human/channels/imessage_send_route.h"    /* reply on the inbound chat */
+#include "human/channels/imessage_voice_record.h"  /* native Messages voice delivery */
 #include "human/context/conversation.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/io_secure.h"
 #include "human/core/log.h"
+#include "human/core/log_redact.h"
 #include "human/core/paths.h"
 #include "human/core/process_util.h"
 #include "human/core/string.h"
 #include "human/observability/validator_telemetry.h"
 #include "human/persona.h"
+#include "human/util/typedstream.h"
 #ifndef HU_CODENAME
 #define HU_CODENAME "human"
 #endif
 #include <errno.h>
 #include <fcntl.h>
+#include <pthread.h>
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -337,6 +342,7 @@ typedef struct hu_imessage_ctx {
     size_t last_courtesy_message_len;
     size_t last_media_count;
     char last_media_path[256];
+    hu_imsg_send_route_t last_send_route; /* tests: route of the last send */
     struct {
         char session_key[128];
         char content[4096];
@@ -949,19 +955,8 @@ static void imessage_report_sent(const char *tgt, size_t tgt_len, const char *te
 }
 #endif
 
-#if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__)
-
-/* Forward declarations for the native Messages.app bridge (defined later). */
-static void ax_open_conversation(const char *recipient, size_t recipient_len);
-static bool ax_start_typing(const char *target, size_t target_len);
-static bool ax_stop_typing(void);
-#ifdef HU_IMESSAGE_TAPBACK_ENABLED
-static bool ax_tapback(const char *content_prefix, int row_offset, const char *tapback_label);
-#endif
-static bool imcore_init(hu_imessage_ctx_t *c);
-static bool imcore_start_typing(hu_imessage_ctx_t *c, const char *recipient, size_t recipient_len);
-static bool imcore_stop_typing(hu_imessage_ctx_t *c, const char *recipient, size_t recipient_len);
-
+/* Outbound echo ring. Pure memory, so it is compiled in test builds too: the
+ * threaded-reply wrapper writes it on every build and tests read it. */
 static uint32_t imessage_hash(const char *s, size_t len) {
     uint32_t h = 2166136261u;
     for (size_t i = 0; i < len; i++)
@@ -979,6 +974,98 @@ static void imessage_record_sent(hu_imessage_ctx_t *c, const char *msg, size_t m
     c->sent_ring_len[slot] = copy_len;
     c->sent_ring_hash[slot] = imessage_hash(msg, msg_len);
     c->sent_ring_idx++;
+}
+
+#if defined(HU_ENABLE_SQLITE) && (HU_IS_TEST || (defined(__APPLE__) && defined(__MACH__)))
+/* Open chat.db readonly: up to `attempts` opens while it is locked (backoff
+ * 100/200/400 ms), then a `busy_ms` busy timeout on the handle. One attempt
+ * never sleeps. */
+static int imessage_open_chatdb_budget(const char *db_path, sqlite3 **db_out, int attempts,
+                                       int busy_ms) {
+    int rc = SQLITE_OK;
+    for (int attempt = 0; attempt < attempts; attempt++) {
+        *db_out = NULL;
+        rc = sqlite3_open_v2(db_path, db_out, SQLITE_OPEN_READONLY, NULL);
+        if (rc == SQLITE_OK) {
+            sqlite3_busy_timeout(*db_out, busy_ms);
+            return SQLITE_OK;
+        }
+        if (*db_out) {
+            sqlite3_close(*db_out);
+            *db_out = NULL;
+        }
+        if (rc != SQLITE_BUSY && rc != SQLITE_LOCKED)
+            return rc;
+        if (attempts == 1)
+            return rc;
+        hu_log_info("imessage", NULL, "chat.db locked (attempt %d/%d, rc=%d), retrying",
+                    attempt + 1, attempts, rc);
+        usleep((unsigned)(100000 << attempt));
+    }
+    return rc;
+}
+
+/* MAX(ROWID) of our own messages to `handle` in an open chat.db; -1 when
+ * there is none or the read fails (busy included). Closes `db`. */
+static int64_t imessage_latest_sent_rowid_in(sqlite3 *db, const char *handle, size_t handle_len) {
+    const char *sql = "SELECT MAX(m.ROWID) FROM message m "
+                      "JOIN handle h ON m.handle_id = h.ROWID "
+                      "WHERE m.is_from_me = 1 AND h.id = ?1";
+
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        sqlite3_close(db);
+        return -1;
+    }
+
+    char hbuf[128];
+    size_t hlen = handle_len < sizeof(hbuf) - 1 ? handle_len : sizeof(hbuf) - 1;
+    memcpy(hbuf, handle, hlen);
+    hbuf[hlen] = '\0';
+    sqlite3_bind_text(stmt, 1, hbuf, (int)hlen, SQLITE_STATIC);
+
+    int64_t rowid = -1;
+    if (sqlite3_step(stmt) == SQLITE_ROW && sqlite3_column_type(stmt, 0) != SQLITE_NULL)
+        rowid = sqlite3_column_int64(stmt, 0);
+
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    return rowid;
+}
+
+/* The tapback boundary sits on the react path before any tier runs, so it
+ * gets one open and a 100 ms busy budget: a locked chat.db yields -1
+ * (unknown) at once instead of the text path's ~3.7 s of retries. */
+static int64_t imessage_boundary_rowid(const char *handle, size_t handle_len) {
+    char db_path[512];
+    int dp = hu_paths_chatdb(db_path, sizeof(db_path));
+    if (dp < 0 || (size_t)dp >= sizeof(db_path))
+        return -1;
+    sqlite3 *db = NULL;
+    if (imessage_open_chatdb_budget(db_path, &db, 1, 100) != SQLITE_OK)
+        return -1;
+    return imessage_latest_sent_rowid_in(db, handle, handle_len);
+}
+#endif
+
+#if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__)
+
+/* Forward declarations for the native Messages.app bridge (defined later). */
+static void ax_open_conversation(const char *recipient, size_t recipient_len);
+static bool ax_start_typing(const char *target, size_t target_len);
+static bool ax_stop_typing(void);
+#ifdef HU_IMESSAGE_TAPBACK_ENABLED
+static bool ax_tapback(const char *content_prefix, int row_offset, const char *tapback_label);
+#endif
+static bool imcore_init(hu_imessage_ctx_t *c);
+static bool imcore_start_typing(hu_imessage_ctx_t *c, const char *recipient, size_t recipient_len);
+static bool imcore_stop_typing(hu_imessage_ctx_t *c, const char *recipient, size_t recipient_len);
+
+/* A text went out: remember it (echo filter) and record its provenance. */
+static void imessage_text_sent(hu_imessage_ctx_t *c, const char *tgt, size_t tgt_len,
+                               const char *msg, size_t msg_len, int64_t prov_prior) {
+    imessage_record_sent(c, msg, msg_len);
+    imessage_report_sent(tgt, tgt_len, msg, msg_len, HU_IMESSAGE_SENT_KIND_TEXT, prov_prior);
 }
 
 #ifdef HU_ENABLE_SQLITE
@@ -1011,25 +1098,16 @@ static bool imessage_was_sent_by_us(hu_imessage_ctx_t *c, const char *text, size
  * Retries up to 3 times with exponential backoff (100ms, 200ms, 400ms)
  * when the database is locked. */
 static int imessage_open_chatdb(const char *db_path, sqlite3 **db_out) {
-    int rc = SQLITE_OK;
-    for (int attempt = 0; attempt < 3; attempt++) {
-        *db_out = NULL;
-        rc = sqlite3_open_v2(db_path, db_out, SQLITE_OPEN_READONLY, NULL);
-        if (rc == SQLITE_OK) {
-            sqlite3_busy_timeout(*db_out, 3000);
-            return SQLITE_OK;
-        }
-        if (*db_out) {
-            sqlite3_close(*db_out);
-            *db_out = NULL;
-        }
-        if (rc != SQLITE_BUSY && rc != SQLITE_LOCKED)
-            return rc;
-        hu_log_info("imessage", NULL, "chat.db locked (attempt %d/3, rc=%d), retrying", attempt + 1,
-                    rc);
-        usleep((unsigned)(100000 << attempt));
-    }
-    return rc;
+    return imessage_open_chatdb_budget(db_path, db_out, 3, 3000);
+}
+
+/* The live chat.db (HU_CHATDB honoured), opened read-only. */
+static bool imessage_open_live_chatdb(sqlite3 **db) {
+    char db_path[512];
+    int n = hu_paths_chatdb(db_path, sizeof(db_path));
+    if (n < 0 || (size_t)n >= sizeof(db_path))
+        return false;
+    return imessage_open_chatdb(db_path, db) == SQLITE_OK;
 }
 
 bool hu_imessage_user_responded_recently(void *channel_ctx, const char *handle, size_t handle_len,
@@ -1037,13 +1115,8 @@ bool hu_imessage_user_responded_recently(void *channel_ctx, const char *handle, 
     if (!handle || handle_len == 0 || within_seconds <= 0)
         return false;
 
-    char db_path[512];
-    int n = hu_paths_chatdb(db_path, sizeof(db_path));
-    if (n < 0 || (size_t)n >= sizeof(db_path))
-        return false;
-
     sqlite3 *db = NULL;
-    if (imessage_open_chatdb(db_path, &db) != SQLITE_OK)
+    if (!imessage_open_live_chatdb(&db))
         return false;
 
     /*
@@ -1088,6 +1161,22 @@ bool hu_imessage_user_responded_recently(void *channel_ctx, const char *handle, 
     sqlite3_finalize(stmt);
     sqlite3_close(db);
     return found;
+}
+
+hu_error_t hu_imessage_channel_replied_after_batch(void *channel_ctx,
+                                                   const hu_channel_loop_msg_t *msgs, size_t n,
+                                                   bool *out_replied) {
+    if (!msgs || !out_replied)
+        return HU_ERR_INVALID_ARGUMENT;
+    sqlite3 *db = NULL;
+    if (!imessage_open_live_chatdb(&db))
+        return HU_ERR_IO;
+    for (size_t i = 0; i < n; i++)
+        out_replied[i] = hu_imessage_user_replied_after(
+            db, msgs[i].chat_id, msgs[i].session_key, msgs[i].message_id,
+            channel_ctx ? imessage_is_ours_cb : NULL, channel_ctx);
+    sqlite3_close(db);
+    return HU_OK;
 }
 #endif
 #endif
@@ -1164,8 +1253,8 @@ static void imsg_bb_on_event(const hu_imessage_bb_event_t *evp, void *user) {
                                                       (double)time(NULL), &hold_s);
     hu_log_info("imessage", NULL,
                 "bb-event: kind=%d chat=%s handle=%s ts=%.3f would_hold_send=%d hold_s=%.1f",
-                (int)ev.kind, ev.chat_guid[0] ? ev.chat_guid : "-", ev.handle[0] ? ev.handle : "-",
-                ev.timestamp, (int)would_hold, hold_s);
+                (int)ev.kind, HU_LOG_WHO(ev.chat_guid, strlen(ev.chat_guid)),
+                HU_LOG_WHO(ev.handle, strlen(ev.handle)), ev.timestamp, (int)would_hold, hold_s);
 }
 
 static void imsg_watch_start(hu_imessage_ctx_t *c) {
@@ -1325,12 +1414,12 @@ static bool imsg_validate_target(hu_imessage_ctx_t *c) {
 
     if (!found)
         hu_log_info("imessage", NULL,
-                    "target '%.*s' not found in active chats (imsg chats); "
+                    "target '%s' not found in active chats (imsg chats); "
                     "first message may create a new conversation",
-                    (int)c->default_target_len, c->default_target);
+                    HU_LOG_WHO(c->default_target, c->default_target_len));
     else if (getenv("HU_DEBUG"))
-        hu_log_info("imessage", NULL, "target '%.*s' validated via imsg chats",
-                    (int)c->default_target_len, c->default_target);
+        hu_log_info("imessage", NULL, "target '%s' validated via imsg chats",
+                    HU_LOG_WHO(c->default_target, c->default_target_len));
     return found;
 }
 
@@ -1600,19 +1689,34 @@ static bool imsg_try_react(hu_imessage_ctx_t *c, int64_t message_id, hu_reaction
                 return true;
             }
             hu_log_info("imessage", NULL, "bridge tapback failed; falling back to imsg react");
+            hu_imessage_caps_note_bridge_failure(); /* re-probe soon (self-heal) */
         }
     }
 
     const char *react_argv[] = {"imsg",       "react",      "--chat-id", chat_rowid_str,
                                 "--reaction", tapback_name, NULL};
+    int64_t reacted_before = hu_imessage_my_reaction_count(message_id);
     hu_run_result_t rr = {0};
     hu_error_t re = hu_process_run_with_timeout(c->alloc, react_argv, NULL, 65536, 15, &rr);
     bool rok = (re == HU_OK && rr.success && rr.exit_code == 0);
+    /* `imsg react` names a chat, not a message, and exits 0 without reacting:
+     * 2026-09-19..26 it "succeeded" ~50 times while chat.db gained a fraction of
+     * those reactions, and each phantom left the contact with no reply at all.
+     * Believe it only when a reaction of ours appears on the target. */
+    if (rok && reacted_before >= 0) {
+        usleep(1500000);
+        if (!hu_imessage_send_landed(reacted_before, hu_imessage_my_reaction_count(message_id))) {
+            hu_log_warn("imessage", NULL,
+                        "imsg react exited 0 but no reaction landed on message %lld; failing",
+                        (long long)message_id);
+            rok = false;
+        }
+    }
     if (!rok)
-        hu_log_info(
-            "imessage", NULL, "imsg react failed (exit=%d stdout=%.*s stderr=%.*s)", rr.exit_code,
-            (int)(rr.stdout_len < 200 ? rr.stdout_len : 200), rr.stdout_buf ? rr.stdout_buf : "",
-            (int)(rr.stderr_len < 200 ? rr.stderr_len : 200), rr.stderr_buf ? rr.stderr_buf : "");
+        hu_log_info("imessage", NULL, "imsg react failed (exit=%d stdout=%s stderr=%s)",
+                    rr.exit_code,
+                    HU_LOG_TEXT(rr.stdout_buf, rr.stdout_buf ? rr.stdout_len : 0, 120),
+                    HU_LOG_TEXT(rr.stderr_buf, rr.stderr_buf ? rr.stderr_len : 0, 120));
     hu_run_result_free(c->alloc, &rr);
     return rok;
 }
@@ -1638,6 +1742,106 @@ hu_blue_verdict_t hu_imessage_blue_guard_verdict(hu_allocator_t *alloc, const ch
     return getenv("HU_IMESSAGE_ALLOW_GREEN") ? HU_BLUE_ALLOW : HU_BLUE_HOLD;
 }
 #endif /* __APPLE__ && __MACH__ && !HU_IS_TEST */
+
+#ifdef HU_ENABLE_SQLITE
+/* Send-path chat.db reads (see imessage.h). Only plain, unerrored outbound
+ * rows: a tapback or a failed copy in the window is not our bubble landing. */
+#define IMSG_OUT_PLAIN " m.is_from_me = 1 AND m.associated_message_type = 0 AND m.error = 0"
+#define IMSG_FROM_CHAT                                                       \
+    " FROM message m JOIN chat_message_join cmj ON cmj.message_id = m.ROWID" \
+    " JOIN chat c ON c.ROWID = cmj.chat_id WHERE c.guid = ?1 AND"
+#define IMSG_FROM_HANDLE                                                             \
+    " FROM message m WHERE (m.handle_id IN (SELECT ROWID FROM handle WHERE id = ?1)" \
+    " OR m.ROWID IN (SELECT cmj.message_id FROM chat_message_join cmj"               \
+    " JOIN chat c ON c.ROWID = cmj.chat_id WHERE c.chat_identifier = ?1)) AND"
+
+int64_t hu_imessage_chatdb_sent_boundary(void *sqlite_db, const char *chat_guid,
+                                         const char *handle) {
+    sqlite3 *db = (sqlite3 *)sqlite_db;
+    const char *key = chat_guid ? chat_guid : handle;
+    if (!db || !key || !key[0])
+        return -1;
+    sqlite3_stmt *st = NULL;
+    if (sqlite3_prepare_v2(db,
+                           chat_guid
+                               ? "SELECT COALESCE(MAX(m.ROWID), 0)" IMSG_FROM_CHAT IMSG_OUT_PLAIN
+                               : "SELECT COALESCE(MAX(m.ROWID), 0)" IMSG_FROM_HANDLE IMSG_OUT_PLAIN,
+                           -1, &st, NULL) != SQLITE_OK)
+        return -1;
+    sqlite3_bind_text(st, 1, key, -1, SQLITE_STATIC);
+    int64_t v = sqlite3_step(st) == SQLITE_ROW ? sqlite3_column_int64(st, 0) : -1;
+    sqlite3_finalize(st);
+    return v;
+}
+
+bool hu_imessage_chatdb_text_landed(void *sqlite_db, const char *chat_guid, const char *handle,
+                                    int64_t prior, const char *text, size_t text_len) {
+    sqlite3 *db = (sqlite3 *)sqlite_db;
+    const char *key = chat_guid ? chat_guid : handle;
+    if (!db || !key || !key[0] || prior < 0 || !text)
+        return false;
+    sqlite3_stmt *st = NULL;
+    if (sqlite3_prepare_v2(db,
+                           chat_guid
+                               ? "SELECT m.text, m.attributedBody" IMSG_FROM_CHAT IMSG_OUT_PLAIN
+                                 " AND m.ROWID > ?2 ORDER BY m.ROWID"
+                               : "SELECT m.text, m.attributedBody" IMSG_FROM_HANDLE IMSG_OUT_PLAIN
+                                 " AND m.ROWID > ?2 ORDER BY m.ROWID",
+                           -1, &st, NULL) != SQLITE_OK)
+        return false;
+    sqlite3_bind_text(st, 1, key, -1, SQLITE_STATIC);
+    sqlite3_bind_int64(st, 2, prior);
+    bool hit = false;
+    while (!hit && sqlite3_step(st) == SQLITE_ROW) {
+        const char *row = (const char *)sqlite3_column_text(st, 0);
+        char decoded[4096];
+        if (!row || !row[0] || hu_imessage_text_is_placeholder(row)) {
+            /* macOS 15+ keeps the text in attributedBody; same decoder as poll. */
+            const unsigned char *blob = sqlite3_column_blob(st, 1);
+            int blen = sqlite3_column_bytes(st, 1);
+            size_t n = (blob && blen > 0) ? hu_imessage_extract_attributed_body(
+                                                blob, (size_t)blen, decoded, sizeof(decoded))
+                                          : 0;
+            row = n > 0 ? decoded : NULL; /* NULL: undecodable */
+        }
+        hit = hu_imsg_landed_text_matches(row, row ? strlen(row) : 0, text, text_len);
+    }
+    sqlite3_finalize(st);
+    return hit;
+}
+
+bool hu_imessage_chatdb_inbound_route(void *sqlite_db, const char *handle, size_t handle_len,
+                                      char *guid_out, size_t guid_cap, char *service_out,
+                                      size_t service_cap) {
+    sqlite3 *db = (sqlite3 *)sqlite_db;
+    if (!db || !handle || handle_len == 0 || !guid_out || guid_cap == 0 || !service_out ||
+        service_cap == 0)
+        return false;
+    guid_out[0] = service_out[0] = '\0';
+    /* One row, two columns: the chat and the service of the same message. */
+    sqlite3_stmt *st = NULL;
+    if (sqlite3_prepare_v2(db,
+                           "SELECT c.guid, m.service FROM message m "
+                           "JOIN handle h ON m.handle_id = h.ROWID "
+                           "JOIN chat_message_join cmj ON cmj.message_id = m.ROWID "
+                           "JOIN chat c ON c.ROWID = cmj.chat_id "
+                           "WHERE h.id = ?1 AND m.is_from_me = 0 AND m.service IS NOT NULL "
+                           "AND c.chat_identifier = h.id ORDER BY m.date DESC LIMIT 1",
+                           -1, &st, NULL) != SQLITE_OK)
+        return false;
+    sqlite3_bind_text(st, 1, handle, (int)handle_len, SQLITE_STATIC);
+    if (sqlite3_step(st) == SQLITE_ROW) {
+        const char *g = (const char *)sqlite3_column_text(st, 0);
+        const char *v = (const char *)sqlite3_column_text(st, 1);
+        if (g && v) {
+            snprintf(guid_out, guid_cap, "%s", g);
+            snprintf(service_out, service_cap, "%s", v);
+        }
+    }
+    sqlite3_finalize(st);
+    return guid_out[0] && service_out[0];
+}
+#endif /* HU_ENABLE_SQLITE */
 
 static hu_error_t imessage_start(void *ctx) {
     hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ctx;
@@ -1946,155 +2150,203 @@ size_t hu_imessage_imcore_conformance(const hu_imcore_selector_req_t *reqs, size
 
 #if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__)
 /*
- * Typing indicator with chat ID caching and group chat support.
- * Caches target to skip expensive chat iteration on repeat sends.
- * Skipped when the daemon already called start_typing (typing_active).
+ * Typing rhythm over the IMCore bridge (2026-09-29). A person composing does
+ * not show one unbroken indicator for two minutes: they type, stop to think,
+ * and type again. start_typing starts a pulse that alternates the bridge's
+ * typing indicator (hu_imsg_typing_phase_ms) until stop_typing or a send.
+ * Before a send the indicator is topped up to the text's plausible typing
+ * time (hu_imsg_typing_catchup_ms). No keystrokes and no window changes: the
+ * old simulator activated Messages and sent ".", Cmd-A, Delete as real key
+ * events, which land in whatever app has focus if activation loses a race.
+ * One conversation types at a time (the daemon runs one turn at a time), so
+ * the pulse is file-static.
+ */
+#define HU_IMSG_TYPING_PULSE_MAX_MS (5ull * 60ull * 1000ull) /* a turn that goes silent */
+
+static struct {
+    pthread_mutex_t mu;
+    pthread_cond_t cv;
+    pthread_t thread;
+    bool live;
+    bool quit;
+    bool done;               /* the thread exited on its own (5-min cap) */
+    bool on;                 /* the indicator is showing right now */
+    uint64_t phase_start_ms; /* when the current on/off phase began */
+    uint64_t shown_ms;       /* on-time of completed phases */
+    uint64_t began_ms;       /* the pulse's start, for the end-of-pulse log */
+    unsigned pauses;         /* typing -> paused transitions */
+    char target[128];
+} s_pulse = {.mu = PTHREAD_MUTEX_INITIALIZER, .cv = PTHREAD_COND_INITIALIZER};
+
+static uint64_t pulse_now_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u;
+}
+
+static bool imsg_bridge_up(hu_imessage_ctx_t *c) {
+    return c && c->use_imsg_cli && imsg_cli_available(c) &&
+           hu_imessage_caps_cached(c->alloc)->advanced;
+}
+
+static bool bridge_typing(const char *target, bool on) {
+    hu_allocator_t alloc = hu_system_allocator();
+    /* A group is addressed by its chat identifier, a person by handle. */
+    const char *flag =
+        hu_voice_record_handle_ok(target, strlen(target)) ? "--to" : "--chat-identifier";
+    const char *argv_on[] = {"imsg", "typing", flag, target, NULL};
+    const char *argv_off[] = {"imsg", "typing", flag, target, "--stop", "true", NULL};
+    hu_run_result_t rr = {0};
+    /* Bounded: pulse_stop joins the pulse thread from the daemon's thread. */
+    hu_error_t err =
+        hu_process_run_with_timeout(&alloc, on ? argv_on : argv_off, NULL, 4096, 5, &rr);
+    bool ok = err == HU_OK && rr.success && rr.exit_code == 0;
+    hu_run_result_free(&alloc, &rr);
+    if (!ok)
+        hu_imessage_caps_note_bridge_failure();
+    return ok;
+}
+
+/* Called with s_pulse.mu held: close the current phase at `now`. */
+static void pulse_close_phase(uint64_t now) {
+    if (s_pulse.on && now > s_pulse.phase_start_ms)
+        s_pulse.shown_ms += now - s_pulse.phase_start_ms;
+    s_pulse.phase_start_ms = now;
+}
+
+static void *pulse_main(void *arg) {
+    (void)arg;
+    uint32_t seed = (uint32_t)pulse_now_ms() ^ (uint32_t)getpid();
+    uint64_t began = pulse_now_ms();
+    pthread_mutex_lock(&s_pulse.mu);
+    while (!s_pulse.quit) {
+        uint32_t phase = hu_imsg_typing_phase_ms(&seed, s_pulse.on);
+        struct timespec until;
+        clock_gettime(CLOCK_REALTIME, &until);
+        until.tv_sec += phase / 1000u;
+        until.tv_nsec += (long)(phase % 1000u) * 1000000L;
+        if (until.tv_nsec >= 1000000000L) {
+            until.tv_sec++;
+            until.tv_nsec -= 1000000000L;
+        }
+        while (!s_pulse.quit &&
+               pthread_cond_timedwait(&s_pulse.cv, &s_pulse.mu, &until) != ETIMEDOUT) {}
+        if (s_pulse.quit)
+            break;
+        uint64_t now = pulse_now_ms();
+        bool stop_for_good = now - began > HU_IMSG_TYPING_PULSE_MAX_MS;
+        bool want_on = !s_pulse.on && !stop_for_good;
+        char target[sizeof(s_pulse.target)];
+        memcpy(target, s_pulse.target, sizeof(target));
+        pthread_mutex_unlock(&s_pulse.mu);
+        bool ok = bridge_typing(target, want_on);
+        pthread_mutex_lock(&s_pulse.mu);
+        if (ok) {
+            pulse_close_phase(now);
+            if (s_pulse.on && !want_on)
+                s_pulse.pauses++;
+            s_pulse.on = want_on;
+        }
+        if (stop_for_good)
+            break;
+    }
+    s_pulse.done = true;
+    pthread_mutex_unlock(&s_pulse.mu);
+    return NULL;
+}
+
+/* Ends the pulse; returns the milliseconds the indicator was shown. With
+ * `leave_on` the indicator stays up (a send follows and clears it). */
+static uint64_t pulse_stop(bool leave_on) {
+    pthread_mutex_lock(&s_pulse.mu);
+    if (!s_pulse.live) {
+        pthread_mutex_unlock(&s_pulse.mu);
+        return 0;
+    }
+    s_pulse.quit = true;
+    pthread_cond_broadcast(&s_pulse.cv);
+    pthread_t th = s_pulse.thread;
+    pthread_mutex_unlock(&s_pulse.mu);
+    pthread_join(th, NULL);
+    pthread_mutex_lock(&s_pulse.mu);
+    pulse_close_phase(pulse_now_ms());
+    uint64_t shown = s_pulse.shown_ms;
+    uint64_t span = pulse_now_ms() - s_pulse.began_ms;
+    unsigned pauses = s_pulse.pauses;
+    bool was_on = s_pulse.on;
+    char target[sizeof(s_pulse.target)];
+    memcpy(target, s_pulse.target, sizeof(target));
+    s_pulse.live = false;
+    pthread_mutex_unlock(&s_pulse.mu);
+    hu_log_info("imessage", NULL, "typing pulse: shown %llums of %llums, %u pause(s)",
+                (unsigned long long)shown, (unsigned long long)span, pauses);
+    if (leave_on && !was_on)
+        (void)bridge_typing(target, true);
+    else if (!leave_on && was_on)
+        (void)bridge_typing(target, false);
+    return shown;
+}
+
+/* Starts the pulse for `target` with the indicator already showing. */
+static bool pulse_start(const char *target, size_t target_len) {
+    if (target_len == 0 || target_len >= sizeof(s_pulse.target))
+        return false;
+    (void)pulse_stop(false); /* a previous conversation's pulse, if any */
+    char tgt[sizeof(s_pulse.target)];
+    memcpy(tgt, target, target_len);
+    tgt[target_len] = '\0';
+    if (!bridge_typing(tgt, true))
+        return false;
+    pthread_mutex_lock(&s_pulse.mu);
+    memcpy(s_pulse.target, tgt, target_len + 1);
+    s_pulse.quit = false;
+    s_pulse.done = false;
+    s_pulse.on = true;
+    s_pulse.shown_ms = 0;
+    s_pulse.pauses = 0;
+    s_pulse.phase_start_ms = pulse_now_ms();
+    s_pulse.began_ms = s_pulse.phase_start_ms;
+    s_pulse.live = pthread_create(&s_pulse.thread, NULL, pulse_main, NULL) == 0;
+    bool live = s_pulse.live;
+    pthread_mutex_unlock(&s_pulse.mu);
+    return live;
+}
+
+static bool pulse_is_for(const char *target, size_t target_len) {
+    pthread_mutex_lock(&s_pulse.mu);
+    bool hit = s_pulse.live && !s_pulse.done && strlen(s_pulse.target) == target_len &&
+               memcmp(s_pulse.target, target, target_len) == 0;
+    pthread_mutex_unlock(&s_pulse.mu);
+    return hit;
+}
+
+/*
+ * Right before a text goes out: the indicator should have been up about as
+ * long as the text takes to type. When the pulse ran through the reply's
+ * generation that is usually already true (no wait); a follow-up bubble or a
+ * proactive message gets its own short burst of typing first.
  */
 static void imessage_simulate_typing(hu_imessage_ctx_t *c, const char *tgt, size_t tgt_len,
                                      size_t message_len) {
-    if (!c || atomic_load(&c->typing_active))
+    if (!c || !tgt || tgt_len == 0 || tgt_len >= sizeof(s_pulse.target))
         return;
-
-    unsigned int delay_ms =
+    uint32_t typing_ms =
         hu_imessage_typing_duration(message_len, (uint32_t)time(NULL) ^ (uint32_t)message_len);
-
-    size_t tgt_esc_cap = tgt_len * 2 + 1;
-    if (tgt_esc_cap > 4096)
-        return;
-
-    char tgt_esc[4096];
-    escape_for_applescript(tgt_esc, sizeof(tgt_esc), tgt, tgt_len);
-
-    if (delay_ms <= 3000) {
-        bool same_target = (c->typing_last_target_len == tgt_len && tgt_len > 0 &&
-                            memcmp(c->typing_last_target, tgt, tgt_len) == 0);
-        if (tgt_len > 0 && tgt_len < sizeof(c->typing_last_target)) {
-            memcpy(c->typing_last_target, tgt, tgt_len);
-            c->typing_last_target[tgt_len] = '\0';
-            c->typing_last_target_len = tgt_len;
-        }
-
-        char typing_script[1024];
-        int ts_n;
-        if (same_target) {
-            ts_n = snprintf(typing_script, sizeof(typing_script),
-                            "tell application \"Messages\" to activate\n"
-                            "delay 0.2\n"
-                            "tell application \"System Events\" to tell process \"Messages\"\n"
-                            "  keystroke \".\"\n"
-                            "  delay %.1f\n"
-                            "  keystroke \"a\" using command down\n"
-                            "  key code 51\n"
-                            "end tell",
-                            (float)delay_ms / 1000.0f);
-        } else {
-            ts_n = snprintf(typing_script, sizeof(typing_script),
-                            "tell application \"Messages\"\n"
-                            "  activate\n"
-                            "  set targetHandle to \"%s\"\n"
-                            "  set targetChat to missing value\n"
-                            "  repeat with c in every chat\n"
-                            "    try\n"
-                            "      repeat with p in participants of c\n"
-                            "        if handle of p is targetHandle then\n"
-                            "          set targetChat to c\n"
-                            "          exit repeat\n"
-                            "        end if\n"
-                            "      end repeat\n"
-                            "    end try\n"
-                            "    if targetChat is not missing value then exit repeat\n"
-                            "  end repeat\n"
-                            "end tell\n"
-                            "delay 0.3\n"
-                            "tell application \"System Events\" to tell process \"Messages\"\n"
-                            "  keystroke \".\"\n"
-                            "  delay %.1f\n"
-                            "  keystroke \"a\" using command down\n"
-                            "  key code 51\n"
-                            "end tell",
-                            tgt_esc, (float)delay_ms / 1000.0f);
-        }
-        if (ts_n > 0 && (size_t)ts_n < sizeof(typing_script)) {
-            const char *ts_argv[] = {"osascript", "-e", typing_script, NULL};
-            hu_run_result_t ts_result = {0};
-            hu_error_t ts_err = hu_process_run(c->alloc, ts_argv, NULL, 65536, &ts_result);
-            hu_run_result_free(c->alloc, &ts_result);
-            if (ts_err != HU_OK && getenv("HU_DEBUG"))
-                hu_log_error("imessage", NULL, "typing indicator failed (accessibility?)");
-        }
+    uint64_t shown = 0;
+    if (pulse_is_for(tgt, tgt_len)) {
+        shown = pulse_stop(true);
+    } else if (atomic_load(&c->typing_active)) {
+        return; /* another tier (AX/IMCore) is showing the indicator */
     } else {
-        /* Longer messages: re-trigger typing indicator every ~2.5s so the
-         * bubble stays visible for the entire simulated composing period. */
-        bool same_target = (c->typing_last_target_len == tgt_len && tgt_len > 0 &&
-                            memcmp(c->typing_last_target, tgt, tgt_len) == 0);
-        if (tgt_len > 0 && tgt_len < sizeof(c->typing_last_target)) {
-            memcpy(c->typing_last_target, tgt, tgt_len);
-            c->typing_last_target[tgt_len] = '\0';
-            c->typing_last_target_len = tgt_len;
-        }
-
-        unsigned int remaining = delay_ms;
-        while (remaining > 0) {
-            unsigned int chunk = remaining > 2500 ? 2500 : remaining;
-            char typing_script[1024];
-            int ts_n;
-            if (same_target) {
-                ts_n = snprintf(typing_script, sizeof(typing_script),
-                                "tell application \"Messages\" to activate\n"
-                                "delay 0.2\n"
-                                "tell application \"System Events\" to tell process "
-                                "\"Messages\"\n"
-                                "  keystroke \".\"\n"
-                                "  delay %.1f\n"
-                                "  keystroke \"a\" using command down\n"
-                                "  key code 51\n"
-                                "end tell",
-                                (float)chunk / 1000.0f);
-            } else {
-                ts_n = snprintf(typing_script, sizeof(typing_script),
-                                "tell application \"Messages\"\n"
-                                "  activate\n"
-                                "  set targetHandle to \"%s\"\n"
-                                "  set targetChat to missing value\n"
-                                "  repeat with c in every chat\n"
-                                "    try\n"
-                                "      repeat with p in participants of c\n"
-                                "        if handle of p is targetHandle then\n"
-                                "          set targetChat to c\n"
-                                "          exit repeat\n"
-                                "        end if\n"
-                                "      end repeat\n"
-                                "    end try\n"
-                                "    if targetChat is not missing value then exit repeat\n"
-                                "  end repeat\n"
-                                "end tell\n"
-                                "delay 0.3\n"
-                                "tell application \"System Events\" to tell process "
-                                "\"Messages\"\n"
-                                "  keystroke \".\"\n"
-                                "  delay %.1f\n"
-                                "  keystroke \"a\" using command down\n"
-                                "  key code 51\n"
-                                "end tell",
-                                tgt_esc, (float)chunk / 1000.0f);
-                same_target = true;
-            }
-            if (ts_n > 0 && (size_t)ts_n < sizeof(typing_script)) {
-                const char *ts_argv[] = {"osascript", "-e", typing_script, NULL};
-                hu_run_result_t ts_result = {0};
-                hu_error_t ts_err = hu_process_run(c->alloc, ts_argv, NULL, 65536, &ts_result);
-                hu_run_result_free(c->alloc, &ts_result);
-                if (ts_err != HU_OK) {
-                    usleep((unsigned int)(remaining) * 1000);
-                    break;
-                }
-            } else {
-                usleep((unsigned int)(remaining) * 1000);
-                break;
-            }
-            remaining -= chunk;
-        }
+        char t[sizeof(s_pulse.target)];
+        memcpy(t, tgt, tgt_len);
+        t[tgt_len] = '\0';
+        if (!imsg_bridge_up(c) || !bridge_typing(t, true))
+            return; /* no bridge: send without an indicator, never with keystrokes */
     }
+    uint32_t wait_ms = hu_imsg_typing_catchup_ms(typing_ms, shown);
+    if (wait_ms > 0)
+        usleep(wait_ms * 1000u);
 }
 #endif
 
@@ -2157,6 +2409,112 @@ const char *hu_imessage_applescript_service_type(const char *service) {
     return "iMessage";
 }
 
+#if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__)
+/* Production backend for hu_imsg_send_text_via: the real imsg / osascript
+ * spawns. Tests drive the same orchestration with a fake backend. */
+typedef struct {
+    hu_imessage_ctx_t *c;
+    const char *tgt;
+    size_t tgt_len;
+} imsg_send_be_ctx_t;
+
+static bool imsg_be_run_imsg(void *ctx, const char *const *argv) {
+    imsg_send_be_ctx_t *b = (imsg_send_be_ctx_t *)ctx;
+    hu_run_result_t r = {0};
+    hu_error_t err = hu_process_run_with_timeout(b->c->alloc, argv, NULL, 65536, 15, &r);
+    bool ok = (err == HU_OK && r.success && r.exit_code == 0);
+    hu_run_result_free(b->c->alloc, &r);
+    return ok;
+}
+
+static bool imsg_be_run_applescript(void *ctx, const char *script, unsigned timeout_s) {
+    imsg_send_be_ctx_t *b = (imsg_send_be_ctx_t *)ctx;
+    const char *argv[] = {"osascript", "-e", script, NULL};
+    hu_run_result_t r = {0};
+    /* Outer bound: a wedged Messages must not hold the daemon indefinitely. */
+    hu_error_t err = hu_process_run_with_timeout(b->c->alloc, argv, NULL, 65536, timeout_s, &r);
+    bool ok = (err == HU_OK && r.success && r.exit_code == 0);
+    hu_run_result_free(b->c->alloc, &r);
+    return ok;
+}
+
+/* chat.db reads for the landing check, on the user's chat.db: by chat GUID
+ * for SMS/RCS routes, else by handle. -1 / false when it cannot be read. */
+static int64_t imsg_be_sent_boundary(void *ctx, const hu_imsg_send_route_t *route, const char *to) {
+    (void)ctx;
+#ifdef HU_ENABLE_SQLITE
+    sqlite3 *db = imsg_open_user_chatdb();
+    if (!db)
+        return -1;
+    int64_t v = hu_imessage_chatdb_sent_boundary(
+        db, hu_imsg_route_by_chat(route) ? route->chat_guid : NULL, to);
+    sqlite3_close(db);
+    return v;
+#else
+    (void)route;
+    (void)to;
+    return -1;
+#endif
+}
+
+static bool imsg_be_landed(void *ctx, const hu_imsg_send_route_t *route, const char *to,
+                           int64_t prior, const char *text) {
+    (void)ctx;
+#ifdef HU_ENABLE_SQLITE
+    sqlite3 *db = imsg_open_user_chatdb();
+    if (!db)
+        return false;
+    bool hit =
+        hu_imessage_chatdb_text_landed(db, hu_imsg_route_by_chat(route) ? route->chat_guid : NULL,
+                                       to, prior, text, text ? strlen(text) : 0);
+    sqlite3_close(db);
+    return hit;
+#else
+    (void)route;
+    (void)to;
+    (void)prior;
+    (void)text;
+    return false;
+#endif
+}
+
+static void imsg_be_sleep_ms(void *ctx, unsigned ms) {
+    (void)ctx;
+    usleep((useconds_t)ms * 1000u);
+}
+
+/* After a restart the in-process route table is empty: rebuild this contact's
+ * route from chat.db — the chat AND service of their latest INBOUND message,
+ * one row — so the first reply still goes to the right chat. Not from the blue guard
+ * (HU_IMESSAGE_ALLOW_GREEN skips its lookup). */
+static bool imsg_route_recover(const char *tgt, size_t tgt_len, hu_imsg_send_route_t *route) {
+#ifdef HU_ENABLE_SQLITE
+    char guid[HU_IMSG_ROUTE_GUID_MAX];
+    char svc[16];
+    sqlite3 *db = imsg_open_user_chatdb();
+    if (!db)
+        return false;
+    bool ok =
+        hu_imessage_chatdb_inbound_route(db, tgt, tgt_len, guid, sizeof(guid), svc, sizeof(svc));
+    sqlite3_close(db);
+    if (!ok)
+        return false;
+    hu_imsg_route_note_inbound(tgt, tgt_len, guid, svc);
+    return hu_imsg_route_lookup(tgt, tgt_len, route);
+#else
+    (void)tgt;
+    (void)tgt_len;
+    (void)route;
+    return false;
+#endif
+}
+
+static void imsg_be_log_outcome(void *ctx, const char *line) {
+    (void)ctx;
+    hu_log_info("imessage", NULL, "%s", line);
+}
+#endif
+
 static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len,
                                 const char *message, size_t message_len, const char *const *media,
                                 size_t media_count) {
@@ -2178,7 +2536,8 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
             memcpy(tgt, target + (target_len - copy), copy);
             tgt[copy] = '\0';
             if (hu_imessage_handle_excluded(tgt, xc->exclude_from, xc->exclude_from_count)) {
-                hu_log_info("imessage", NULL, "outbound to excluded handle %s blocked", tgt);
+                hu_log_info("imessage", NULL, "outbound to excluded handle %s blocked",
+                            HU_LOG_WHO_CSTR(tgt));
                 return HU_ERR_PERMISSION_DENIED;
             }
         }
@@ -2196,6 +2555,9 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
         if (message_len == 0 && media_count == 0)
             return HU_ERR_INVALID_ARGUMENT;
         c->last_media_count = media_count;
+        /* Same route lookup as production (a miss zeroes it); recorded so a
+         * test can see which chat the send would address. */
+        (void)hu_imsg_route_lookup(target, target_len, &c->last_send_route);
         if (media && media_count > 0 && media[0]) {
             size_t mp_len = strlen(media[0]);
             if (mp_len > sizeof(c->last_media_path) - 1)
@@ -2296,9 +2658,9 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
             HU_BLUE_HOLD) {
             hu_log_warn(
                 "imessage", NULL,
-                "blue_guard: HELD send to %.*s — not iMessage-reachable "
+                "blue_guard: HELD send to %s — not iMessage-reachable "
                 "(whois=%d recent=%d handle=%d); set HU_IMESSAGE_ALLOW_GREEN=1 to permit SMS",
-                (int)(tgt_len > 24 ? 24 : tgt_len), tgt, (int)live, (int)recent, (int)handle_svc);
+                HU_LOG_WHO(tgt, tgt_len), (int)live, (int)recent, (int)handle_svc);
             return HU_ERR_NOT_SUPPORTED;
         }
     }
@@ -2338,6 +2700,11 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
     hu_error_t send_err = HU_OK;
     char *clean = NULL;
     size_t clean_cap = 0;
+    /* Which chat this contact wrote on (SMS/RCS chats are sent to by chat).
+     * Zero-initialized: a miss must read as "no route". */
+    hu_imsg_send_route_t route = {0};
+    bool have_route =
+        hu_imsg_route_lookup(tgt, tgt_len, &route) || imsg_route_recover(tgt, tgt_len, &route);
 
     /* Skip empty text send when we have media (voice-only) */
     if (message_len > 0) {
@@ -2409,113 +2776,170 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
 
         imessage_simulate_typing(c, tgt, tgt_len, message_len);
 
-        {
-            if (c->use_imsg_cli && imsg_cli_available(c)) {
-                char tgt_buf[256];
-                size_t tb = tgt_len < sizeof(tgt_buf) - 1 ? tgt_len : sizeof(tgt_buf) - 1;
-                memcpy(tgt_buf, tgt, tb);
-                tgt_buf[tb] = '\0';
-                /* "auto" lets the CLI fall back to SMS for a contact with no
-                 * iMessage account; hardcoding "imessage" here is what
-                 * black-holed 124 sends to one RCS number. */
-                const char *imsg_service = hu_imessage_send_service();
-                const char *imsg_argv[] = {"imsg",  "send",      "--to",       tgt_buf, "--text",
-                                           message, "--service", imsg_service, NULL};
-                hu_run_result_t imsg_result = {0};
-                hu_error_t imsg_err =
-                    hu_process_run_with_timeout(c->alloc, imsg_argv, NULL, 65536, 15, &imsg_result);
-                bool imsg_ok =
-                    (imsg_err == HU_OK && imsg_result.success && imsg_result.exit_code == 0);
-                hu_run_result_free(c->alloc, &imsg_result);
-                if (imsg_ok) {
-                    imessage_record_sent(c, message, message_len);
-                    imessage_report_sent(tgt, tgt_len, message, message_len,
-                                         HU_IMESSAGE_SENT_KIND_TEXT, prov_prior);
+        /* Bridge sends (spec 2026-09-28): an effect the daemon marked for this
+         * reply (Phase 3), or a bubble that is exactly one link as a rich-link
+         * balloon (Phase 5). Any failure falls through to the plain send below. */
+        /* The bridge verbs address `iMessage;-;<handle>`, which does not exist
+         * for an SMS/RCS contact (read-only probe 2026-10-02: -1728), so a
+         * green chat skips straight to the routed send below. */
+        if (c->use_imsg_cli && imsg_cli_available(c) && !hu_imsg_route_by_chat(&route) &&
+            hu_imessage_caps_cached(c->alloc)->advanced) {
+            char fx[16], guid[300];
+            bool have_guid = hu_imsg_chat_guid(guid, sizeof(guid), tgt, tgt_len) > 0;
+            bool fx_marked =
+                have_guid && hu_imsg_effect_take(tgt, tgt_len, (int64_t)time(NULL), fx, sizeof(fx));
+            bool rich = have_guid && !fx_marked && hu_imsg_is_bare_url(message, message_len);
+            const char *fx_argv[] = {"imsg",  "send-rich", "--chat", guid, "--text",
+                                     message, "--effect",  fx,       NULL};
+            const char *url_argv[] = {"imsg", "send-rich", "--chat", guid, "--url", message, NULL};
+            if (fx_marked || rich) {
+                if (hu_imsg_run_ok(c->alloc, fx_marked ? fx_argv : url_argv, 20)) {
+                    hu_log_info("imessage", NULL, "sent via bridge: %s",
+                                fx_marked ? fx : "rich link");
+                    imessage_text_sent(c, tgt, tgt_len, message, message_len, prov_prior);
                     goto imsg_media;
                 }
-                if (getenv("HU_DEBUG"))
-                    hu_log_info("imessage", NULL, "imsg send failed, falling back to AppleScript");
+                hu_imessage_caps_note_bridge_failure();
             }
         }
-        /* Escaped strings: worst case 2x length */
-        size_t msg_esc_cap = message_len * 2 + 1;
-        size_t tgt_esc_cap = tgt_len * 2 + 1;
-        if (msg_esc_cap > 65536 || tgt_esc_cap > 4096) {
-            send_err = HU_ERR_INVALID_ARGUMENT;
-            goto imsg_cleanup;
-        }
+        /* Text send: imsg, then AppleScript, addressed by the route the
+         * contact's last 1:1 message came in on. An SMS/RCS chat is sent to
+         * BY THAT CHAT; iMessage and unknown routes keep the exact argv and
+         * script they always had (imessage_send_route.h, 2026-09-26). */
+        {
+            char tgt_buf[256];
+            size_t tb = tgt_len < sizeof(tgt_buf) - 1 ? tgt_len : sizeof(tgt_buf) - 1;
+            memcpy(tgt_buf, tgt, tb);
+            tgt_buf[tb] = '\0';
+            /* Escaped strings: worst case 2x length */
+            size_t msg_esc_cap = message_len * 2 + 1;
+            size_t tgt_esc_cap = tgt_len * 2 + 1;
+            if (msg_esc_cap > 65536 || tgt_esc_cap > 4096) {
+                send_err = HU_ERR_INVALID_ARGUMENT;
+                goto imsg_cleanup;
+            }
+            char *msg_esc = (char *)c->alloc->alloc(c->alloc->ctx, msg_esc_cap);
+            char *tgt_esc = (char *)c->alloc->alloc(c->alloc->ctx, tgt_esc_cap);
+            if (!msg_esc || !tgt_esc) {
+                if (msg_esc)
+                    c->alloc->free(c->alloc->ctx, msg_esc, msg_esc_cap);
+                if (tgt_esc)
+                    c->alloc->free(c->alloc->ctx, tgt_esc, tgt_esc_cap);
+                send_err = HU_ERR_OUT_OF_MEMORY;
+                goto imsg_cleanup;
+            }
+            escape_for_applescript(msg_esc, msg_esc_cap, message, message_len);
+            escape_for_applescript(tgt_esc, tgt_esc_cap, tgt, tgt_len);
 
-        char *msg_esc = (char *)c->alloc->alloc(c->alloc->ctx, msg_esc_cap);
-        char *tgt_esc = (char *)c->alloc->alloc(c->alloc->ctx, tgt_esc_cap);
-        if (!msg_esc || !tgt_esc) {
-            if (msg_esc)
-                c->alloc->free(c->alloc->ctx, msg_esc, msg_esc_cap);
-            if (tgt_esc)
-                c->alloc->free(c->alloc->ctx, tgt_esc, tgt_esc_cap);
-            send_err = HU_ERR_OUT_OF_MEMORY;
-            goto imsg_cleanup;
-        }
-        escape_for_applescript(msg_esc, msg_esc_cap, message, message_len);
-        escape_for_applescript(tgt_esc, tgt_esc_cap, tgt, tgt_len);
-
-        /* Target the iMessage service explicitly for reliability on modern macOS */
-        size_t script_cap =
-            256 + strlen(msg_esc) + strlen(tgt_esc); /* 256 covers the service token */
-        char *script = (char *)c->alloc->alloc(c->alloc->ctx, script_cap);
-        if (!script) {
+            imsg_send_be_ctx_t be_ctx = {.c = c, .tgt = tgt, .tgt_len = tgt_len};
+            hu_imsg_send_backend_t be = {.ctx = &be_ctx,
+                                         .imsg_available = c->use_imsg_cli && imsg_cli_available(c),
+                                         .run_imsg = imsg_be_run_imsg,
+                                         .run_applescript = imsg_be_run_applescript,
+                                         .log_outcome = imsg_be_log_outcome,
+                                         .sent_boundary = imsg_be_sent_boundary,
+                                         .landed = imsg_be_landed,
+                                         .sleep_ms = imsg_be_sleep_ms};
+            /* "auto" lets the CLI fall back to SMS for a handle-addressed
+             * contact with no iMessage account; hardcoding "imessage" here is
+             * what black-holed 124 sends to one RCS number. */
+            const char *imsg_service = hu_imessage_send_service();
+            hu_imsg_send_request_t req = {.route = have_route ? &route : NULL,
+                                          .to = tgt_buf,
+                                          .text = message,
+                                          .service = imsg_service,
+                                          .as_service =
+                                              hu_imessage_applescript_service_type(imsg_service),
+                                          .tgt_esc = tgt_esc,
+                                          .msg_esc = msg_esc};
+            hu_imsg_send_path_t path = hu_imsg_send_text_via(&be, &req);
             c->alloc->free(c->alloc->ctx, msg_esc, msg_esc_cap);
             c->alloc->free(c->alloc->ctx, tgt_esc, tgt_esc_cap);
-            send_err = HU_ERR_OUT_OF_MEMORY;
-            goto imsg_cleanup;
-        }
-        const char *as_service = hu_imessage_applescript_service_type(hu_imessage_send_service());
-        int n = snprintf(script, script_cap,
-                         "tell application \"Messages\"\n"
-                         "  set targetService to 1st service whose service type = %s\n"
-                         "  set targetBuddy to buddy \"%s\" of targetService\n"
-                         "  send \"%s\" to targetBuddy\n"
-                         "end tell",
-                         as_service, tgt_esc, msg_esc);
-
-        c->alloc->free(c->alloc->ctx, msg_esc, msg_esc_cap);
-        c->alloc->free(c->alloc->ctx, tgt_esc, tgt_esc_cap);
-        if (n < 0 || (size_t)n >= script_cap) {
-            c->alloc->free(c->alloc->ctx, script, script_cap);
-            send_err = HU_ERR_INTERNAL;
-            goto imsg_cleanup;
-        }
-
-        {
-#ifdef HU_IS_TEST
-            if (g_imessage_test_send_stub != NULL) {
-                /* Test stub: invoke callback instead of osascript */
-                (*g_imessage_test_send_stub)(tgt, tgt_len, message, message_len);
-                c->alloc->free(c->alloc->ctx, script, script_cap);
-                send_err = HU_OK;
-            } else {
-#endif
-                const char *argv[] = {"osascript", "-e", script, NULL};
-                hu_run_result_t result = {0};
-                hu_error_t err = hu_process_run(c->alloc, argv, NULL, 65536, &result);
-                c->alloc->free(c->alloc->ctx, script, script_cap);
-                bool ok = (err == HU_OK && result.success && result.exit_code == 0);
-                hu_run_result_free(c->alloc, &result);
-                if (err || !ok)
-                    send_err = HU_ERR_CHANNEL_SEND;
-#ifdef HU_IS_TEST
+            if (path == HU_IMSG_SEND_PATH_NONE) {
+                send_err = HU_ERR_CHANNEL_SEND;
+                /* Final failure: never lose a reply silently. The daemon's
+                 * observer records it and tells the owner. */
+                hu_imessage_send_failed_event_t fev = {
+                    .handle = tgt,
+                    .handle_len = tgt_len,
+                    .chat_service = hu_imsg_route_service_name(
+                        have_route ? route.service : HU_IMSG_SERVICE_UNKNOWN),
+                    .text = message,
+                    .text_len = message_len};
+                hu_imessage_send_failure_notify(&fev);
+                goto imsg_cleanup;
             }
-#endif
-        }
-
-        if (send_err == HU_OK) {
-            imessage_record_sent(c, message, message_len);
-            imessage_report_sent(tgt, tgt_len, message, message_len, HU_IMESSAGE_SENT_KIND_TEXT,
-                                 prov_prior);
+            imessage_text_sent(c, tgt, tgt_len, message, message_len, prov_prior);
+            goto imsg_media;
         }
     }
 
 #if !HU_IS_TEST
 imsg_media:
+    {
+        /* Native Messages voice delivery (W3). SHADOW: check whether a Messages
+         * recording could run right now and log it; the attachment still goes. */
+        hu_voice_record_route_t vroute =
+            hu_voice_record_route(hu_voice_delivery_mode_parse(getenv("HU_VOICE_DELIVERY")),
+                                  message_len, media, media_count);
+        if (vroute != HU_VREC_ROUTE_ATTACHMENT &&
+            !hu_voice_record_handle_allowed(getenv("HU_VOICE_DELIVERY_ONLY"), tgt, tgt_len))
+            vroute = HU_VREC_ROUTE_ATTACHMENT; /* not on the native list: attachment as before */
+        if (vroute == HU_VREC_ROUTE_SHADOW) {
+            const hu_voice_record_port_t *vport = hu_voice_record_macos_port();
+            hu_voice_record_request_t vreq;
+            hu_voice_record_request_from_env(tgt, tgt_len, media[0], 0, &vreq);
+            hu_voice_record_facts_t vfacts;
+            memset(&vfacts, 0, sizeof(vfacts));
+            if (vport->gather_facts(vport->ctx, vreq.real_mic, &vfacts) != HU_OK)
+                vfacts.ax_trusted = false;
+            vfacts.min_idle_sec = vreq.min_idle_sec;
+            hu_voice_record_block_t vblock = hu_voice_record_preflight(&vfacts);
+            hu_log_info("imessage", NULL, "voice delivery shadow: would_record=%d block=%s",
+                        vblock == HU_VREC_OK ? 1 : 0, hu_voice_record_block_name(vblock));
+        } else if (vroute == HU_VREC_ROUTE_RECORD) {
+            /* HU_VOICE_DELIVERY=messages as a default is gated on the W5 "real or
+             * clone?" measurement (spec 2026-09-26 W5): do not flip without it.
+             * Once Send is pressed the memo is out — never also send the file,
+             * even when chat.db is slow to confirm it. Any failure before Send
+             * falls through to the attachment below. */
+            hu_voice_record_result_t vres;
+            hu_error_t verr = hu_voice_record_send_from_env(tgt, tgt_len, media[0], &vres);
+            if (verr == HU_OK) {
+                if (!vres.restored)
+                    hu_log_error("imessage", NULL,
+                                 "voice record: default input NOT restored to the real mic");
+                hu_log_info("imessage", NULL,
+                            "voice delivered via Messages: verified=%d restored=%d waited_ms=%u",
+                            vres.verified ? 1 : 0, vres.restored ? 1 : 0, vres.idle_waited_ms);
+                imessage_report_sent(tgt, tgt_len, NULL, 0, HU_IMESSAGE_SENT_KIND_MEDIA,
+                                     vres.prior_max_rowid);
+                goto imsg_cleanup;
+            }
+            if (verr == HU_ERR_IO && !vres.restored)
+                hu_log_error("imessage", NULL,
+                             "voice record: default input NOT restored to the real mic");
+            if (vres.cancel_failed)
+                hu_log_error("imessage", NULL,
+                             "voice record: Cancel failed — a recording may be left in Messages");
+            hu_log_info("imessage", NULL,
+                        "voice record fell back to attachment: block=%s stage=%d reason=%s "
+                        "waited_ms=%u idle=%.2fs elapsed=%.2fs",
+                        hu_voice_record_block_name(vres.block), (int)vres.stage,
+                        vres.abort_reason ? vres.abort_reason : "-", vres.idle_waited_ms,
+                        vres.check_idle_sec, vres.check_elapsed_sec);
+        }
+    }
+    /* Voice-first memos (spec 2026-09-28): a memo that was not recorded
+     * natively (blocked, failed before Send, or off the native list) never
+     * goes out as a .caf file when HU_VOICE_NO_ATTACHMENT=1. The error sends the
+     * daemon down its text path instead. */
+    if (!hu_voice_record_may_attach(message_len, media, media_count,
+                                    getenv("HU_VOICE_NO_ATTACHMENT"))) {
+        hu_log_info("imessage", NULL, "voice memo not sent as a file; text goes instead");
+        send_err = HU_ERR_IO_BUSY;
+        goto imsg_cleanup;
+    }
     /* Send media attachments (local file paths only) after text succeeds.
      * Prefer imsg send --file when available (faster, better error reporting);
      * fall back to AppleScript per-attachment on failure. */
@@ -2547,8 +2971,11 @@ imsg_media:
                 continue;
 
             if (try_imsg_file) {
-                const char *fa[] = {"imsg", "send",      "--to",     imsg_tgt_buf, "--file",
-                                    url,    "--service", "imessage", NULL};
+                /* SMS/RCS chats get the file by chat GUID; others, as before. */
+                const char *fa[10];
+                if (hu_imsg_route_build_file_argv(have_route ? &route : NULL, imsg_tgt_buf, url, fa,
+                                                  10) == 0)
+                    continue;
                 hu_run_result_t ir = {0};
                 hu_error_t ie = hu_process_run_with_timeout(c->alloc, fa, NULL, 65536, 15, &ir);
                 bool fok = (ie == HU_OK && ir.success && ir.exit_code == 0);
@@ -2574,16 +3001,26 @@ imsg_media:
             if (!path_esc)
                 continue;
             escape_for_applescript(path_esc, path_esc_cap, url, path_len);
-            size_t m_script_cap = 256 + strlen(m_tgt_esc) + strlen(path_esc);
+            size_t m_script_cap =
+                256 + strlen(m_tgt_esc) + strlen(path_esc) + HU_IMSG_ROUTE_GUID_MAX;
             char *m_script = (char *)c->alloc->alloc(c->alloc->ctx, m_script_cap);
             if (m_script) {
+                bool m_by_chat = hu_imsg_route_by_chat(&route);
+                int m_chat_n = m_by_chat ? hu_imsg_route_build_chat_attach_script(
+                                               &route, path_esc, m_script, m_script_cap)
+                                         : -1;
                 size_t m_n =
-                    imessage_build_attach_script(m_script, m_script_cap, m_tgt_esc, path_esc);
+                    m_by_chat
+                        ? (m_chat_n > 0 && (size_t)m_chat_n < m_script_cap ? (size_t)m_chat_n : 0)
+                        : imessage_build_attach_script(m_script, m_script_cap, m_tgt_esc, path_esc);
                 c->alloc->free(c->alloc->ctx, path_esc, path_esc_cap);
                 if (m_n > 0) {
                     const char *argv[] = {"osascript", "-e", m_script, NULL};
                     hu_run_result_t result = {0};
-                    hu_error_t err = hu_process_run(c->alloc, argv, NULL, 65536, &result);
+                    hu_error_t err = hu_process_run_with_timeout(
+                        c->alloc, argv, NULL, 65536,
+                        m_by_chat ? HU_IMSG_AS_TIMEOUT_BY_CHAT_S : HU_IMSG_AS_TIMEOUT_BY_HANDLE_S,
+                        &result);
                     bool ok = (err == HU_OK && result.success && result.exit_code == 0);
                     hu_run_result_free(c->alloc, &result);
                     if (ok)
@@ -2651,11 +3088,13 @@ static bool imessage_health_check(void *ctx) {
 #endif
 }
 
-static hu_error_t imessage_load_conversation_history(void *ctx, hu_allocator_t *alloc,
-                                                     const char *contact_id, size_t contact_id_len,
-                                                     size_t limit, hu_channel_history_entry_t **out,
-                                                     size_t *out_count) {
-    (void)ctx;
+/* Shared body of both history loaders: run `sql` (?1 = handle, ?2 = limit)
+ * and decode rows. `label_own_media`: Seth's text-less rows carry their media
+ * label instead of the legacy "[you replied]" (DM loader only). */
+static hu_error_t imessage_load_history_sql(const char *sql, bool label_own_media,
+                                            hu_allocator_t *alloc, const char *contact_id,
+                                            size_t contact_id_len, size_t limit,
+                                            hu_channel_history_entry_t **out, size_t *out_count) {
     if (!alloc || !contact_id || !out || !out_count)
         return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;
@@ -2675,34 +3114,6 @@ static hu_error_t imessage_load_conversation_history(void *ctx, hu_allocator_t *
     sqlite3 *db = NULL;
     if (imessage_open_chatdb(db_path, &db) != SQLITE_OK)
         return HU_ERR_INTERNAL;
-
-    const char *sql = "SELECT m.is_from_me, m.text, "
-                      "  datetime(m.date/1000000000 + 978307200, 'unixepoch', 'localtime') as ts, "
-                      "  (SELECT COUNT(*) FROM message_attachment_join maj "
-                      "   JOIN attachment a ON maj.attachment_id = a.ROWID "
-                      "   WHERE maj.message_id = m.ROWID AND a.filename IS NOT NULL "
-                      "   AND (LOWER(a.filename) LIKE '%.mov' OR LOWER(a.filename) LIKE '%.mp4' "
-                      "     OR LOWER(a.filename) LIKE '%.m4v')) > 0 AS has_video, "
-                      "  (SELECT COUNT(*) FROM message_attachment_join maj2 "
-                      "   JOIN attachment a2 ON maj2.attachment_id = a2.ROWID "
-                      "   WHERE maj2.message_id = m.ROWID AND a2.filename IS NOT NULL "
-                      "   AND (LOWER(a2.filename) LIKE '%.jpg' OR LOWER(a2.filename) LIKE '%.jpeg' "
-                      "     OR LOWER(a2.filename) LIKE '%.png' OR LOWER(a2.filename) LIKE '%.heic' "
-                      "     OR LOWER(a2.filename) LIKE '%.gif' OR LOWER(a2.filename) LIKE "
-                      "'%.webp')) > 0 AS has_image, "
-                      "  (SELECT COUNT(*) FROM message_attachment_join maj3 "
-                      "   JOIN attachment a3 ON maj3.attachment_id = a3.ROWID "
-                      "   WHERE maj3.message_id = m.ROWID AND a3.filename IS NOT NULL "
-                      "   AND (LOWER(a3.filename) LIKE '%.caf' OR LOWER(a3.filename) LIKE '%.m4a' "
-                      "     OR LOWER(a3.filename) LIKE '%.mp3' OR LOWER(a3.filename) LIKE '%.aac' "
-                      "     OR LOWER(a3.filename) LIKE '%.opus')) > 0 AS has_audio, "
-                      "  m.attributedBody, "
-                      "  m.balloon_bundle_id, "
-                      "  m.expressive_send_style_id "
-                      "FROM message m "
-                      "JOIN handle h ON m.handle_id = h.ROWID "
-                      "WHERE h.id = ?1 AND m.associated_message_type = 0 "
-                      "ORDER BY m.date DESC LIMIT ?2";
 
     sqlite3_stmt *stmt = NULL;
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
@@ -2773,17 +3184,20 @@ static hu_error_t imessage_load_conversation_history(void *ctx, hu_allocator_t *
                 tlen = sizeof(entries[0].text) - 1;
             memcpy(entries[count].text, txt, tlen);
             entries[count].text[tlen] = '\0';
+        } else if (entries[count].from_me && !label_own_media) {
+            snprintf(entries[count].text, sizeof(entries[0].text), "[you replied]");
+        } else if (has_audio) {
+            snprintf(entries[count].text, sizeof(entries[0].text), "[Voice Message]");
+        } else if (has_video) {
+            snprintf(entries[count].text, sizeof(entries[0].text), "[Video]");
+        } else if (has_image) {
+            snprintf(entries[count].text, sizeof(entries[0].text), "[Photo]");
         } else if (entries[count].from_me) {
+            /* No text and no media we recognise: an unsent/edited row, a
+             * game or Digital Touch balloon. Not necessarily an attachment. */
             snprintf(entries[count].text, sizeof(entries[0].text), "[you replied]");
         } else {
-            if (has_audio)
-                snprintf(entries[count].text, sizeof(entries[0].text), "[Voice Message]");
-            else if (has_video)
-                snprintf(entries[count].text, sizeof(entries[0].text), "[Video]");
-            else if (has_image)
-                snprintf(entries[count].text, sizeof(entries[0].text), "[Photo]");
-            else
-                snprintf(entries[count].text, sizeof(entries[0].text), "[image or attachment]");
+            snprintf(entries[count].text, sizeof(entries[0].text), "[image or attachment]");
         }
         if (ts) {
             size_t tslen = strlen(ts);
@@ -2808,10 +3222,29 @@ static hu_error_t imessage_load_conversation_history(void *ctx, hu_allocator_t *
     *out_count = count;
     return HU_OK;
 #else
+    (void)sql;
+    (void)label_own_media;
     (void)contact_id_len;
     (void)limit;
     return HU_ERR_NOT_SUPPORTED;
 #endif
+}
+
+static hu_error_t imessage_load_conversation_history(void *ctx, hu_allocator_t *alloc,
+                                                     const char *contact_id, size_t contact_id_len,
+                                                     size_t limit, hu_channel_history_entry_t **out,
+                                                     size_t *out_count) {
+    (void)ctx;
+    return imessage_load_history_sql(HU_IMESSAGE_SQL_HANDLE_HISTORY, false, alloc, contact_id,
+                                     contact_id_len, limit, out, out_count);
+}
+
+hu_error_t hu_imessage_load_dm_history(void *ctx, hu_allocator_t *alloc, const char *contact_id,
+                                       size_t contact_id_len, size_t limit,
+                                       hu_channel_history_entry_t **out, size_t *out_count) {
+    (void)ctx;
+    return imessage_load_history_sql(HU_IMESSAGE_SQL_DM_HISTORY, true, alloc, contact_id,
+                                     contact_id_len, limit, out, out_count);
 }
 
 #if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__) && defined(HU_ENABLE_SQLITE)
@@ -3036,30 +3469,7 @@ int64_t hu_imessage_get_latest_sent_rowid(const char *handle, size_t handle_len)
     sqlite3 *db = NULL;
     if (imessage_open_chatdb(db_path, &db) != SQLITE_OK)
         return -1;
-
-    const char *sql = "SELECT MAX(m.ROWID) FROM message m "
-                      "JOIN handle h ON m.handle_id = h.ROWID "
-                      "WHERE m.is_from_me = 1 AND h.id = ?1";
-
-    sqlite3_stmt *stmt = NULL;
-    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
-        sqlite3_close(db);
-        return -1;
-    }
-
-    char hbuf[128];
-    size_t hlen = handle_len < sizeof(hbuf) - 1 ? handle_len : sizeof(hbuf) - 1;
-    memcpy(hbuf, handle, hlen);
-    hbuf[hlen] = '\0';
-    sqlite3_bind_text(stmt, 1, hbuf, (int)hlen, SQLITE_STATIC);
-
-    int64_t rowid = -1;
-    if (sqlite3_step(stmt) == SQLITE_ROW && sqlite3_column_type(stmt, 0) != SQLITE_NULL)
-        rowid = sqlite3_column_int64(stmt, 0);
-
-    sqlite3_finalize(stmt);
-    sqlite3_close(db);
-    return rowid;
+    return imessage_latest_sent_rowid_in(db, handle, handle_len);
 }
 
 hu_error_t hu_imessage_build_read_receipt_context(hu_allocator_t *alloc, const char *contact_id,
@@ -3401,8 +3811,8 @@ static hu_error_t imessage_get_response_constraints(void *ctx,
     return HU_OK;
 }
 
-static hu_error_t imessage_react(void *ctx, const char *target, size_t target_len,
-                                 int64_t message_id, hu_reaction_type_t reaction) {
+static hu_error_t imessage_react_tiers(void *ctx, const char *target, size_t target_len,
+                                       int64_t message_id, hu_reaction_type_t reaction) {
     (void)target;
     (void)target_len;
     (void)message_id;
@@ -3647,16 +4057,10 @@ static hu_error_t imessage_react(void *ctx, const char *target, size_t target_le
     int exit_code = result.exit_code;
     bool ok = result.success && exit_code == 0;
     if (!ok) {
-        hu_log_error("imessage", NULL, "tapback JXA failed: exit=%d stdout=%.*s stderr=%.*s",
-                     exit_code,
-                     (int)(result.stdout_buf && result.stdout_len > 0
-                               ? (result.stdout_len < 200 ? result.stdout_len : 200)
-                               : 0),
-                     result.stdout_buf ? result.stdout_buf : "",
-                     (int)(result.stderr_buf && result.stderr_len > 0
-                               ? (result.stderr_len < 200 ? result.stderr_len : 200)
-                               : 0),
-                     result.stderr_buf ? result.stderr_buf : "");
+        hu_log_error(
+            "imessage", NULL, "tapback JXA failed: exit=%d stdout=%s stderr=%s", exit_code,
+            HU_LOG_TEXT(result.stdout_buf, result.stdout_buf ? result.stdout_len : 0, 120),
+            HU_LOG_TEXT(result.stderr_buf, result.stderr_buf ? result.stderr_len : 0, 120));
     }
     hu_run_result_free(c->alloc, &result);
     if (!ok)
@@ -3664,6 +4068,53 @@ static hu_error_t imessage_react(void *ctx, const char *target, size_t target_le
     return HU_OK;
 #endif
 #endif
+}
+
+/* Send provenance for tapbacks: the chat.db boundary is read before the
+ * tiers run and the observer hears only a delivered tapback, so the record
+ * claims the first from-me reaction above the boundary. Bookkeeping cannot
+ * fail the tapback: the observer returns nothing and logs its own failures. */
+#if HU_IS_TEST
+static int64_t (*g_test_tapback_boundary)(const char *, size_t) = NULL;
+void hu_imessage_set_test_tapback_boundary_stub(int64_t (*stub)(const char *handle,
+                                                                size_t handle_len)) {
+    g_test_tapback_boundary = stub;
+}
+#endif
+
+static int64_t imessage_tapback_boundary(const char *target, size_t target_len) {
+    if (!hu_imessage_send_observer_active() || !target || target_len == 0)
+        return -1;
+#if HU_IS_TEST
+    if (g_test_tapback_boundary)
+        return g_test_tapback_boundary(target, target_len);
+    /* Tests read only an explicit $HU_CHATDB fixture, never the real chat.db. */
+    const char *fixture = getenv("HU_CHATDB");
+    if (!fixture || !fixture[0])
+        return -1;
+#endif
+#if defined(HU_ENABLE_SQLITE) && (HU_IS_TEST || (defined(__APPLE__) && defined(__MACH__)))
+    return imessage_boundary_rowid(target, target_len);
+#else
+    return -1;
+#endif
+}
+
+static void imessage_report_tapback(const char *target, size_t target_len, int64_t prior) {
+    hu_imessage_sent_event_t ev = {.handle = target,
+                                   .handle_len = target_len,
+                                   .kind = HU_IMESSAGE_SENT_KIND_TAPBACK,
+                                   .prior_max_rowid = prior};
+    hu_imessage_send_observer_notify(&ev);
+}
+
+static hu_error_t imessage_react(void *ctx, const char *target, size_t target_len,
+                                 int64_t message_id, hu_reaction_type_t reaction) {
+    int64_t prior = imessage_tapback_boundary(target, target_len);
+    hu_error_t err = imessage_react_tiers(ctx, target, target_len, message_id, reaction);
+    if (err == HU_OK)
+        imessage_report_tapback(target, target_len, prior);
+    return err;
 }
 
 static char *imessage_vt_get_attachment_path(void *ctx, hu_allocator_t *alloc, int64_t message_id) {
@@ -3735,6 +4186,12 @@ static hu_error_t imessage_mark_read(void *ctx, const char *contact_id, size_t c
     hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ctx;
     if (!c->alloc || !contact_id || contact_id_len == 0)
         return HU_ERR_INVALID_ARGUMENT;
+    /* The bridge's read receipt is the one that shows "Read" on the sender's
+     * side; the AppleScript below is the no-bridge fallback. Without this the
+     * daemon's "read, pause, then type" step marked nothing read, and the
+     * contact watched typing dots under a "Delivered" (2026-09-29). */
+    if (hu_imessage_mark_read(ctx, contact_id, contact_id_len) == HU_OK)
+        return HU_OK;
 
     if (contact_id_len > 4096)
         return HU_ERR_INVALID_ARGUMENT;
@@ -3792,6 +4249,13 @@ static hu_error_t imessage_mark_read(void *ctx, const char *contact_id, size_t c
 #if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__)
 
 /* ── Messages.app PID lookup ────────────────────────────────────────── */
+static pid_t ax_messages_pid(void);
+
+/* Shared with the voice-record port (imessage_voice_record.h). */
+pid_t hu_imessage_messages_pid(void) {
+    return ax_messages_pid();
+}
+
 static pid_t ax_messages_pid(void) {
     int count = proc_listallpids(NULL, 0);
     if (count <= 0)
@@ -4487,8 +4951,8 @@ bool hu_imessage_ax_reply_tier2_show_menu(const char *target, size_t target_len,
         return false;
     AXUIElementRef row = ax_find_reply_row(target, target_len, prefix);
     if (!row) {
-        hu_log_info("imessage", NULL, "AX reply tier2: parent row not found (prefix=%.20s)",
-                    prefix);
+        hu_log_info("imessage", NULL, "AX reply tier2: parent row not found (prefix=%s)",
+                    HU_LOG_TEXT_CSTR(prefix, 20));
         return false;
     }
     bool menu_ok = ax_click_menu_item_reply(row);
@@ -4663,6 +5127,57 @@ int64_t hu_imessage_ax_reply_newest_rowid(void) {
     return max_rowid;
 #else
     return 0;
+#endif
+}
+
+/* Native Messages voice delivery (W3): the confirmation that a recorded memo
+ * really went out — measured in chat.db, not inferred from the button press. */
+int64_t hu_imessage_chatdb_max_rowid(void) {
+#ifdef HU_ENABLE_SQLITE
+    int64_t r = hu_imessage_ax_reply_newest_rowid();
+    return r > 0 ? r : -1;
+#else
+    return -1;
+#endif
+}
+
+#ifdef HU_ENABLE_SQLITE
+/* The default chat.db (HU_CHATDB or ~/Library/Messages), opened read-only. */
+static bool imessage_open_default_chatdb(sqlite3 **db_out) {
+    char path[512];
+    int n = hu_paths_chatdb(path, sizeof(path));
+    return n >= 0 && (size_t)n < sizeof(path) && imessage_open_chatdb(path, db_out) == SQLITE_OK;
+}
+#endif
+
+bool hu_imessage_chatdb_audio_from_me_after(const char *handle, size_t handle_len,
+                                            int64_t after_rowid) {
+#ifdef HU_ENABLE_SQLITE
+    if (!handle || handle_len == 0 || after_rowid < 0)
+        return false;
+    sqlite3 *db = NULL;
+    if (!imessage_open_default_chatdb(&db))
+        return false;
+    bool found = false;
+    sqlite3_stmt *stmt = NULL;
+    static const char sql[] = "SELECT 1 FROM message m "
+                              "JOIN chat_message_join cj ON cj.message_id = m.ROWID "
+                              "JOIN chat c ON c.ROWID = cj.chat_id "
+                              "WHERE m.ROWID > ?1 AND m.is_from_me = 1 AND m.is_audio_message = 1 "
+                              "AND c.chat_identifier = ?2 LIMIT 1";
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_int64(stmt, 1, after_rowid);
+        sqlite3_bind_text(stmt, 2, handle, (int)handle_len, NULL);
+        found = sqlite3_step(stmt) == SQLITE_ROW;
+        sqlite3_finalize(stmt);
+    }
+    sqlite3_close(db);
+    return found;
+#else
+    (void)handle;
+    (void)handle_len;
+    (void)after_rowid;
+    return false;
 #endif
 }
 #endif
@@ -4965,10 +5480,8 @@ hu_error_t hu_imessage_mark_read(void *ctx, const char *target, size_t target_le
 #endif
 }
 
-hu_error_t hu_imessage_react_emoji_with_fallback(void *ctx, const char *target, size_t target_len,
-                                                 int64_t message_id, const char *emoji_utf8,
-                                                 size_t emoji_utf8_len) {
-    (void)emoji_utf8_len; /* emoji_utf8 is NUL-terminated; len is informational */
+static hu_error_t react_emoji_tiers(void *ctx, const char *target, size_t target_len,
+                                    int64_t message_id, const char *emoji_utf8) {
 
     if (!emoji_utf8 || !emoji_utf8[0])
         return HU_ERR_INVALID_ARGUMENT;
@@ -5001,11 +5514,21 @@ hu_error_t hu_imessage_react_emoji_with_fallback(void *ctx, const char *target, 
     return HU_ERR_NOT_SUPPORTED;
 }
 
-/* ── Typing indicators: three-tier fallback ──────────────────────────
+hu_error_t hu_imessage_react_emoji_with_fallback(void *ctx, const char *target, size_t target_len,
+                                                 int64_t message_id, const char *emoji_utf8,
+                                                 size_t emoji_utf8_len) {
+    (void)emoji_utf8_len; /* emoji_utf8 is NUL-terminated; len is informational */
+    int64_t prior = imessage_tapback_boundary(target, target_len);
+    hu_error_t err = react_emoji_tiers(ctx, target, target_len, message_id, emoji_utf8);
+    if (err == HU_OK)
+        imessage_report_tapback(target, target_len, prior);
+    return err;
+}
+
+/* ── Typing indicators ────────────────────────────────────────────────
+ * Tier 0: the IMCore bridge (imsg typing), pulsed typing/paused — no UI
  * Tier 1: IMCore private framework (direct API, no UI, macOS 14-15)
- * Tier 2: AX compose field injection (bypasses keystroke block, macOS 14+)
- * Tier 3: AppleScript keystroke via System Events (last resort)
- * Requires Accessibility permission for tiers 2+3. */
+ * Tier 2: AX compose field injection (opens the chat; needs Accessibility) */
 static hu_error_t imessage_start_typing(void *ctx, const char *recipient, size_t recipient_len) {
 #if HU_IS_TEST
     (void)ctx;
@@ -5028,6 +5551,19 @@ static hu_error_t imessage_start_typing(void *ctx, const char *recipient, size_t
         c->typing_last_target_len = recipient_len;
     }
 
+    /* Tier 0: the IMCore bridge, pulsed like a person composing. No UI. The
+     * daemon calls start_typing more than once a turn; a running pulse for
+     * the same chat keeps its rhythm instead of restarting. */
+    if (pulse_is_for(recipient, recipient_len))
+        return HU_OK;
+    /* Nobody types into a chat they have not opened: read it first. */
+    if (imsg_bridge_up(c))
+        (void)hu_imessage_mark_read(c, recipient, recipient_len);
+    if (imsg_bridge_up(c) && pulse_start(recipient, recipient_len)) {
+        hu_log_info("imessage", NULL, "typing started via bridge (rhythm)");
+        return HU_OK;
+    }
+
     /* Tier 1: IMCore — direct API, no UI activation needed. */
     imcore_init(c);
     if (imcore_start_typing(c, recipient, recipient_len)) {
@@ -5043,24 +5579,6 @@ static hu_error_t imessage_start_typing(void *ctx, const char *recipient, size_t
         hu_log_info("imessage", NULL, "typing started via AX compose field");
         atomic_store(&c->typing_active, true);
         return HU_OK;
-    }
-
-    /* Tier 3: imsg typing CLI or AppleScript keystroke (legacy). */
-    if (c->use_imsg_cli && imsg_cli_available(c)) {
-        char tgt_buf[256];
-        size_t tb = recipient_len < sizeof(tgt_buf) - 1 ? recipient_len : sizeof(tgt_buf) - 1;
-        memcpy(tgt_buf, recipient, tb);
-        tgt_buf[tb] = '\0';
-        const char *argv[] = {"imsg", "typing", "--to", tgt_buf, "--duration", "5s", NULL};
-        hu_run_result_t result = {0};
-        hu_error_t err = hu_process_run(c->alloc, argv, NULL, 4096, &result);
-        bool ok = (err == HU_OK && result.exit_code == 0);
-        hu_run_result_free(c->alloc, &result);
-        if (ok) {
-            hu_log_info("imessage", NULL, "typing started via imsg CLI");
-            atomic_store(&c->typing_active, true);
-            return HU_OK;
-        }
     }
 
     /* Rate-limit to one log per daemon lifetime — typing indicator is
@@ -5094,6 +5612,18 @@ static hu_error_t imessage_stop_typing(void *ctx, const char *recipient, size_t 
     hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ctx;
     if (!c || !c->alloc)
         return HU_ERR_INVALID_ARGUMENT;
+
+    /* Tier 0: the bridge pulse. */
+    if (recipient && pulse_is_for(recipient, recipient_len)) {
+        (void)pulse_stop(false);
+        return HU_OK;
+    }
+    /* Only the tier that started typing may stop it. The AX tier's stop
+     * empties the open chat's compose field, so reaching it after bridge
+     * typing (or a send that already ended the pulse) wiped whatever draft
+     * the owner was typing in Messages (critic, 2026-09-29). */
+    if (!atomic_load(&c->typing_active))
+        return HU_OK;
 
     /* Tier 1: IMCore */
     if (imcore_stop_typing(c, recipient, recipient_len)) {
@@ -5138,6 +5668,19 @@ static bool imessage_supports_link_unfurl(void *ctx) {
     return true;
 }
 
+/* A delivered threaded reply joins the echo ring like any text send, or a
+ * self-chat answers its own bubbles (2026-09-30 loop). Provenance is already
+ * reported inside hu_imessage_reply. */
+static hu_error_t imessage_reply(void *ctx, const char *target, size_t target_len,
+                                 const char *parent_guid, size_t parent_guid_len, const char *body,
+                                 size_t body_len) {
+    hu_error_t err =
+        hu_imessage_reply(ctx, target, target_len, parent_guid, parent_guid_len, body, body_len);
+    if (err == HU_OK && ctx && body)
+        imessage_record_sent((hu_imessage_ctx_t *)ctx, body, body_len);
+    return err;
+}
+
 static const hu_channel_vtable_t imessage_vtable = {
     .start = imessage_start,
     .stop = imessage_stop,
@@ -5150,8 +5693,7 @@ static const hu_channel_vtable_t imessage_vtable = {
     .load_conversation_history = imessage_load_conversation_history,
     .get_response_constraints = imessage_get_response_constraints,
     .react = imessage_react,
-    .reply = (hu_error_t (*)(void *, const char *, size_t, const char *, size_t, const char *,
-                             size_t))hu_imessage_reply,
+    .reply = imessage_reply,
     .react_emoji = hu_imessage_react_emoji_with_fallback,
     /* send_sticker is intentionally NULL: macOS exposes no automation API to
      * send a native sticker/Memoji balloon (AppleScript/JXA/imsg/BlueBubbles
@@ -5538,6 +6080,11 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
                 memcpy(msgs[i].guid, c->mock_msgs[i].guid, 96);
                 memcpy(msgs[i].reply_to_guid, c->mock_msgs[i].reply_to_guid, 96);
                 memcpy(msgs[i].chat_id, c->mock_msgs[i].chat_id, 128);
+                /* Mirror production: remember the 1:1 inbound's chat. Mocks
+                 * carry no service column, so the GUID prefix decides. */
+                if (!msgs[i].is_group && msgs[i].chat_id[0])
+                    hu_imsg_route_note_inbound(msgs[i].session_key, strlen(msgs[i].session_key),
+                                               msgs[i].chat_id, NULL);
             }
             *out_count = n;
             c->mock_count = 0;
@@ -5639,6 +6186,15 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
             sqlite3_finalize(col_check);
         }
     }
+    bool has_chat_style = false;
+    {
+        sqlite3_stmt *col_check = NULL;
+        if (sqlite3_prepare_v2(db, "SELECT style FROM chat LIMIT 0", -1, &col_check, NULL) ==
+            SQLITE_OK) {
+            has_chat_style = true;
+            sqlite3_finalize(col_check);
+        }
+    }
 
     /* If last_rowid was never seeded (e.g. FDA wasn't granted at startup),
      * seed it now to current max so we only pick up truly new messages. */
@@ -5671,6 +6227,8 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
      *   11: balloon_bundle_id, 12: expressive_send_style_id, 13: unix_ts,
      *   14: was_retracted (only when has_date_retracted, else absent),
      *   15: chat_id (from chat_message_join → chat.guid)
+     *   16: chat_style (chat.style, or NULL when the column is absent)
+     *   Without date_retracted, chat_id and chat_style shift down to 14/15.
      *
      * Attachment type classification uses EXISTS (cheaper than COUNT). */
 
@@ -5691,10 +6249,7 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
     "             AND (LOWER(av.filename) LIKE '%.mov' OR LOWER(av.filename) LIKE '%.mp4' " \
     "               OR LOWER(av.filename) LIKE '%.m4v')) "                                  \
     "       THEN '[Video]' ELSE '[Photo]' END)) AS text, h.id, "                            \
-    "  COALESCE("                                                                           \
-    "    (SELECT COUNT(DISTINCT chj2.handle_id) FROM chat_message_join cmj "                \
-    "     JOIN chat_handle_join chj2 ON chj2.chat_id = cmj.chat_id "                        \
-    "     WHERE cmj.message_id = m.ROWID), 0) AS participant_count, "                       \
+    "  " HU_IMESSAGE_SQL_HANDLE_COUNT_OF_MESSAGE " AS participant_count, "                  \
     "  EXISTS (SELECT 1 FROM message_attachment_join maj "                                  \
     "   JOIN attachment a ON maj.attachment_id = a.ROWID "                                  \
     "   WHERE maj.message_id = m.ROWID AND a.filename IS NOT NULL "                         \
@@ -5727,6 +6282,15 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
     "   JOIN chat c ON cmj2.chat_id = c.ROWID "     \
     "   WHERE cmj2.message_id = m.ROWID LIMIT 1) AS chat_guid"
 
+/* chat.style of the message's chat (43 group / 45 1:1), or NULL on a chat.db
+ * without the column. Selected right after chat_guid. */
+#define IMSG_POLL_SQL_CHAT_STYLE      ", " HU_IMESSAGE_SQL_CHAT_STYLE_OF_MESSAGE " AS chat_style"
+#define IMSG_POLL_SQL_CHAT_STYLE_NULL ", NULL AS chat_style"
+/* The service this message arrived on (iMessage / SMS / RCS): a reply goes
+ * back to the same chat on the same service (imessage_send_route.h). Always
+ * the LAST selected column. */
+#define IMSG_POLL_SQL_MSG_SERVICE     ", m.service AS msg_service"
+
 #define IMSG_POLL_SQL_FROM                                                              \
     " FROM message m "                                                                  \
     "JOIN handle h ON m.handle_id = h.ROWID "                                           \
@@ -5752,12 +6316,16 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
     /* Build SQL variant based on available columns */
     char sql_buf[4096];
     int sql_len;
+    const char *style_sql =
+        has_chat_style ? IMSG_POLL_SQL_CHAT_STYLE : IMSG_POLL_SQL_CHAT_STYLE_NULL;
     if (has_date_retracted) {
-        sql_len = snprintf(sql_buf, sizeof(sql_buf), "%s%s%s%s", IMSG_POLL_SQL_BASE,
-                           IMSG_POLL_SQL_RETRACT, IMSG_POLL_SQL_CHAT_ID, IMSG_POLL_SQL_FROM);
+        sql_len = snprintf(sql_buf, sizeof(sql_buf), "%s%s%s%s%s%s", IMSG_POLL_SQL_BASE,
+                           IMSG_POLL_SQL_RETRACT, IMSG_POLL_SQL_CHAT_ID, style_sql,
+                           IMSG_POLL_SQL_MSG_SERVICE, IMSG_POLL_SQL_FROM);
     } else {
-        sql_len = snprintf(sql_buf, sizeof(sql_buf), "%s%s%s", IMSG_POLL_SQL_BASE,
-                           IMSG_POLL_SQL_CHAT_ID, IMSG_POLL_SQL_FROM);
+        sql_len = snprintf(sql_buf, sizeof(sql_buf), "%s%s%s%s%s", IMSG_POLL_SQL_BASE,
+                           IMSG_POLL_SQL_CHAT_ID, style_sql, IMSG_POLL_SQL_MSG_SERVICE,
+                           IMSG_POLL_SQL_FROM);
     }
     if (sql_len < 0 || (size_t)sql_len >= sizeof(sql_buf)) {
         sqlite3_close(db);
@@ -5779,6 +6347,8 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
 
     const int col_retracted = has_date_retracted ? 14 : -1;
     const int col_chat_guid = has_date_retracted ? 15 : 14;
+    const int col_chat_style = col_chat_guid + 1;
+    const int col_msg_service = col_chat_style + 1;
 
     size_t count = 0;
     int step_rc;
@@ -5806,6 +6376,31 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
                     attr_blob, (size_t)attr_len, attr_text_buf, sizeof(attr_text_buf));
                 if (extracted > 0)
                     text = attr_text_buf;
+            }
+        }
+
+        /* A voice memo: Messages keeps iOS's transcript of it in attributedBody
+         * (IMAudioTranscription). Reply to what they said, not to "[Audio]" —
+         * 2026-09-27 the daemon answered Mindy's memo without hearing it. The
+         * log line measures whether a local STT fallback is ever needed. */
+        char audio_text_buf[4200];
+        if (has_audio) {
+            const unsigned char *ab = sqlite3_column_blob(stmt, 10);
+            int abl = sqlite3_column_bytes(stmt, 10);
+            const char pre[] = HU_AUDIO_TRANSCRIPTION_PREFIX;
+            size_t pl = sizeof(pre) - 1;
+            memcpy(audio_text_buf, pre, pl);
+            size_t tn =
+                (ab && abl > 0)
+                    ? hu_imessage_extract_audio_transcription(ab, (size_t)abl, audio_text_buf + pl,
+                                                              sizeof(audio_text_buf) - pl - 1)
+                    : 0;
+            hu_log_info("imessage", NULL, "inbound audio rowid=%lld transcript=%s",
+                        (long long)rowid, tn > 0 ? "ios" : "none");
+            if (tn > 0) {
+                audio_text_buf[pl + tn] = ']';
+                audio_text_buf[pl + tn + 1] = '\0';
+                text = audio_text_buf;
             }
         }
 
@@ -5851,7 +6446,7 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
          * consumed and never re-processed. */
         if (hu_imessage_handle_excluded(handle, c->exclude_from, c->exclude_from_count)) {
             hu_log_info("imessage", NULL, "excluded handle %s; dropping silently (no reply)",
-                        handle);
+                        HU_LOG_WHO_CSTR(handle));
             c->last_rowid = rowid;
             continue;
         }
@@ -5878,8 +6473,8 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
                 int64_t now_epoch = (int64_t)time(NULL);
                 int64_t bucket = now_epoch / 86400;
                 hu_log_info("imessage", NULL,
-                            "non-allowlisted iMessage from %s; dropping (bucket=%lld)", handle,
-                            (long long)bucket);
+                            "non-allowlisted iMessage from %s; dropping (bucket=%lld)",
+                            HU_LOG_WHO_CSTR(handle), (long long)bucket);
                 bool dedup_already_replied = hu_imessage_courtesy_dedup_check(handle, bucket);
                 uint32_t aggregate_today_count = hu_imessage_courtesy_aggregate_count(bucket);
                 if (hu_imessage_should_courtesy_reply(false, dedup_already_replied,
@@ -5909,7 +6504,7 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
             if (hu_imessage_inbound_is_stale(msg_unix_ts, (int64_t)time(NULL), max_age)) {
                 hu_log_warn("imessage", NULL,
                             "dropping stale inbound rowid=%lld from %s (age=%llds > cap=%llds)",
-                            (long long)rowid, handle,
+                            (long long)rowid, HU_LOG_WHO_CSTR(handle),
                             (long long)((int64_t)time(NULL) - msg_unix_ts), (long long)max_age);
                 c->last_rowid = rowid;
                 continue;
@@ -5930,7 +6525,7 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
                                                imessage_is_ours_cb, c)) {
                 hu_log_info("imessage", NULL,
                             "skipping inbound rowid=%lld from %s: human already replied after it",
-                            (long long)rowid, handle);
+                            (long long)rowid, HU_LOG_WHO_CSTR(handle));
                 c->last_rowid = rowid;
                 continue;
             }
@@ -5946,7 +6541,14 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
         memcpy(msgs[count].content, text, text_len);
         msgs[count].content[text_len] = '\0';
         msgs[count].message_id = rowid;
-        msgs[count].is_group = (participant_count > 2);
+        /* chat.style is authoritative (43 group, 45 1:1). participant_count
+         * comes from chat_handle_join, which never lists the owner: a 1:1 has
+         * 1 handle and a 3-person group has 2, so the old `> 2` test ran every
+         * 3-person group through the DM path (DM send target, no group gate). */
+        int chat_style = sqlite3_column_type(stmt, col_chat_style) == SQLITE_NULL
+                             ? HU_IMESSAGE_CHAT_STYLE_UNKNOWN
+                             : sqlite3_column_int(stmt, col_chat_style);
+        msgs[count].is_group = hu_imessage_chat_is_group(chat_style, participant_count);
         msgs[count].has_attachment = (has_image != 0 || has_audio != 0);
         msgs[count].has_video = (has_video != 0);
         if (guid && strlen(guid) > 0) {
@@ -5979,6 +6581,11 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
                 cg_len = sizeof(msgs[count].chat_id) - 1;
             memcpy(msgs[count].chat_id, chat_guid, cg_len);
             msgs[count].chat_id[cg_len] = '\0';
+            /* Answer a 1:1 contact on the chat (and service) they wrote on. */
+            if (!msgs[count].is_group)
+                hu_imsg_route_note_inbound(
+                    handle, handle_len, msgs[count].chat_id,
+                    (const char *)sqlite3_column_text(stmt, col_msg_service));
         } else {
             msgs[count].chat_id[0] = '\0';
         }
@@ -5986,7 +6593,8 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
         c->last_rowid = rowid;
         count++;
         if (getenv("HU_DEBUG"))
-            hu_log_info("imessage", NULL, "incoming handle=%s len=%zu", handle, text_len);
+            hu_log_info("imessage", NULL, "incoming handle=%s len=%zu", HU_LOG_WHO_CSTR(handle),
+                        text_len);
     }
 
     if (step_rc != SQLITE_DONE && step_rc != SQLITE_ROW)
@@ -6064,24 +6672,14 @@ static size_t gif_json_extract(const char *json, size_t json_len, const char *ke
     }
     return 0;
 }
-#endif /* HU_IS_TEST || HU_HTTP_CURL */
 
-#if HU_IS_TEST
-size_t hu_imessage_test_gif_json_extract(const char *json, size_t json_len, const char *key,
-                                         char *out, size_t cap) {
-    return gif_json_extract(json, json_len, key, out, cap);
-}
-#endif
-
-#if !HU_IS_TEST && defined(HU_HTTP_CURL)
-#include "human/core/http.h"
-#include "human/core/json.h"
-
-char *hu_imessage_fetch_gif(hu_allocator_t *alloc, const char *query, size_t query_len,
-                            const char *api_key, size_t api_key_len) {
-    if (!alloc || !query || query_len == 0 || !api_key || api_key_len == 0)
-        return NULL;
-
+size_t hu_imessage_gif_search_url(char *out, size_t cap, const char *query, size_t query_len,
+                                  const char *api_key, size_t api_key_len) {
+    if (!out || cap == 0)
+        return 0;
+    out[0] = '\0';
+    if (!query || query_len == 0 || !api_key || api_key_len == 0)
+        return 0;
     /* URL-encode the query: spaces to +, unreserved chars verbatim, rest %XX */
     char encoded[512];
     size_t eidx = 0;
@@ -6100,13 +6698,37 @@ char *hu_imessage_fetch_gif(hu_allocator_t *alloc, const char *query, size_t que
         }
     }
     encoded[eidx] = '\0';
+    /* Klipy keeps Tenor v2's request and response shape; Tenor itself was shut
+     * down by Google on 2026-06-30. */
+    int n =
+        snprintf(out, cap, "https://api.klipy.com/v2/search?q=%s&key=%.*s&limit=1&media_filter=gif",
+                 encoded, (int)api_key_len, api_key);
+    if (n < 0 || (size_t)n >= cap) {
+        out[0] = '\0';
+        return 0;
+    }
+    return (size_t)n;
+}
+#endif /* HU_IS_TEST || HU_HTTP_CURL */
 
-    char url[512];
-    int n = snprintf(url, sizeof(url),
-                     "https://tenor.googleapis.com/v2/search?q=%s&key=%.*s"
-                     "&client_key=human_app&limit=1&media_filter=gif",
-                     encoded, (int)api_key_len, api_key);
-    if (n < 0 || (size_t)n >= sizeof(url))
+#if HU_IS_TEST
+size_t hu_imessage_test_gif_json_extract(const char *json, size_t json_len, const char *key,
+                                         char *out, size_t cap) {
+    return gif_json_extract(json, json_len, key, out, cap);
+}
+#endif
+
+#if !HU_IS_TEST && defined(HU_HTTP_CURL)
+#include "human/core/http.h"
+#include "human/core/json.h"
+
+char *hu_imessage_fetch_gif(hu_allocator_t *alloc, const char *query, size_t query_len,
+                            const char *api_key, size_t api_key_len) {
+    if (!alloc || !query || query_len == 0 || !api_key || api_key_len == 0)
+        return NULL;
+
+    char url[768];
+    if (hu_imessage_gif_search_url(url, sizeof(url), query, query_len, api_key, api_key_len) == 0)
         return NULL;
 
     hu_http_response_t resp = {0};
@@ -6523,6 +7145,17 @@ void hu_imessage_test_store_guid_text(hu_channel_t *ch, const char *guid, const 
     (void)text;
 }
 
+bool hu_imessage_test_in_echo_ring(hu_channel_t *ch, const char *text, size_t len) {
+    if (!ch || !ch->ctx || !text)
+        return false;
+    hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ch->ctx;
+    size_t want = len < HU_IMESSAGE_SENT_PREFIX_LEN - 1 ? len : HU_IMESSAGE_SENT_PREFIX_LEN - 1;
+    for (size_t i = 0; i < HU_IMESSAGE_SENT_RING_SIZE; i++)
+        if (c->sent_ring_len[i] == want && want > 0 && memcmp(c->sent_ring[i], text, want) == 0)
+            return true;
+    return false;
+}
+
 const char *hu_imessage_test_get_last_message(hu_channel_t *ch, size_t *out_len) {
     if (!ch || !ch->ctx)
         return NULL;
@@ -6581,7 +7214,7 @@ hu_error_t hu_imessage_test_handle_non_allowlisted(hu_channel_t *ch, const char 
      * regardless of whether we send a reply. Uses info-level so it does
      * not trip log-noise alerts. */
     hu_log_info("imessage", NULL, "non-allowlisted iMessage from %s; dropping (bucket=%lld)",
-                handle, (long long)bucket);
+                HU_LOG_WHO_CSTR(handle), (long long)bucket);
     bool should = hu_imessage_should_courtesy_reply(
         false, dedup_already_replied, c->courtesy_replies_enabled, aggregate_today_count);
     if (!should)
@@ -6644,5 +7277,49 @@ bool hu_imessage_test_chatdb_busy_log_emitted(hu_channel_t *ch) {
 
 void hu_imessage_set_test_send_stub(hu_imessage_test_send_stub_fn fn) {
     g_imessage_test_send_stub = fn;
+}
+
+void hu_imessage_test_last_send_route(hu_channel_t *ch, hu_imsg_send_route_t *out) {
+    if (!out)
+        return;
+    memset(out, 0, sizeof(*out));
+    if (ch && ch->ctx)
+        *out = ((hu_imessage_ctx_t *)ch->ctx)->last_send_route;
+}
+#endif
+
+#ifdef HU_ENABLE_SQLITE
+int64_t hu_imessage_my_reaction_count(int64_t message_rowid) {
+    char db_path[512];
+    int dp = hu_paths_chatdb(db_path, sizeof(db_path));
+    if (message_rowid <= 0 || dp < 0 || (size_t)dp >= sizeof(db_path))
+        return -1;
+    sqlite3 *db = NULL;
+    if (sqlite3_open_v2(db_path, &db, SQLITE_OPEN_READONLY, NULL) != SQLITE_OK) {
+        if (db)
+            sqlite3_close(db);
+        return -1;
+    }
+    sqlite3_busy_timeout(db, 3000);
+    /* associated_message_guid is "p:<part>/<guid>" (or "bp:<guid>"). */
+    const char *sql = "SELECT COUNT(*) FROM message r WHERE r.is_from_me = 1"
+                      " AND r.associated_message_type BETWEEN 2000 AND 2005"
+                      " AND r.associated_message_guid LIKE"
+                      " '%' || (SELECT guid FROM message WHERE ROWID = ?1)";
+    sqlite3_stmt *st = NULL;
+    int64_t n = -1;
+    if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) == SQLITE_OK) {
+        sqlite3_bind_int64(st, 1, (sqlite3_int64)message_rowid);
+        if (sqlite3_step(st) == SQLITE_ROW)
+            n = sqlite3_column_int64(st, 0);
+        sqlite3_finalize(st);
+    }
+    sqlite3_close(db);
+    return n;
+}
+#else
+int64_t hu_imessage_my_reaction_count(int64_t message_rowid) {
+    (void)message_rowid;
+    return -1;
 }
 #endif

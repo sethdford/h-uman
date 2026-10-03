@@ -113,10 +113,20 @@ static hu_voice_decision_t classify_with_reason(const char *response_text, size_
     if (incoming_msg && incoming_len > 0 && is_logistics(incoming_msg, incoming_len))
         RETURN_TEXT("logistics");
 
-    /* Never: response would exceed max_duration_sec (~5 chars/sec speaking rate) */
+    /* Never: response would exceed max_duration_sec. Spoken time is words at
+     * Seth's measured 155 wpm (2.6 words/s); "chars / 5" called a 70-word
+     * memo 80 s. */
     if (voice_msg_config->max_duration_sec > 0) {
-        uint32_t est_sec = (uint32_t)(response_len / 5);
-        if (est_sec > voice_msg_config->max_duration_sec)
+        size_t words = 0;
+        bool in_word = false;
+        for (size_t i = 0; i < response_len; i++) {
+            bool w =
+                response_text[i] != ' ' && response_text[i] != '\n' && response_text[i] != '\t';
+            if (w && !in_word)
+                words++;
+            in_word = w;
+        }
+        if ((double)words / 2.6 > (double)voice_msg_config->max_duration_sec)
             RETURN_TEXT("too_long");
     }
 

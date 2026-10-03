@@ -1,4 +1,5 @@
 #include "human/agent/choreography.h"
+#include "human/context/reply_fragment.h"
 #include "human/core/string.h"
 #include <ctype.h>
 #include <stdint.h>
@@ -65,7 +66,8 @@ static bool choreo_word_is_reaction(const char *w, size_t wlen) {
     return false;
 }
 
-static bool choreo_reaction_split(const char *response, size_t response_len, choreo_span_t *out_two) {
+static bool choreo_reaction_split(const char *response, size_t response_len,
+                                  choreo_span_t *out_two) {
     size_t i = 0;
     while (i < response_len && isspace((unsigned char)response[i]))
         i++;
@@ -135,6 +137,36 @@ static void choreo_merge_last_two(choreo_span_t *sp, size_t *n) {
     (*n)--;
 }
 
+/* Where a double text may break: after sentence-ending punctuation, else
+ * after a comma, whichever such boundary is nearest the middle. Returns the
+ * left segment's length (punctuation kept), 0 when there is no boundary, so
+ * the reply stays one bubble. A character midpoint split mid-clause
+ * ("nah too windy. just" | "hung out by the water", 2026-09-30). A boundary
+ * that would leave a 1-word bubble ("... by the water." | "peaceful") is not
+ * a candidate (hu_reply_cut_is_clean). */
+static size_t choreo_double_text_split(const char *r, size_t len) {
+    static const char *const tiers[] = {".!?", ","};
+    const size_t min_side = 4;
+    for (size_t t = 0; t < sizeof tiers / sizeof tiers[0]; t++) {
+        size_t best = 0, best_dist = SIZE_MAX;
+        for (size_t i = min_side; i + 1 + min_side <= len; i++) {
+            if (!strchr(tiers[t], r[i]) || !isspace((unsigned char)r[i + 1]))
+                continue;
+            size_t cut = i + 1;
+            if (!hu_reply_cut_is_clean(r, len, cut))
+                continue;
+            size_t dist = cut > len / 2 ? cut - len / 2 : len / 2 - cut;
+            if (dist < best_dist) {
+                best = cut;
+                best_dist = dist;
+            }
+        }
+        if (best > 0)
+            return best;
+    }
+    return 0;
+}
+
 static bool prob_roll(float p, uint32_t s) {
     if (p <= 0.f)
         return false;
@@ -193,15 +225,7 @@ hu_error_t hu_choreography_plan(hu_allocator_t *alloc, const char *response, siz
     bool dtext = prob_roll(config->double_text_probability, s2);
 
     if (dtext && nsp == 1 && response_len >= 40 && config->message_splitting_enabled) {
-        size_t mid = response_len / 2;
-        size_t split = mid;
-        while (split > 0 && !isspace((unsigned char)response[split]))
-            split--;
-        if (split == 0) {
-            split = mid;
-            while (split < response_len && !isspace((unsigned char)response[split]))
-                split++;
-        }
+        size_t split = choreo_double_text_split(response, response_len);
         if (split > 0 && split < response_len) {
             size_t right = split;
             while (right < response_len && isspace((unsigned char)response[right]))

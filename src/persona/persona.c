@@ -3,6 +3,7 @@
 #include "human/core/gate_mode.h"
 #include "human/core/json.h"
 #include "human/core/log.h"
+#include "human/core/log_redact.h"
 #include "human/core/paths.h"
 #include "human/core/string.h"
 #include "human/data/loader.h"
@@ -569,169 +570,7 @@ void hu_persona_deinit(hu_allocator_t *alloc, hu_persona_t *persona) {
                     persona->contacts_count * sizeof(hu_contact_profile_t));
     }
 
-    /* Cross-channel ACL */
-    if (persona->cross_channel_acl.rules) {
-        for (size_t i = 0; i < persona->cross_channel_acl.rule_count; i++) {
-            if (persona->cross_channel_acl.rules[i].allow_list) {
-                for (size_t j = 0; j < persona->cross_channel_acl.rules[i].allow_count; j++) {
-                    if (persona->cross_channel_acl.rules[i].allow_list[j]) {
-                        alloc->free(alloc->ctx, persona->cross_channel_acl.rules[i].allow_list[j],
-                                    strlen(persona->cross_channel_acl.rules[i].allow_list[j]) + 1);
-                    }
-                }
-                alloc->free(alloc->ctx, persona->cross_channel_acl.rules[i].allow_list,
-                            persona->cross_channel_acl.rules[i].allow_count * sizeof(char *));
-            }
-        }
-        alloc->free(alloc->ctx, persona->cross_channel_acl.rules,
-                    persona->cross_channel_acl.rule_count * sizeof(hu_xchan_acl_rule_t));
-    }
-
     memset(persona, 0, sizeof(*persona));
-}
-
-/* --- Safe defaults and persona initialization --- */
-
-static hu_error_t populate_safe_default_acl(hu_allocator_t *alloc, hu_xchan_acl_t *acl) {
-    if (!acl)
-        return HU_ERR_INVALID_ARGUMENT;
-
-    /* Seven default rules: one per relationship type. The pattern is:
-     * - coworker can see: coworker (same-type always allowed)
-     * - work can see: work, coworker
-     * - acquaintance can see: acquaintance, work
-     * - friend can see: friend, acquaintance, coworker (broader than work)
-     * - close_friend can see: close_friend, friend, family (deeper)
-     * - family can see: family, close_friend, partner
-     * - partner can see: partner, family (exclusive)
-     *
-     * Safe default is deny_unknown (close if trust is unclear).
-     */
-
-    acl->rule_count = 7;
-    acl->rules = alloc->alloc(alloc->ctx, 7 * sizeof(hu_xchan_acl_rule_t));
-    if (!acl->rules)
-        return HU_ERR_OUT_OF_MEMORY;
-
-    memset(acl->rules, 0, 7 * sizeof(hu_xchan_acl_rule_t));
-
-    /* Rule 0: coworker */
-    strncpy(acl->rules[0].relationship_type, "coworker", 31);
-    acl->rules[0].allow_list = alloc->alloc(alloc->ctx, sizeof(char *));
-    if (!acl->rules[0].allow_list)
-        return HU_ERR_OUT_OF_MEMORY;
-    acl->rules[0].allow_list[0] = alloc->alloc(alloc->ctx, 10);
-    if (!acl->rules[0].allow_list[0])
-        return HU_ERR_OUT_OF_MEMORY;
-    strcpy(acl->rules[0].allow_list[0], "coworker");
-    acl->rules[0].allow_count = 1;
-
-    /* Rule 1: work */
-    strncpy(acl->rules[1].relationship_type, "work", 31);
-    acl->rules[1].allow_list = alloc->alloc(alloc->ctx, 2 * sizeof(char *));
-    if (!acl->rules[1].allow_list)
-        return HU_ERR_OUT_OF_MEMORY;
-    acl->rules[1].allow_list[0] = alloc->alloc(alloc->ctx, 5);
-    acl->rules[1].allow_list[1] = alloc->alloc(alloc->ctx, 10);
-    if (!acl->rules[1].allow_list[0] || !acl->rules[1].allow_list[1])
-        return HU_ERR_OUT_OF_MEMORY;
-    strcpy(acl->rules[1].allow_list[0], "work");
-    strcpy(acl->rules[1].allow_list[1], "coworker");
-    acl->rules[1].allow_count = 2;
-
-    /* Rule 2: acquaintance */
-    strncpy(acl->rules[2].relationship_type, "acquaintance", 31);
-    acl->rules[2].allow_list = alloc->alloc(alloc->ctx, 2 * sizeof(char *));
-    if (!acl->rules[2].allow_list)
-        return HU_ERR_OUT_OF_MEMORY;
-    acl->rules[2].allow_list[0] = alloc->alloc(alloc->ctx, 13);
-    acl->rules[2].allow_list[1] = alloc->alloc(alloc->ctx, 5);
-    if (!acl->rules[2].allow_list[0] || !acl->rules[2].allow_list[1])
-        return HU_ERR_OUT_OF_MEMORY;
-    strcpy(acl->rules[2].allow_list[0], "acquaintance");
-    strcpy(acl->rules[2].allow_list[1], "work");
-    acl->rules[2].allow_count = 2;
-
-    /* Rule 3: friend */
-    strncpy(acl->rules[3].relationship_type, "friend", 31);
-    acl->rules[3].allow_list = alloc->alloc(alloc->ctx, 3 * sizeof(char *));
-    if (!acl->rules[3].allow_list)
-        return HU_ERR_OUT_OF_MEMORY;
-    acl->rules[3].allow_list[0] = alloc->alloc(alloc->ctx, 7);
-    acl->rules[3].allow_list[1] = alloc->alloc(alloc->ctx, 13);
-    acl->rules[3].allow_list[2] = alloc->alloc(alloc->ctx, 10);
-    if (!acl->rules[3].allow_list[0] || !acl->rules[3].allow_list[1] ||
-        !acl->rules[3].allow_list[2])
-        return HU_ERR_OUT_OF_MEMORY;
-    strcpy(acl->rules[3].allow_list[0], "friend");
-    strcpy(acl->rules[3].allow_list[1], "acquaintance");
-    strcpy(acl->rules[3].allow_list[2], "coworker");
-    acl->rules[3].allow_count = 3;
-
-    /* Rule 4: close_friend */
-    strncpy(acl->rules[4].relationship_type, "close_friend", 31);
-    acl->rules[4].allow_list = alloc->alloc(alloc->ctx, 3 * sizeof(char *));
-    if (!acl->rules[4].allow_list)
-        return HU_ERR_OUT_OF_MEMORY;
-    acl->rules[4].allow_list[0] = alloc->alloc(alloc->ctx, 13);
-    acl->rules[4].allow_list[1] = alloc->alloc(alloc->ctx, 7);
-    acl->rules[4].allow_list[2] = alloc->alloc(alloc->ctx, 7);
-    if (!acl->rules[4].allow_list[0] || !acl->rules[4].allow_list[1] ||
-        !acl->rules[4].allow_list[2])
-        return HU_ERR_OUT_OF_MEMORY;
-    strcpy(acl->rules[4].allow_list[0], "close_friend");
-    strcpy(acl->rules[4].allow_list[1], "friend");
-    strcpy(acl->rules[4].allow_list[2], "family");
-    acl->rules[4].allow_count = 3;
-
-    /* Rule 5: family */
-    strncpy(acl->rules[5].relationship_type, "family", 31);
-    acl->rules[5].allow_list = alloc->alloc(alloc->ctx, 3 * sizeof(char *));
-    if (!acl->rules[5].allow_list)
-        return HU_ERR_OUT_OF_MEMORY;
-    acl->rules[5].allow_list[0] = alloc->alloc(alloc->ctx, 7);
-    acl->rules[5].allow_list[1] = alloc->alloc(alloc->ctx, 13);
-    acl->rules[5].allow_list[2] = alloc->alloc(alloc->ctx, 8);
-    if (!acl->rules[5].allow_list[0] || !acl->rules[5].allow_list[1] ||
-        !acl->rules[5].allow_list[2])
-        return HU_ERR_OUT_OF_MEMORY;
-    strcpy(acl->rules[5].allow_list[0], "family");
-    strcpy(acl->rules[5].allow_list[1], "close_friend");
-    strcpy(acl->rules[5].allow_list[2], "partner");
-    acl->rules[5].allow_count = 3;
-
-    /* Rule 6: partner */
-    strncpy(acl->rules[6].relationship_type, "partner", 31);
-    acl->rules[6].allow_list = alloc->alloc(alloc->ctx, 2 * sizeof(char *));
-    if (!acl->rules[6].allow_list)
-        return HU_ERR_OUT_OF_MEMORY;
-    acl->rules[6].allow_list[0] = alloc->alloc(alloc->ctx, 8);
-    acl->rules[6].allow_list[1] = alloc->alloc(alloc->ctx, 7);
-    if (!acl->rules[6].allow_list[0] || !acl->rules[6].allow_list[1])
-        return HU_ERR_OUT_OF_MEMORY;
-    strcpy(acl->rules[6].allow_list[0], "partner");
-    strcpy(acl->rules[6].allow_list[1], "family");
-    acl->rules[6].allow_count = 2;
-
-    /* Default policy: deny_unknown (safe-default-closed) */
-    strncpy(acl->default_policy, "deny_unknown", 31);
-
-    return HU_OK;
-}
-
-void hu_persona_load_defaults(hu_persona_t *out) {
-    if (!out)
-        return;
-    memset(out, 0, sizeof(*out));
-
-    /* Use the system allocator */
-    hu_allocator_t alloc = hu_system_allocator();
-    hu_error_t err = populate_safe_default_acl(&alloc, &out->cross_channel_acl);
-    if (err != HU_OK) {
-        /* On failure, zero the ACL struct and set rule_count = 0
-         * so deinit/filter are safe. Fail-closed: zero rules → deny everything. */
-        memset(&out->cross_channel_acl, 0, sizeof(out->cross_channel_acl));
-    }
 }
 
 void hu_persona_free(hu_persona_t *persona) {
@@ -778,9 +617,8 @@ const hu_contact_profile_t *hu_persona_find_contact(const hu_persona_t *persona,
             return cp;
     }
     if (getenv("HU_DEBUG"))
-        hu_log_info("persona", NULL, "find_contact: no match for '%.*s' among %zu contacts",
-                    (int)(contact_id_len > 30 ? 30 : contact_id_len), contact_id,
-                    persona->contacts_count);
+        hu_log_info("persona", NULL, "find_contact: no match for '%s' among %zu contacts",
+                    HU_LOG_WHO(contact_id, contact_id_len), persona->contacts_count);
     return NULL;
 }
 
@@ -2647,6 +2485,11 @@ hu_error_t hu_persona_load_json(hu_allocator_t *alloc, const char *json, size_t 
                 if (rl && rl->type == HU_JSON_NUMBER && rl->data.number >= 1) {
                     double v = rl->data.number;
                     cp->reply_chars_p90 = (uint16_t)(v > 2000 ? 2000 : v);
+                }
+                hu_json_value_t *r5 = hu_json_object_get(cval, "reply_chars_p50");
+                if (r5 && r5->type == HU_JSON_NUMBER && r5->data.number >= 1) {
+                    double v = r5->data.number;
+                    cp->reply_chars_p50 = (uint16_t)(v > 2000 ? 2000 : v);
                 }
             }
 
@@ -5513,10 +5356,13 @@ static hu_error_t persona_compact_append_line(hu_allocator_t *alloc, char **buf,
 
 static hu_error_t persona_build_prompt_compact_ex(hu_allocator_t *alloc,
                                                   const hu_persona_t *persona, const char *channel,
-                                                  size_t channel_len, bool immersive, char **out,
+                                                  size_t channel_len, bool immersive,
+                                                  hu_persona_style_opts_t *opts, char **out,
                                                   size_t *out_len) {
     if (!alloc || !persona || !channel || !out || !out_len)
         return HU_ERR_INVALID_ARGUMENT;
+    if (opts)
+        opts->suppressed = 0;
     size_t cap = HU_PERSONA_PROMPT_INIT_CAP; /* 4 KB initial, doubles as needed */
     char *buf = (char *)alloc->alloc(alloc->ctx, cap);
     if (!buf)
@@ -5602,8 +5448,10 @@ static hu_error_t persona_build_prompt_compact_ex(hu_allocator_t *alloc,
             if (err != HU_OK)
                 goto fail;
         }
-        if (overlay->avg_length && overlay->avg_length[0]) {
-            n = snprintf(tmp, sizeof(tmp), "- Length: %.300s\n", overlay->avg_length);
+        char fb[1024]; /* learned-style filtered entry */
+        const char *avg = hu_persona_style_opts_filter(opts, overlay->avg_length, fb, sizeof(fb));
+        if (avg && avg[0]) {
+            n = snprintf(tmp, sizeof(tmp), "- Length: %.300s\n", avg);
             err = persona_compact_append(alloc, &buf, &len, &cap, tmp, (size_t)n);
             if (err != HU_OK)
                 goto fail;
@@ -5616,14 +5464,26 @@ static hu_error_t persona_build_prompt_compact_ex(hu_allocator_t *alloc,
         }
         size_t notes_max = overlay->style_notes_count < 4 ? overlay->style_notes_count : 4;
         for (size_t i = 0; i < notes_max; i++) {
-            if (!overlay->style_notes[i])
+            const char *note =
+                hu_persona_style_opts_filter(opts, overlay->style_notes[i], fb, sizeof(fb));
+            if (!note)
                 continue;
-            n = snprintf(tmp, sizeof(tmp), "- %.250s\n", overlay->style_notes[i]);
+            n = snprintf(tmp, sizeof(tmp), "- %.250s\n", note);
             err = persona_compact_append(alloc, &buf, &len, &cap, tmp, (size_t)n);
             if (err != HU_OK)
                 goto fail;
         }
         err = persona_compact_append_str(alloc, &buf, &len, &cap, "\n");
+        if (err != HU_OK)
+            goto fail;
+    }
+    /* 3b. Learned style line (HU_LEARNED_STYLE=live), in place of the
+     * fixed-length entries the block above just omitted. */
+    if (opts && opts->learned_line && opts->learned_line_len > 0) {
+        err = persona_compact_append(alloc, &buf, &len, &cap, opts->learned_line,
+                                     opts->learned_line_len);
+        if (err == HU_OK)
+            err = persona_compact_append_str(alloc, &buf, &len, &cap, "\n\n");
         if (err != HU_OK)
             goto fail;
     }
@@ -5636,10 +5496,13 @@ static hu_error_t persona_build_prompt_compact_ex(hu_allocator_t *alloc,
         size_t r_max =
             persona->communication_rules_count < 4 ? persona->communication_rules_count : 4;
         for (size_t i = 0; i < r_max; i++) {
-            if (!persona->communication_rules[i])
+            char fb[1024]; /* learned-style filtered entry */
+            const char *rule =
+                hu_persona_style_opts_filter(opts, persona->communication_rules[i], fb, sizeof(fb));
+            if (!rule)
                 continue;
             char tmp[512];
-            int n = snprintf(tmp, sizeof(tmp), "- %.300s\n", persona->communication_rules[i]);
+            int n = snprintf(tmp, sizeof(tmp), "- %.300s\n", rule);
             err = persona_compact_append(alloc, &buf, &len, &cap, tmp, (size_t)n);
             if (err != HU_OK)
                 goto fail;
@@ -5818,7 +5681,7 @@ fail:
 hu_error_t hu_persona_build_prompt_compact(hu_allocator_t *alloc, const hu_persona_t *persona,
                                            const char *channel, size_t channel_len, char **out,
                                            size_t *out_len) {
-    return persona_build_prompt_compact_ex(alloc, persona, channel, channel_len, false, out,
+    return persona_build_prompt_compact_ex(alloc, persona, channel, channel_len, false, NULL, out,
                                            out_len);
 }
 
@@ -5826,7 +5689,16 @@ hu_error_t hu_persona_build_prompt_compact_immersive(hu_allocator_t *alloc,
                                                      const hu_persona_t *persona,
                                                      const char *channel, size_t channel_len,
                                                      char **out, size_t *out_len) {
-    return persona_build_prompt_compact_ex(alloc, persona, channel, channel_len, true, out,
+    return persona_build_prompt_compact_ex(alloc, persona, channel, channel_len, true, NULL, out,
+                                           out_len);
+}
+
+hu_error_t hu_persona_build_prompt_compact_immersive_ex(hu_allocator_t *alloc,
+                                                        const hu_persona_t *persona,
+                                                        const char *channel, size_t channel_len,
+                                                        hu_persona_style_opts_t *opts, char **out,
+                                                        size_t *out_len) {
+    return persona_build_prompt_compact_ex(alloc, persona, channel, channel_len, true, opts, out,
                                            out_len);
 }
 

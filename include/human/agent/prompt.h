@@ -54,9 +54,16 @@ typedef struct hu_prompt_config {
     bool persona_immersive;      /* suppress AI-assistant framing for deep persona mode */
     const char *contact_context; /* per-contact profile context (from persona contacts) */
     size_t contact_context_len;
+    /* HU_LEARNED_STYLE=live rendered a learned line this turn: the immersive
+     * branch strips length-imposing sentences from contact_context
+     * (hu_learned_style_strip_contact). false = untouched. */
+    bool learned_style_live;
     const char *conversation_context; /* conversation history + awareness (from channel history) */
     size_t conversation_context_len;
-    uint32_t max_response_chars;      /* 0 = unlimited */
+    uint32_t max_response_chars; /* 0 = unlimited */
+    /* hu_length_tight_t: LEGACY (0) keeps today's "Keep it tight" at <= 80;
+     * HU_LENGTH_POLICY LIVE sets NO/YES from cap < the contact's p50. */
+    uint8_t response_limit_tight;
     const struct hu_persona *persona; /* persona struct for externalized prompt fields */
     const char *safety_rules;
     size_t safety_rules_len;

@@ -183,3 +183,6 @@ adapters/
 
 # committed CMake output once escaped the build-*/ glob by name
 bld/
+
+# Brainstorming visual-companion mockups (superpowers)
+.superpowers/

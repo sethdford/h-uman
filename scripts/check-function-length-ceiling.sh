@@ -24,7 +24,7 @@
 
 set -eu
 
-MAX_FN_BASELINE=8943    # hu_agent_turn, src/agent/agent_turn.c — hu_service_run fell below it after the 2026-09-12 housekeeping carve
+MAX_FN_BASELINE=8558    # hu_service_run, src/daemon.c — merged-tree measurement 2026-09-30 (main 8557 after #555; prospective-v2 adds 1: `rt.is_group = msgs[batch_start].is_group;` at src/daemon.c:4040, needed by LIVE's never-fire-in-a-group filter)
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -66,10 +66,17 @@ for f in files:
         if a in ("-o", "-MF", "-MT", "-MQ"): skip = True; continue
         if a == "-c" or a.endswith(".c") or a.startswith("-M"): continue
         out.append(a)
-    cmd = ["clang"] + out + ["-fsyntax-only", "-w", "-Xclang", "-ast-dump=json",
-                             "-Xclang", "-ast-dump-filter=hu_", e["file"]]
-    r = subprocess.run(cmd, capture_output=True, text=True, cwd=e["directory"])
-    dec = json.JSONDecoder(); s = r.stdout; i = 0
+    # -ast-dump-filter keeps the dump small but hides every function whose name
+    # lacks the filter string. The hu_agent_turn body is the static
+    # agent_turn_run since the 2026-09-30 carve, so it gets its own pass or the
+    # longest function in the tree would be invisible to this gate.
+    s = ""
+    for filt in ("hu_", "agent_turn_run"):
+        cmd = ["clang"] + out + ["-fsyntax-only", "-w", "-Xclang", "-ast-dump=json",
+                                 "-Xclang", "-ast-dump-filter=" + filt, e["file"]]
+        r = subprocess.run(cmd, capture_output=True, text=True, cwd=e["directory"])
+        s += r.stdout
+    dec = json.JSONDecoder(); i = 0
     base = os.path.basename(f)
     while i < len(s):
         j = s.find("{", i)

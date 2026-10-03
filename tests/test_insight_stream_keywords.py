@@ -9,6 +9,7 @@ retires the rows already written (fired=2, distinct from a real fire).
 """
 import sqlite3
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
@@ -74,10 +75,10 @@ def test_filter_keywords_drops_a_cue_already_backing_another_intention():
     assert kept == ["flight"]
 
 
-def seed(db, kw, action, fired=0):
+def seed(db, kw, action, fired=0, expires_at=0):
     db.execute("INSERT INTO prospective_memories(trigger_type,trigger_value,action,contact_id,"
-               "expires_at,fired,created_at) VALUES('keyword',?,?,?,0,?,1)",
-               (kw, action, CONTACT, fired))
+               "expires_at,fired,created_at) VALUES('keyword',?,?,?,?,?,1)",
+               (kw, action, CONTACT, expires_at, fired))
 
 
 def test_prune_retires_generic_and_duplicate_cues_with_fired_2():
@@ -111,3 +112,57 @@ def test_prune_retires_generic_and_duplicate_cues_with_fired_2():
     assert wet["orphaned"] == 4  # internship, wfh day, vacuum review, check on them
     # a second pass finds nothing more to do
     assert insight_stream.prune_pass(db, [CONTACT], write=True)["retired"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Fix round M2: prospective_pass's post-loop expire-UPDATE and "N live" count
+# must filter to trigger_type='keyword'. This pass only ever WRITES keyword
+# rows, but prospective v2 mirrors cue_kind='time' rows into the same
+# prospective_memories table. With both v2 gates OFF (HU_PROSPECTIVE /
+# HU_PROSPECTIVE_TIME unset), the unfiltered queries flipped a still-pending
+# TIME row to fired=3 and folded a not-yet-due one into this curator's
+# printed "live" count -- v2 owns time-row expiry, not this keyword-only
+# pass. targets=[] skips the LLM-driven loop entirely (hermetic, no model,
+# no network) so only the post-loop block under test runs.
+# ---------------------------------------------------------------------------
+
+class _NoopArgs:
+    write = True
+
+
+def test_prospective_pass_expire_and_live_count_are_keyword_only():
+    db = make_db([])
+    now = int(time.time())
+    # keyword, already past due -> must be retired (fired=3) and counted as expired.
+    seed(db, "taco", "ask about tacos", expires_at=now - 100)
+    # time, already past due -> must be LEFT ALONE (v2 owns time-row expiry).
+    db.execute(
+        "INSERT INTO prospective_memories(trigger_type,trigger_value,action,contact_id,"
+        "expires_at,fired,created_at) VALUES('time','','call the vet',?,?,0,0)",
+        (CONTACT, now - 100))
+    # time, not yet due -> must NOT be counted in "live" (keyword-only count).
+    db.execute(
+        "INSERT INTO prospective_memories(trigger_type,trigger_value,action,contact_id,"
+        "expires_at,fired,created_at) VALUES('time','','confirm reservation',?,?,0,0)",
+        (CONTACT, now + 100000))
+    # keyword, not yet due -> control: still counted in "live".
+    seed(db, "lasagna", "send the recipe", expires_at=now + 100000)
+    db.commit()
+
+    insight_stream.prospective_pass(db, _NoopArgs(), identity="", contacts={}, targets=[],
+                                     now_ms=now * 1000)
+
+    rows = {a: (tt, fired) for tt, a, fired in db.execute(
+        "SELECT trigger_type, action, fired FROM prospective_memories")}
+    assert rows["ask about tacos"] == ("keyword", 3)          # retired by the expire-UPDATE
+    assert rows["call the vet"] == ("time", 0)                # untouched -- NOT flipped to fired=3
+    assert rows["confirm reservation"] == ("time", 0)         # untouched, not due yet either
+    assert rows["send the recipe"] == ("keyword", 0)          # control: still pending, not due
+
+    expired = db.execute(
+        "SELECT COUNT(*) FROM prospective_memories WHERE fired=3").fetchone()[0]
+    live = db.execute(
+        "SELECT COUNT(*) FROM prospective_memories WHERE trigger_type='keyword' AND fired=0 AND "
+        "expires_at > strftime('%s','now')").fetchone()[0]
+    assert expired == 1   # only the keyword row, never the past-due time row
+    assert live == 1      # only the keyword row, never the not-yet-due time row

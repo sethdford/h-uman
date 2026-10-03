@@ -13,6 +13,7 @@
 #include "human/daemon/reactive_turn.h"
 
 #include "human/agent.h"
+#include "human/agent/contact_stage_turn.h"
 #include "human/channel.h"
 #include "human/config.h"
 #include "human/core/log.h"
@@ -58,6 +59,9 @@ void hu_daemon_reactive_context_load(hu_allocator_t *alloc, hu_agent_t *agent,
     (void)comfort_pending;
 
     hu_agent_clear_history(agent);
+    /* DEF-16: this contact's own relationship stage, before the length
+     * calibration reads it (src/agent/turn/contact_stage_turn.c). */
+    (void)hu_contact_stage_refresh(agent, batch_key, key_len);
 
     /* Set active channel for per-channel persona overlays */
     if (ch->channel->vtable->name) {
@@ -98,7 +102,9 @@ void hu_daemon_reactive_context_load(hu_allocator_t *alloc, hu_agent_t *agent,
         if (agent->session_store->vtable->load_messages(agent->session_store->ctx, alloc, batch_key,
                                                         key_len, &entries, &entry_count) == HU_OK &&
             entries && entry_count > 0) {
-            for (size_t e = 0; e < entry_count; e++) {
+            size_t first =
+                entry_count > HU_DAEMON_RESTORE_RECENT ? entry_count - HU_DAEMON_RESTORE_RECENT : 0;
+            for (size_t e = first; e < entry_count; e++) {
                 if (!entries[e].content || entries[e].content_len == 0)
                     continue;
                 hu_role_t role = HU_ROLE_USER;
@@ -476,4 +482,37 @@ void hu_daemon_reactive_context_load(hu_allocator_t *alloc, hu_agent_t *agent,
     rt->cross_channel_ctx_len = cross_channel_ctx_len;
 #endif
     rt->contact_for_tapback = contact_for_tapback;
+}
+
+void hu_daemon_agent_clear_session_scope(hu_agent_t *agent) {
+    if (!agent)
+        return;
+    agent->memory_session_id = NULL;
+    agent->memory_session_id_len = 0;
+    if (agent->memory && agent->memory->vtable) {
+        agent->memory->current_session_id = NULL;
+        agent->memory->current_session_id_len = 0;
+    }
+}
+
+void hu_daemon_reactive_turn_end(hu_agent_t *agent) {
+    if (!agent)
+        return;
+    agent->contact_context = NULL;
+    agent->contact_context_len = 0;
+    agent->conversation_context = NULL;
+    agent->conversation_context_len = 0;
+    agent->ab_history_entries = NULL;
+    agent->ab_history_count = 0;
+    agent->turn_model = NULL;
+    agent->turn_model_len = 0;
+    agent->lean_prompt = false;
+    agent->turn_temperature = 0.0;
+    agent->turn_thinking_budget = 0;
+    agent->max_response_chars = 0;
+    agent->response_limit_tight = 0;
+    agent->voice_memo_turn = false;
+    agent->history_msg_cap = 0;
+    agent->self_test_turn = false;
+    hu_daemon_agent_clear_session_scope(agent);
 }

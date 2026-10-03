@@ -2,6 +2,8 @@
 #include "human/agent/reply_prompt.h"
 #include "human/agent.h"
 #include "human/agent/hard_moment.h"
+#include "human/agent/learned_style_turn.h"
+#include "human/agent/length_policy.h"
 #include "human/agent/prompt.h"
 #include "human/agent/prompt_budget.h"
 #include "human/context/conversation.h"
@@ -10,31 +12,40 @@
 #include <stdlib.h>
 #include <string.h>
 
-uint32_t hu_reply_prompt_max_chars(const hu_reply_prompt_request_t *req) {
-    if (!req)
-        return 0;
+/* The daemon's 1:1 length decision (hu_length_policy_turn, not brief). */
+static void reply_prompt_length(const hu_reply_prompt_request_t *req,
+                                hu_length_turn_result_t *out) {
     const hu_contact_profile_t *cp =
         (req->persona && req->contact)
             ? hu_persona_find_contact(req->persona, req->contact, strlen(req->contact))
             : NULL;
-    /* daemon.c F15: max_chars starts at the channel constraint and is lowered
-     * to the relational limit when that is smaller. */
-    int rel = hu_conversation_max_response_chars_relational(req->incoming_len, cp, req->stage);
-    uint32_t max_chars = req->channel_max_chars;
-    if (rel > 0 && (max_chars == 0 || (uint32_t)rel < max_chars))
-        max_chars = (uint32_t)rel;
-    return max_chars;
+    hu_length_turn_t t = {.inbound = req->incoming,
+                          .inbound_len = req->incoming_len,
+                          .contact = cp,
+                          .stage = req->stage,
+                          .channel_max = req->channel_max_chars};
+    hu_length_policy_turn(&t, hu_length_policy_mode(), out);
+}
+
+uint32_t hu_reply_prompt_max_chars(const hu_reply_prompt_request_t *req) {
+    if (!req)
+        return 0;
+    hu_length_turn_result_t r;
+    reply_prompt_length(req, &r);
+    return r.cap;
 }
 
 /* Conversation context the daemon builds from the inbound text alone:
  * length calibration first, then the honesty check, joined like daemon.c. */
 static char *offline_conversation_context(hu_allocator_t *alloc,
                                           const hu_reply_prompt_request_t *req,
-                                          const hu_contact_profile_t *cp, size_t *out_len) {
+                                          const hu_contact_profile_t *cp,
+                                          const hu_length_turn_result_t *lim, size_t *out_len) {
     *out_len = 0;
     char cal[1024];
-    size_t cal_len = hu_conversation_calibrate_length_for_contact(
-        req->incoming, req->incoming_len, NULL, 0, false, cp, req->stage, cal, sizeof(cal));
+    size_t cal_len = hu_conversation_calibrate_length_capped(
+        req->incoming, req->incoming_len, false, cp, req->stage, lim->tight ? lim->cap : 0, cal,
+        sizeof(cal));
     char *honesty = req->incoming
                         ? hu_conversation_honesty_check(alloc, req->incoming, req->incoming_len)
                         : NULL;
@@ -84,8 +95,10 @@ hu_error_t hu_reply_prompt_render(hu_allocator_t *alloc, const hu_reply_prompt_r
 
     char *head = NULL;
     size_t head_len = 0;
-    hu_error_t err = hu_agent_build_lean_persona_head(&agent, req->incoming, req->incoming_len,
-                                                      &head, &head_len);
+    /* Lean head + HU_LEARNED_STYLE, the same helper the turn paths use. */
+    hu_learned_style_turn_t ls_turn;
+    hu_error_t err = hu_agent_build_head_learned(&agent, true, NULL, 0, req->incoming,
+                                                 req->incoming_len, &head, &head_len, &ls_turn);
     if (err != HU_OK)
         return err;
     hu_agent_apply_relationship_tone(&agent, &head, &head_len);
@@ -100,9 +113,10 @@ hu_error_t hu_reply_prompt_render(hu_allocator_t *alloc, const hu_reply_prompt_r
     size_t contact_ctx_len = 0;
     if (cp)
         (void)hu_contact_profile_build_context(alloc, cp, &contact_ctx, &contact_ctx_len);
+    hu_length_turn_result_t lim;
+    reply_prompt_length(req, &lim);
     size_t convo_len = 0;
-    char *convo = offline_conversation_context(alloc, req, cp, &convo_len);
-
+    char *convo = offline_conversation_context(alloc, req, cp, &lim, &convo_len);
     hu_prompt_config_t cfg = {
         .persona_prompt = head,
         .persona_prompt_len = head_len,
@@ -110,9 +124,11 @@ hu_error_t hu_reply_prompt_render(hu_allocator_t *alloc, const hu_reply_prompt_r
         .persona = NULL, /* lean path, as agent_stream.c */
         .contact_context = contact_ctx,
         .contact_context_len = contact_ctx_len,
+        .learned_style_live = ls_turn.live,
         .conversation_context = convo,
         .conversation_context_len = convo_len,
-        .max_response_chars = hu_reply_prompt_max_chars(req),
+        .max_response_chars = lim.cap,
+        .response_limit_tight = (uint8_t)lim.tight,
     };
     hu_prompt_field_stat_t stats[HU_PROMPT_FIELD_COUNT];
     memset(stats, 0, sizeof(stats));

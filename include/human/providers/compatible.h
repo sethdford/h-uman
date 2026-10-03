@@ -5,6 +5,7 @@
 #include "human/core/error.h"
 #include "human/core/http.h"
 #include "human/provider.h"
+#include <stdbool.h>
 #include <stddef.h>
 
 /* Whole-request cap for a loopback upstream (mlx_local → 127.0.0.1:8741).
@@ -12,6 +13,10 @@
  * contention; 120 s is far above both and far below the 600 s shared default
  * that let a half-open socket freeze the daemon on 2026-09-03. */
 #define HU_COMPATIBLE_LOCAL_TIMEOUT_SECS 120L
+
+/* Pure predicate: true when `url` names a loopback host (127.0.0.1 or
+ * localhost, http or https, the host ending at ':', '/' or the end). NULL-safe. */
+bool hu_compatible_url_is_loopback(const char *url, size_t url_len);
 
 /* Pure predicate: fill *out with the transport caps compatible_chat will use
  * for `url`. Loopback hosts (127.0.0.1 / localhost) get
@@ -21,7 +26,25 @@
 void hu_compatible_request_opts_for_url(const char *url, size_t url_len,
                                         hu_http_request_opts_t *out);
 
+/* True when `p` is an OpenAI-compatible provider whose base_url host is the
+ * loopback interface (127.0.0.1 / localhost) — a model on this machine. False
+ * for any other provider type, including wrappers around one. NULL-safe. */
+bool hu_compatible_is_loopback(const hu_provider_t *p);
+
+#if defined(HU_IS_TEST) && HU_IS_TEST
+/* Test builds only: the X-HU-Purpose / X-HU-Priority block this thread's last
+ * chat or stream_chat request carried (compatible_request_headers). */
+const char *hu_compatible_test_last_headers(void);
+#endif
+
 hu_error_t hu_compatible_create(hu_allocator_t *alloc, const char *api_key, size_t api_key_len,
                                 const char *base_url, size_t base_url_len, hu_provider_t *out);
+
+/* Called with each failed chat result. When a request carrying images or video failed
+ * with HU_ERR_NOT_SUPPORTED (the server is text-only), the provider stops claiming
+ * vision for the rest of the process and logs that once. Other results are ignored;
+ * non-compatible providers are ignored. */
+void hu_compatible_record_modality_error(hu_provider_t *p, hu_error_t err,
+                                         const hu_chat_request_t *request);
 
 #endif

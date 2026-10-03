@@ -6,7 +6,9 @@ typedef int hu_prospective_unused_;
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/log.h"
+#include "human/core/log_redact.h"
 #include "human/core/string.h"
+#include "human/memory/prospective_policy.h"
 #include <sqlite3.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -172,7 +174,6 @@ hu_error_t hu_prospective_mark_fired(sqlite3 *db, const hu_prospective_entry_t *
     sqlite3_finalize(stmt);
     return err;
 }
-#define PROSPECTIVE_RENDER_CAP 3
 
 char *hu_prospective_directive_build(hu_allocator_t *alloc, sqlite3 *db, const char *text,
                                      size_t text_len, const char *contact_id, size_t cid_len,
@@ -189,28 +190,22 @@ char *hu_prospective_directive_build(hu_allocator_t *alloc, sqlite3 *db, const c
         !entries || count == 0)
         return NULL;
 
+    /* The render lives in prospective_policy.c so the v2 SOFT directive and
+     * this legacy one share the loop; LEGACY is byte-identical to the pre-v2
+     * code (pinned by directive_build_legacy_bytes_are_pinned). */
     char buf[1024];
-    size_t pos = 0;
-    int n = snprintf(buf, sizeof(buf), "[PROSPECTIVE MEMORY: Remember to: ");
-    if (n > 0 && (size_t)n < sizeof(buf))
-        pos = (size_t)n;
-    size_t rendered = 0;
-    for (size_t i = 0; i < count && i < PROSPECTIVE_RENDER_CAP && pos < sizeof(buf) - 64; i++) {
-        if (i > 0) {
-            memcpy(buf + pos, " | ", 3);
-            pos += 3;
-        }
-        int w = snprintf(buf + pos, sizeof(buf) - pos, "%s (triggered by: %s)", entries[i].action,
-                         entries[i].trigger_value);
-        if (w <= 0 || pos + (size_t)w >= sizeof(buf))
-            break;
-        pos += (size_t)w;
-        rendered++;
+    const char *acts[HU_PROSPECTIVE_RENDER_CAP];
+    const char *cues[HU_PROSPECTIVE_RENDER_CAP];
+    size_t m = count < HU_PROSPECTIVE_RENDER_CAP ? count : HU_PROSPECTIVE_RENDER_CAP;
+    for (size_t i = 0; i < m; i++) {
+        acts[i] = entries[i].action;
+        cues[i] = entries[i].trigger_value;
     }
+    size_t pos = 0;
+    size_t rendered =
+        hu_prospective_render(HU_PM_RENDER_LEGACY, acts, cues, m, buf, sizeof(buf), &pos);
     char *out = NULL;
-    if (rendered > 0 && pos + 2 < sizeof(buf)) {
-        buf[pos++] = ']';
-        buf[pos] = '\0';
+    if (rendered > 0) {
         out = (char *)alloc->alloc(alloc->ctx, pos + 1);
         if (out) {
             memcpy(out, buf, pos + 1);
@@ -220,10 +215,10 @@ char *hu_prospective_directive_build(hu_allocator_t *alloc, sqlite3 *db, const c
             if (hu_prospective_mark_fired(db, entries, rendered) != HU_OK)
                 hu_log_warn("prospective", NULL, "could not retire %zu surfaced triggers",
                             rendered);
-            hu_log_info("prospective", NULL,
-                        "fired %zu of %zu open triggers for %.*s: %s (cue: %s)", rendered, count,
-                        (int)cid_len, contact_id ? contact_id : "", entries[0].action,
-                        entries[0].trigger_value);
+            hu_log_info("prospective", NULL, "fired %zu of %zu open triggers for %s: %s (cue: %s)",
+                        rendered, count, HU_LOG_WHO(contact_id, cid_len),
+                        HU_LOG_TEXT_CSTR(entries[0].action, 120),
+                        HU_LOG_TEXT_CSTR(entries[0].trigger_value, 120));
         }
     }
     alloc->free(alloc->ctx, entries, count * sizeof(hu_prospective_entry_t));

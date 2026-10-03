@@ -13,6 +13,7 @@
 #include "human/agent/persona_eval.h"
 #include "human/core/json.h"
 #include "human/core/log.h"
+#include "human/core/paths.h"
 #include <ctype.h>
 #include <math.h>
 #include <stdio.h>
@@ -368,9 +369,20 @@ hu_error_t hu_persona_eval_load(hu_allocator_t *alloc, const char *path,
         return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;
 
-    const char *resolved = path ? path : "/tmp/seth_speaker_id.json";
+    /* State dir first; /tmp is the legacy location (a reboot empties it). */
+    char state_path[1024];
+    const char *resolved = path;
     size_t bytes_len = 0;
-    char *bytes = read_file_all(alloc, resolved, &bytes_len);
+    char *bytes = NULL;
+    if (!resolved && hu_persona_eval_default_path(state_path, sizeof(state_path)) > 0) {
+        resolved = state_path;
+        bytes = read_file_all(alloc, resolved, &bytes_len);
+    }
+    if (!bytes) {
+        if (!path)
+            resolved = "/tmp/seth_speaker_id.json";
+        bytes = read_file_all(alloc, resolved, &bytes_len);
+    }
     if (!bytes) {
         hu_log_warn("persona_eval", NULL,
                     "model file unreadable: %s — P(Seth) scoring will "
@@ -490,4 +502,8 @@ double hu_persona_eval_score(const hu_persona_eval_model_t *m, const char *text,
 bool hu_persona_eval_is_seth(const hu_persona_eval_model_t *m, const char *text, size_t text_len,
                              double threshold) {
     return hu_persona_eval_score(m, text, text_len) >= threshold;
+}
+
+int hu_persona_eval_default_path(char *buf, size_t cap) {
+    return hu_paths_state(buf, cap, "models/seth_speaker_id.json");
 }

@@ -407,7 +407,27 @@ static void emotional_protection_holds_across_all_dimensions(void) {
     HU_ASSERT_EQ(violations, 0);
 }
 
+/* Live 2026-09-29 07:54: an 88-char reply split into two bubbles. Bubble 1
+ * drew TAPBACK (reaction only, text dropped), bubble 2 drew TAPBACK_PLUS_FLAT
+ * (a second reaction, then "What about you"). DEF-2 (2026-10-01): the same
+ * random draw swallowed whole single-bubble replies into a bare thumbs-up. The
+ * text always goes out; only the director adds a reaction, once. */
+static void test_reply_style_finalize_never_drops_text_or_reacts_twice(void) {
+    /* A drawn tapback style is plain text: the draw never decides a reaction. */
+    HU_ASSERT_EQ((int)hu_imessage_reply_style_finalize(HU_REPLY_STYLE_TAPBACK),
+                 (int)HU_REPLY_STYLE_FLAT);
+    HU_ASSERT_EQ((int)hu_imessage_reply_style_finalize(HU_REPLY_STYLE_TAPBACK_PLUS_FLAT),
+                 (int)HU_REPLY_STYLE_FLAT);
+    /* Text shapes pass through — THREADED keeps its threading (round-1 fix:
+     * a director reaction used to turn it into TAPBACK_PLUS_FLAT). */
+    HU_ASSERT_EQ((int)hu_imessage_reply_style_finalize(HU_REPLY_STYLE_THREADED),
+                 (int)HU_REPLY_STYLE_THREADED);
+    HU_ASSERT_EQ((int)hu_imessage_reply_style_finalize(HU_REPLY_STYLE_FLAT),
+                 (int)HU_REPLY_STYLE_FLAT);
+}
+
 void run_imessage_reply_style_tests(void) {
+    HU_RUN_TEST(test_reply_style_finalize_never_drops_text_or_reacts_twice);
     HU_TEST_SUITE("imessage_reply_style");
     HU_RUN_TEST(enum_values_are_stable);
     HU_RUN_TEST(fresh_low_density_scores_low_thread);

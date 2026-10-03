@@ -30,7 +30,7 @@ The homepage (`src/pages/index.astro`) is a 10-section scroll narrative.
 
 ## Rules
 
-- Font: Avenir via `var(--hu-font)`. Never import Google Fonts.
+- Fonts: Avenir via `var(--hu-font)` for UI/body; Newsreader via `var(--hu-font-display)` (Tailwind `font-display`) for display type in `data-brand="quiet"` scopes. Self-hosted only — `npm run check:fonts` fails on any Google font host in `dist/`.
 - Icons: inline Phosphor SVGs with `viewBox="0 0 256 256" fill="currentColor"`.
 - Colors: `--hu-*` CSS custom properties only. No raw hex values.
 - Spacing/radius: `--hu-space-*` and `--hu-radius-*` tokens only.

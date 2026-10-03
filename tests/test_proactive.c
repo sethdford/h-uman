@@ -23,6 +23,8 @@
 #include <string.h>
 #ifdef HU_ENABLE_SQLITE
 #include "human/memory/superhuman.h"
+#include <sqlite3.h>
+#include <stdlib.h>
 #include <time.h>
 #endif
 
@@ -295,13 +297,15 @@ static void proactive_starter_with_memory(void) {
     const char *content1 =
         "recent topics activities interests: user wanted to try that pasta recipe";
     static const char CONTACT[] = "contact_a";
-    mem.vtable->store(mem.ctx, key1, strlen(key1), content1, strlen(content1), &cat, CONTACT,
-                      sizeof(CONTACT) - 1);
+    HU_ASSERT_EQ(mem.vtable->store(mem.ctx, key1, strlen(key1), content1, strlen(content1), &cat,
+                                   CONTACT, sizeof(CONTACT) - 1),
+                 HU_OK);
 
     const char *key2 = "topic:contact_a:2";
     const char *content2 = "recent topics activities interests: new apartment move";
-    mem.vtable->store(mem.ctx, key2, strlen(key2), content2, strlen(content2), &cat, CONTACT,
-                      sizeof(CONTACT) - 1);
+    HU_ASSERT_EQ(mem.vtable->store(mem.ctx, key2, strlen(key2), content2, strlen(content2), &cat,
+                                   CONTACT, sizeof(CONTACT) - 1),
+                 HU_OK);
 
     char *out = NULL;
     size_t out_len = 0;
@@ -354,13 +358,15 @@ static void proactive_starter_skips_first_person_confession_entry(void) {
     /* Poisonous entry: a first-person confession fragment. */
     const char *key1 = "topic:contact_p24:1";
     const char *content1 = "recent topics activities interests: I confessed something terrible";
-    mem.vtable->store(mem.ctx, key1, strlen(key1), content1, strlen(content1), &cat, CONTACT,
-                      sizeof(CONTACT) - 1);
+    HU_ASSERT_EQ(mem.vtable->store(mem.ctx, key1, strlen(key1), content1, strlen(content1), &cat,
+                                   CONTACT, sizeof(CONTACT) - 1),
+                 HU_OK);
     /* Clean entry mixed in. */
     const char *key2 = "topic:contact_p24:2";
     const char *content2 = "recent topics activities interests: pasta recipe weekend";
-    mem.vtable->store(mem.ctx, key2, strlen(key2), content2, strlen(content2), &cat, CONTACT,
-                      sizeof(CONTACT) - 1);
+    HU_ASSERT_EQ(mem.vtable->store(mem.ctx, key2, strlen(key2), content2, strlen(content2), &cat,
+                                   CONTACT, sizeof(CONTACT) - 1),
+                 HU_OK);
 
     char *out = NULL;
     size_t out_len = 0;
@@ -392,8 +398,9 @@ static void proactive_starter_skips_emotion_keyword_entry(void) {
     };
     const char *key = "topic:contact_p24b:1";
     const char *content = "recent topics activities interests: feeling lonely and depressed";
-    mem.vtable->store(mem.ctx, key, strlen(key), content, strlen(content), &cat, CONTACT,
-                      sizeof(CONTACT) - 1);
+    HU_ASSERT_EQ(mem.vtable->store(mem.ctx, key, strlen(key), content, strlen(content), &cat,
+                                   CONTACT, sizeof(CONTACT) - 1),
+                 HU_OK);
 
     char *out = NULL;
     size_t out_len = 0;
@@ -615,8 +622,9 @@ static void proactive_starter_diverse_memories_produce_context(void) {
         "recent topics activities interests: house renovation project",
     };
     for (int i = 0; i < 6; i++) {
-        mem.vtable->store(mem.ctx, keys[i], strlen(keys[i]), contents[i], strlen(contents[i]), &cat,
-                          CONTACT, sizeof(CONTACT) - 1);
+        HU_ASSERT_EQ(mem.vtable->store(mem.ctx, keys[i], strlen(keys[i]), contents[i],
+                                       strlen(contents[i]), &cat, CONTACT, sizeof(CONTACT) - 1),
+                     HU_OK);
     }
 
     char *out = NULL;
@@ -718,12 +726,37 @@ static void proactive_reminder_no_trigger_without_interests(void) {
     hu_proactive_result_deinit(&result, &alloc);
 }
 
-static void proactive_important_dates_match_returns_true_and_message(void) {
-    hu_important_date_t dates[1];
-    memset(&dates[0], 0, sizeof(dates[0]));
+/* This test used to assert that a persona birthday ("happy birthday!")
+ * matched for contact "min", which is the leak it now guards against: the
+ * daemon asks once per contact, so every contact's check-in that day got the
+ * birthday line. A persona date that names no person is not a contact's. */
+static void proactive_important_dates_personless_birthday_is_no_contacts(void) {
+    hu_important_date_t dates[2];
+    memset(dates, 0, sizeof(dates));
     (void)snprintf(dates[0].date, sizeof(dates[0].date), "07-15");
     (void)snprintf(dates[0].type, sizeof(dates[0].type), "birthday");
-    (void)snprintf(dates[0].message, sizeof(dates[0].message), "happy birthday!");
+    (void)snprintf(dates[0].message, sizeof(dates[0].message), "happy birthday min!");
+    (void)snprintf(dates[1].date, sizeof(dates[1].date), "07-15");
+    (void)snprintf(dates[1].type, sizeof(dates[1].type), "anniversary");
+    (void)snprintf(dates[1].message, sizeof(dates[1].message), "happy anniversary!");
+
+    hu_persona_t persona = {0};
+    persona.important_dates = dates;
+    persona.important_dates_count = 2;
+
+    char msg_out[256] = "";
+    HU_ASSERT_FALSE(hu_proactive_check_important_dates(&persona, "min", 3, 7, 15, msg_out,
+                                                       sizeof(msg_out), NULL, 0));
+    HU_ASSERT_FALSE(hu_proactive_check_important_dates(&persona, "dana", 4, 7, 15, msg_out,
+                                                       sizeof(msg_out), NULL, 0));
+}
+
+static void proactive_important_dates_holiday_matches_any_contact(void) {
+    hu_important_date_t dates[1];
+    memset(&dates[0], 0, sizeof(dates[0]));
+    (void)snprintf(dates[0].date, sizeof(dates[0].date), "12-25");
+    (void)snprintf(dates[0].type, sizeof(dates[0].type), "holiday");
+    (void)snprintf(dates[0].message, sizeof(dates[0].message), "merry christmas!");
 
     hu_persona_t persona = {0};
     persona.important_dates = dates;
@@ -731,11 +764,11 @@ static void proactive_important_dates_match_returns_true_and_message(void) {
 
     char msg_out[256];
     char type_out[32];
-    bool ok = hu_proactive_check_important_dates(&persona, "min", 3, 7, 15, msg_out,
+    bool ok = hu_proactive_check_important_dates(&persona, "min", 3, 12, 25, msg_out,
                                                  sizeof(msg_out), type_out, sizeof(type_out));
     HU_ASSERT_TRUE(ok);
-    HU_ASSERT_STR_EQ(msg_out, "happy birthday!");
-    HU_ASSERT_STR_EQ(type_out, "birthday");
+    HU_ASSERT_STR_EQ(msg_out, "merry christmas!");
+    HU_ASSERT_STR_EQ(type_out, "holiday");
 }
 
 static void proactive_important_dates_no_match_returns_false(void) {
@@ -990,7 +1023,7 @@ static void proactive_callbacks_returns_delayed_followup(void) {
     static const char TOPIC[] = "that dinner thing";
     int64_t past = 1000000;
     HU_ASSERT_EQ(hu_superhuman_delayed_followup_schedule(&mem, &alloc, CONTACT, sizeof(CONTACT) - 1,
-                                                         TOPIC, sizeof(TOPIC) - 1, past),
+                                                         TOPIC, sizeof(TOPIC) - 1, past, NULL, 0),
                  HU_OK);
 
     char msg[512];
@@ -1035,7 +1068,7 @@ static void proactive_callbacks_ex_exposes_followup_id_and_supports_retry(void) 
     static const char TOPIC[] = "loan paperwork";
     int64_t past = 1000000;
     HU_ASSERT_EQ(hu_superhuman_delayed_followup_schedule(&mem, &alloc, CONTACT, sizeof(CONTACT) - 1,
-                                                         TOPIC, sizeof(TOPIC) - 1, past),
+                                                         TOPIC, sizeof(TOPIC) - 1, past, NULL, 0),
                  HU_OK);
 
     /* First retrieval — id is exposed. */
@@ -1070,6 +1103,70 @@ static void proactive_callbacks_ex_exposes_followup_id_and_supports_retry(void) 
     mem.vtable->deinit(mem.ctx);
 }
 
+/* Known gap 7: with HU_PROSPECTIVE_TIME=live, F31 must not raise a ledger
+ * row v2 owns (an open time twin): v2 raises it, F31 would raise it again.
+ * OFF and SHADOW are main's behavior to the byte: the earliest due
+ * follow-up, owned or not. LIVE skips the owned follow-up for the one whose
+ * twin is terminal, and with only owned rows left (a follow-up and a
+ * commitment) raises nothing. */
+static void f31_pick(hu_memory_t *mem, const char *contact, char *msg, size_t cap, int64_t *id,
+                     bool *ok) {
+    hu_allocator_t alloc = hu_system_allocator();
+    *ok = hu_proactive_check_callbacks_ex(&alloc, mem, contact, strlen(contact), 0, msg, cap, id);
+}
+
+static void proactive_callbacks_skip_v2_owned_rows_only_when_time_live(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.ctx);
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    static const char CONTACT[] = "contact_cb_gap7";
+    HU_ASSERT_EQ(hu_superhuman_delayed_followup_schedule(&mem, &alloc, CONTACT, sizeof(CONTACT) - 1,
+                                                         "loan paperwork", 14, 1000000, NULL, 0),
+                 HU_OK); /* follow-up 1, twin followup:1 open: v2's */
+    HU_ASSERT_EQ(hu_superhuman_delayed_followup_schedule(&mem, &alloc, CONTACT, sizeof(CONTACT) - 1,
+                                                         "the bike repair", 15, 1000100, NULL, 0),
+                 HU_OK); /* follow-up 2 */
+    HU_ASSERT_EQ(sqlite3_exec(db,
+                              "UPDATE prospective_memories SET status='expired', fired=3 WHERE "
+                              "trigger_value='followup:2'",
+                              NULL, NULL, NULL),
+                 SQLITE_OK); /* its twin is terminal: v2 no longer raises it */
+    static const char *const quiet[] = {NULL, "off", "shadow"};
+    char msg[512];
+    int64_t id = -999;
+    bool ok = false;
+    for (size_t i = 0; i < sizeof(quiet) / sizeof(quiet[0]); i++) {
+        if (quiet[i])
+            setenv("HU_PROSPECTIVE_TIME", quiet[i], 1);
+        else
+            unsetenv("HU_PROSPECTIVE_TIME");
+        f31_pick(&mem, CONTACT, msg, sizeof(msg), &id, &ok);
+        HU_ASSERT_TRUE(ok);
+        HU_ASSERT_STR_EQ(msg, "CALLBACK: Consider asking about: loan paperwork. Only if natural.");
+        HU_ASSERT_EQ(id, (int64_t)1);
+    }
+    setenv("HU_PROSPECTIVE_TIME", "live", 1);
+    f31_pick(&mem, CONTACT, msg, sizeof(msg), &id, &ok);
+    HU_ASSERT_TRUE(ok);
+    HU_ASSERT_STR_EQ(msg, "CALLBACK: Consider asking about: the bike repair. Only if natural.");
+    HU_ASSERT_EQ(id, (int64_t)2);
+
+    /* follow-up 2 delivered; a due commitment with an open twin remains */
+    HU_ASSERT_EQ(hu_superhuman_delayed_followup_mark_sent(&mem, 2), HU_OK);
+    HU_ASSERT_EQ(hu_superhuman_commitment_store(&mem, &alloc, CONTACT, sizeof(CONTACT) - 1,
+                                                "send the photos", 15, "me", 2, 1000200),
+                 HU_OK);
+    f31_pick(&mem, CONTACT, msg, sizeof(msg), &id, &ok);
+    HU_ASSERT_FALSE(ok); /* both rows are v2's: F31 stays silent */
+    HU_ASSERT_EQ(id, (int64_t)-1);
+    unsetenv("HU_PROSPECTIVE_TIME");
+    f31_pick(&mem, CONTACT, msg, sizeof(msg), &id, &ok);
+    HU_ASSERT_TRUE(ok); /* OFF: main's pick again */
+    HU_ASSERT_EQ(id, (int64_t)1);
+    mem.vtable->deinit(mem.ctx);
+}
+
 /* Sanity: the wrapper hu_proactive_check_callbacks still works when caller
  * doesn't care about the id (backward compat). */
 static void proactive_callbacks_wrapper_ignores_id(void) {
@@ -1078,7 +1175,7 @@ static void proactive_callbacks_wrapper_ignores_id(void) {
     HU_ASSERT_NOT_NULL(mem.ctx);
     static const char CONTACT[] = "contact_wrap";
     HU_ASSERT_EQ(hu_superhuman_delayed_followup_schedule(&mem, &alloc, CONTACT, sizeof(CONTACT) - 1,
-                                                         "t", 1, 1000000),
+                                                         "t", 1, 1000000, NULL, 0),
                  HU_OK);
     char msg[256];
     HU_ASSERT_TRUE(hu_proactive_check_callbacks(&alloc, &mem, CONTACT, sizeof(CONTACT) - 1, 0, msg,
@@ -1412,7 +1509,8 @@ void run_proactive_tests(void) {
     HU_RUN_TEST(proactive_replay_key_two_contacts_produce_different_keys);
     HU_RUN_TEST(proactive_replay_key_rejects_null_or_empty);
     HU_RUN_TEST(proactive_replay_key_rejects_too_small_buffer);
-    HU_RUN_TEST(proactive_important_dates_match_returns_true_and_message);
+    HU_RUN_TEST(proactive_important_dates_personless_birthday_is_no_contacts);
+    HU_RUN_TEST(proactive_important_dates_holiday_matches_any_contact);
     HU_RUN_TEST(proactive_important_dates_no_match_returns_false);
     HU_RUN_TEST(proactive_important_dates_empty_returns_false);
 #ifdef HU_ENABLE_SQLITE
@@ -1422,6 +1520,23 @@ void run_proactive_tests(void) {
     HU_RUN_TEST(proactive_callbacks_returns_false_without_due_items);
     HU_RUN_TEST(proactive_callbacks_ex_exposes_followup_id_and_supports_retry);
     HU_RUN_TEST(proactive_callbacks_wrapper_ignores_id);
+    {
+        /* The test sets HU_PROSPECTIVE_TIME and a failed assert longjmps past its
+         * own cleanup; restore the caller's value here so one failure can't
+         * leak "live" into every later suite. */
+        /* volatile, and no prev local: HU_RUN_TEST calls setjmp in this function,
+         * so a non-volatile local here is indeterminate after a longjmp (GCC
+         * -Wclobbered at -Os). */
+        char *volatile saved =
+            getenv("HU_PROSPECTIVE_TIME") ? strdup(getenv("HU_PROSPECTIVE_TIME")) : NULL;
+        HU_RUN_TEST(proactive_callbacks_skip_v2_owned_rows_only_when_time_live);
+        if (saved) {
+            setenv("HU_PROSPECTIVE_TIME", saved, 1);
+            free(saved);
+        } else {
+            unsetenv("HU_PROSPECTIVE_TIME");
+        }
+    }
 #endif
     HU_RUN_TEST(daemon_weather_awareness_build_directive_and_should_mention);
     HU_RUN_TEST(daemon_visual_should_share_decision);

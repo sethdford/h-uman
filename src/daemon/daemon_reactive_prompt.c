@@ -21,6 +21,7 @@
 #include "human/config.h"
 #include "human/core/gate_mode.h"
 #include "human/core/log.h"
+#include "human/core/log_redact.h"
 #include "human/core/string.h"
 #include "human/daemon/agent_facade.h"
 #include "human/daemon/context_facade.h"
@@ -29,10 +30,17 @@
 #include "human/daemon/intelligence_facade.h"
 #include "human/daemon/memory_facade.h"
 #include "human/daemon/persona_facade.h"
+#include "human/daemon/prospective.h"
+#include "human/daemon/thread_context.h"
+#ifdef HU_HAS_IMESSAGE
+#include "human/channels/imessage.h" /* hu_imessage_load_dm_history */
+#endif
 #include "human/daemon_maintenance.h"
 #include "human/humanness.h"
 #include "human/memory/opinion_challenge.h"
 #include "human/platform.h"
+#include "human/providers/local_only.h"
+#include "human/providers/reliable.h"
 #include "human/visual/content.h"
 
 #include <stdint.h>
@@ -541,13 +549,14 @@ void hu_daemon_reactive_prompt_build(hu_allocator_t *alloc, hu_agent_t *agent,
             if (db) {
                 int64_t now_ts = (int64_t)time(NULL);
 
-                /* 9. Prospective memory — cued intentions, rendered once. The
-                 * builder lives in src/memory/prospective.c so the llm_decides
-                 * path below and the tests share it. */
+                /* 9. Prospective memory — cued intentions. HU_PROSPECTIVE picks
+                 * the legacy builder (off/shadow) or the v2 fire-time check
+                 * (live); src/daemon/daemon_prospective.c. */
                 if (combined_len > 0) {
                     size_t pd_len = 0;
-                    char *pd = hu_prospective_directive_build(alloc, db, combined, combined_len,
-                                                              batch_key, key_len, now_ts, &pd_len);
+                    char *pd = hu_daemon_prospective_reactive(alloc, agent, db, batch_key, key_len,
+                                                              combined, combined_len, ctx_entries,
+                                                              ctx_count, rt->is_group, &pd_len);
                     if (pd)
                         PHASE6_APPEND(pd, pd_len);
                 }
@@ -654,10 +663,10 @@ void hu_daemon_reactive_prompt_build(hu_allocator_t *alloc, hu_agent_t *agent,
                                     if (!hold_would)
                                         continue;
                                     hu_log_info("opinion_hold", agent ? agent->observer : NULL,
-                                                "%s: inbound challenges stance [%.*s]",
+                                                "%s: inbound challenges stance [%s]",
                                                 hold_mode == HU_GATE_LIVE ? "live" : "shadow",
-                                                (int)evo_opinions[oi].topic_len,
-                                                evo_opinions[oi].topic);
+                                                HU_LOG_TEXT(evo_opinions[oi].topic,
+                                                            evo_opinions[oi].topic_len, 120));
                                     if (hold_dir && hold_len > 0)
                                         PHASE6_APPEND(hold_dir, hold_len);
                                     break; /* one hold directive max per turn */
@@ -1227,8 +1236,9 @@ void hu_daemon_reactive_prompt_build(hu_allocator_t *alloc, hu_agent_t *agent,
         sqlite3 *pdb = hu_sqlite_memory_get_db(agent->memory);
         if (pdb) {
             size_t pd_len = 0;
-            char *pd = hu_prospective_directive_build(alloc, pdb, combined, combined_len, batch_key,
-                                                      key_len, (int64_t)time(NULL), &pd_len);
+            char *pd = hu_daemon_prospective_reactive(alloc, agent, pdb, batch_key, key_len,
+                                                      combined, combined_len, ctx_entries,
+                                                      ctx_count, rt->is_group, &pd_len);
             if (pd && pd_len > 0) {
                 if (convo_ctx && convo_ctx_len > 0) {
                     size_t total = pd_len + convo_ctx_len + 2;
@@ -1254,6 +1264,45 @@ void hu_daemon_reactive_prompt_build(hu_allocator_t *alloc, hu_agent_t *agent,
         }
     }
 #endif
+
+    /* HU_THREAD_CONTEXT: the last real messages of the 1:1 iMessage thread as
+     * a "## Recent thread" block — under llm_decides the model otherwise sees
+     * only the daemon-written session store. It reads its own DM-scoped
+     * loader (hu_imessage_load_dm_history: chat.style decides) and never the
+     * shared ctx_entries, whose handle join also returns group rows. Never
+     * for a group or a cloud primary. Activation to LIVE gated on the n=40
+     * blind A/B; see docs/guides/thread-context.md. */
+    if (llm_decides && !rt->is_group) {
+        hu_gate_mode_t tc_mode = hu_thread_context_mode();
+        if (tc_mode != HU_GATE_OFF) {
+            hu_channel_history_entry_t *tc_entries = NULL;
+            size_t tc_count = 0;
+#ifdef HU_HAS_IMESSAGE
+            const hu_channel_t *tc_ch = rt->ch ? rt->ch->channel : NULL;
+            const char *tc_ch_name = (tc_ch && tc_ch->vtable && tc_ch->vtable->name)
+                                         ? tc_ch->vtable->name(tc_ch->ctx)
+                                         : NULL;
+            if (tc_ch_name && strcmp(tc_ch_name, "imessage") == 0 &&
+                hu_imessage_load_dm_history(tc_ch->ctx, alloc, batch_key, key_len, 25, &tc_entries,
+                                            &tc_count) != HU_OK) {
+                tc_entries = NULL;
+                tc_count = 0;
+            }
+#endif
+            const hu_contact_profile_t *tc_cp =
+                (agent && agent->persona)
+                    ? hu_persona_find_contact(agent->persona, batch_key, key_len)
+                    : NULL;
+            const char *tc_name = tc_cp ? tc_cp->name : NULL;
+            bool tc_local = agent && (hu_reliable_primary_is_local(&agent->provider) ||
+                                      hu_local_only_provider_is_local(&agent->provider));
+            hu_daemon_thread_context_apply(alloc, tc_mode, tc_local, tc_entries, tc_count, tc_name,
+                                           tc_name ? strlen(tc_name) : 0, combined, combined_len,
+                                           time(NULL), &convo_ctx, &convo_ctx_len, NULL);
+            if (tc_entries)
+                alloc->free(alloc->ctx, tc_entries, 25 * sizeof(hu_channel_history_entry_t));
+        }
+    }
 
     /* 3. Build awareness context from history via shared analyzer.
      * Skip in llm_decides: director + persona are sufficient. */
@@ -1321,8 +1370,7 @@ void hu_daemon_reactive_prompt_build(hu_allocator_t *alloc, hu_agent_t *agent,
                 {
                     int64_t tc_now = (int64_t)time(NULL);
                     if (hu_consolidation_should_run(&topic_consolidation_debounce, tc_now)) {
-                        hu_consolidation_config_t tc_cfg =
-                            hu_daemon_consolidation_config(config, agent);
+                        hu_consolidation_config_t tc_cfg = hu_agent_consolidation_config(config);
                         if (hu_memory_consolidate(alloc, agent->memory, &tc_cfg) == HU_OK) {
                             hu_consolidation_debounce_reset(&topic_consolidation_debounce, tc_now);
                             hu_log_info("human", agent ? agent->observer : NULL,

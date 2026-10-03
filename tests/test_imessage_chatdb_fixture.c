@@ -2,12 +2,19 @@
  * Creates an in-memory SQLite database with the iMessage schema and seed data,
  * then runs the same queries used by imessage.c to catch schema/column drift. */
 #if HU_HAS_IMESSAGE && defined(HU_ENABLE_SQLITE)
+#include "human/channel.h"
 #include "human/channels/imessage.h"
+#include "human/channels/imessage_chat_kind.h"
+#include "human/channels/imessage_send_observer.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "test_framework.h"
+#include "test_tmpdir.h"
 #include <sqlite3.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 static const char *schema_sql = "CREATE TABLE handle ("
                                 "  ROWID INTEGER PRIMARY KEY AUTOINCREMENT,"
@@ -41,7 +48,8 @@ static const char *schema_sql = "CREATE TABLE handle ("
                                 ");"
                                 "CREATE TABLE chat ("
                                 "  ROWID INTEGER PRIMARY KEY AUTOINCREMENT,"
-                                "  guid TEXT UNIQUE"
+                                "  guid TEXT UNIQUE,"
+                                "  style INTEGER"
                                 ");"
                                 "CREATE TABLE chat_message_join ("
                                 "  chat_id INTEGER,"
@@ -342,6 +350,109 @@ static void test_chatdb_history_query_returns_both_directions(void) {
     HU_ASSERT_TRUE(outbound > 0);
 
     sqlite3_finalize(stmt);
+    sqlite3_close(db);
+}
+
+/* The DM-only loader (HU_THREAD_CONTEXT) mirrors hu_imessage_chat_is_group:
+ * chat.style decides; participant count only when style is unknown. The
+ * shared loader (every other consumer) keeps its original handle join. */
+static const char *k_dm_fixture_sql =
+    "INSERT INTO handle (id) VALUES ('+15550000002');" /* handle 3 */
+    /* chat 2: style-43 group with the contact + handle 3 */
+    "INSERT INTO chat (guid, style) VALUES ('iMessage;+;chat-group-1', 43);"
+    "INSERT INTO chat_handle_join (chat_id, handle_id) VALUES (2, 1);"
+    "INSERT INTO chat_handle_join (chat_id, handle_id) VALUES (2, 3);"
+    "INSERT INTO message (guid, text, handle_id, date, is_from_me) "
+    "  VALUES ('G-1', 'group-only from contact', 1, 790000000000000000, 0);"
+    "INSERT INTO chat_message_join VALUES (2, (SELECT ROWID FROM message WHERE guid='G-1'));"
+    "INSERT INTO message (guid, text, handle_id, date, is_from_me) "
+    "  VALUES ('G-2', 'group-only from seth', 1, 790000001000000000, 1);"
+    "INSERT INTO chat_message_join VALUES (2, (SELECT ROWID FROM message WHERE guid='G-2'));"
+    /* chat 3: style-45 DM that lists TWO handles (phone + email of one person) */
+    "INSERT INTO chat (guid, style) VALUES ('iMessage;-;dm-two-handles', 45);"
+    "INSERT INTO chat_handle_join (chat_id, handle_id) VALUES (3, 1);"
+    "INSERT INTO chat_handle_join (chat_id, handle_id) VALUES (3, 3);"
+    "INSERT INTO message (guid, text, handle_id, date, is_from_me) "
+    "  VALUES ('D-45', 'dm45 two handles', 1, 790000003000000000, 0);"
+    "INSERT INTO chat_message_join VALUES (3, (SELECT ROWID FROM message WHERE guid='D-45'));"
+    /* chat 4: style-43 group whose only listed other participant is the contact */
+    "INSERT INTO chat (guid, style) VALUES ('iMessage;+;group-one-handle', 43);"
+    "INSERT INTO chat_handle_join (chat_id, handle_id) VALUES (4, 1);"
+    "INSERT INTO message (guid, text, handle_id, date, is_from_me) "
+    "  VALUES ('G-43', 'group43 one handle', 1, 790000004000000000, 0);"
+    "INSERT INTO chat_message_join VALUES (4, (SELECT ROWID FROM message WHERE guid='G-43'));"
+    /* chat 1 (style NULL, one handle) row from Seth stored with handle_id 0 */
+    "INSERT INTO message (guid, text, handle_id, date, is_from_me) "
+    "  VALUES ('D-0', 'dm reply with no handle', 0, 790000002000000000, 1);"
+    "INSERT INTO chat_message_join VALUES (1, (SELECT ROWID FROM message WHERE guid='D-0'));";
+
+static int history_rows_containing(sqlite3 *db, const char *sql, const char *needle) {
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
+        return -1;
+    sqlite3_bind_text(stmt, 1, "+15559999999", -1, NULL);
+    sqlite3_bind_int(stmt, 2, 50);
+    int hits = 0;
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        const char *t = (const char *)sqlite3_column_text(stmt, 1);
+        if (t && strstr(t, needle))
+            hits++;
+    }
+    sqlite3_finalize(stmt);
+    return hits;
+}
+
+static void test_chatdb_dm_history_style_decides(void) {
+    sqlite3 *db = open_fixture();
+    HU_ASSERT_NOT_NULL(db);
+    HU_ASSERT_EQ(sqlite3_exec(db, k_dm_fixture_sql, NULL, NULL, NULL), SQLITE_OK);
+    const char *sql = HU_IMESSAGE_SQL_DM_HISTORY;
+    HU_ASSERT_EQ(history_rows_containing(db, sql, "Hello there"), 1); /* NULL style, 1 handle */
+    HU_ASSERT_EQ(history_rows_containing(db, sql, "dm45 two handles"), 1);   /* style 45 wins */
+    HU_ASSERT_EQ(history_rows_containing(db, sql, "group43 one handle"), 0); /* style 43 wins */
+    HU_ASSERT_EQ(history_rows_containing(db, sql, "group-only"), 0);
+    HU_ASSERT_EQ(history_rows_containing(db, sql, "dm reply with no handle"), 1);
+    sqlite3_close(db);
+}
+
+/* Existing consumers are unchanged: the shared query is the pre-2026-10-01
+ * text, byte for byte, and still joins on the handle alone. */
+static void test_chatdb_shared_history_query_unchanged(void) {
+    static const char k_original[] =
+        "SELECT m.is_from_me, m.text, "
+        "  datetime(m.date/1000000000 + 978307200, 'unixepoch', 'localtime') as ts, "
+        "  (SELECT COUNT(*) FROM message_attachment_join maj "
+        "   JOIN attachment a ON maj.attachment_id = a.ROWID "
+        "   WHERE maj.message_id = m.ROWID AND a.filename IS NOT NULL "
+        "   AND (LOWER(a.filename) LIKE '%.mov' OR LOWER(a.filename) LIKE '%.mp4' "
+        "     OR LOWER(a.filename) LIKE '%.m4v')) > 0 AS has_video, "
+        "  (SELECT COUNT(*) FROM message_attachment_join maj2 "
+        "   JOIN attachment a2 ON maj2.attachment_id = a2.ROWID "
+        "   WHERE maj2.message_id = m.ROWID AND a2.filename IS NOT NULL "
+        "   AND (LOWER(a2.filename) LIKE '%.jpg' OR LOWER(a2.filename) LIKE '%.jpeg' "
+        "     OR LOWER(a2.filename) LIKE '%.png' OR LOWER(a2.filename) LIKE '%.heic' "
+        "     OR LOWER(a2.filename) LIKE '%.gif' OR LOWER(a2.filename) LIKE "
+        "'%.webp')) > 0 AS has_image, "
+        "  (SELECT COUNT(*) FROM message_attachment_join maj3 "
+        "   JOIN attachment a3 ON maj3.attachment_id = a3.ROWID "
+        "   WHERE maj3.message_id = m.ROWID AND a3.filename IS NOT NULL "
+        "   AND (LOWER(a3.filename) LIKE '%.caf' OR LOWER(a3.filename) LIKE '%.m4a' "
+        "     OR LOWER(a3.filename) LIKE '%.mp3' OR LOWER(a3.filename) LIKE '%.aac' "
+        "     OR LOWER(a3.filename) LIKE '%.opus')) > 0 AS has_audio, "
+        "  m.attributedBody, "
+        "  m.balloon_bundle_id, "
+        "  m.expressive_send_style_id "
+        "FROM message m "
+        "JOIN handle h ON m.handle_id = h.ROWID "
+        "WHERE h.id = ?1 AND m.associated_message_type = 0 "
+        "ORDER BY m.date DESC LIMIT ?2";
+    HU_ASSERT_STR_EQ(HU_IMESSAGE_SQL_HANDLE_HISTORY, k_original);
+    sqlite3 *db = open_fixture();
+    HU_ASSERT_NOT_NULL(db);
+    HU_ASSERT_EQ(sqlite3_exec(db, k_dm_fixture_sql, NULL, NULL, NULL), SQLITE_OK);
+    HU_ASSERT_EQ(history_rows_containing(db, HU_IMESSAGE_SQL_HANDLE_HISTORY, "group-only"), 2);
+    HU_ASSERT_EQ(history_rows_containing(db, HU_IMESSAGE_SQL_HANDLE_HISTORY, "dm reply with no"),
+                 0);
     sqlite3_close(db);
 }
 
@@ -669,10 +780,9 @@ static void test_chatdb_latest_sent_rowid_query(void) {
     HU_ASSERT_NOT_NULL(db);
 
     /* Same SQL as hu_imessage_get_latest_sent_rowid */
-    const char *sql =
-        "SELECT MAX(m.ROWID) FROM message m "
-        "JOIN handle h ON m.handle_id = h.ROWID "
-        "WHERE m.is_from_me = 1 AND h.id = ?1";
+    const char *sql = "SELECT MAX(m.ROWID) FROM message m "
+                      "JOIN handle h ON m.handle_id = h.ROWID "
+                      "WHERE m.is_from_me = 1 AND h.id = ?1";
 
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
@@ -688,28 +798,130 @@ static void test_chatdb_latest_sent_rowid_query(void) {
     sqlite3_close(db);
 }
 
+/* The `imsg react` fallback exits 0 without reacting (it takes a chat, not a
+ * message): on 2026-09-24 the daemon logged 12 tapbacks "ok" and chat.db held
+ * 5 outgoing reactions that day, Seth's included, so contacts got silence.
+ * The fallback now has to show a new reaction of ours on the target message. */
+static void test_chatdb_my_reaction_count_reads_the_real_db(void) {
+    char path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(path, sizeof(path), "reaction_chat.db"));
+    remove(path);
+    sqlite3 *db = NULL;
+    HU_ASSERT_EQ(sqlite3_open(path, &db), SQLITE_OK);
+    HU_ASSERT_EQ(sqlite3_exec(db, schema_sql, NULL, NULL, NULL), SQLITE_OK);
+    HU_ASSERT_EQ(sqlite3_exec(db, seed_sql, NULL, NULL, NULL), SQLITE_OK);
+    const char *prev = getenv("HU_CHATDB");
+    char saved[512] = {0};
+    if (prev)
+        snprintf(saved, sizeof(saved), "%s", prev);
+    setenv("HU_CHATDB", path, 1);
+
+    HU_ASSERT_EQ(hu_imessage_my_reaction_count(1), (int64_t)0); /* MSG-001: none yet */
+    HU_ASSERT_EQ(hu_imessage_my_reaction_count(2), (int64_t)0); /* MSG-003 is THEIR tapback */
+    HU_ASSERT_EQ(sqlite3_exec(db,
+                              "INSERT INTO message (guid, handle_id, is_from_me, "
+                              "associated_message_type, associated_message_guid) VALUES "
+                              "('MSG-900', 1, 1, 2000, 'p:0/MSG-001');",
+                              NULL, NULL, NULL),
+                 SQLITE_OK);
+    HU_ASSERT_EQ(hu_imessage_my_reaction_count(1), (int64_t)1);
+    HU_ASSERT_EQ(hu_imessage_my_reaction_count(2), (int64_t)0);
+
+    if (saved[0])
+        setenv("HU_CHATDB", saved, 1);
+    else
+        unsetenv("HU_CHATDB");
+    sqlite3_close(db);
+    remove(path);
+}
+
+/* The tapback boundary is read on the react path before any tier runs, so a
+ * locked chat.db must not stall the reaction: the read gets one open and a
+ * ~100 ms busy budget, then gives up with -1 (unknown). The shared text-send
+ * open (3 retries + 3 s busy timeout) would hold a tapback ~3.7 s. */
+static int64_t g_bnd_prior = -2;
+static int g_bnd_calls;
+static void bnd_capture(void *user, const hu_imessage_sent_event_t *ev) {
+    (void)user;
+    g_bnd_prior = ev->prior_max_rowid;
+    g_bnd_calls++;
+}
+
+static int64_t bnd_mono_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+static void test_chatdb_tapback_boundary_gives_up_fast_on_locked_db(void) {
+    char path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(path, sizeof(path), "boundary_chat.db"));
+    remove(path);
+    sqlite3 *db = NULL;
+    HU_ASSERT_EQ(sqlite3_open(path, &db), SQLITE_OK);
+    HU_ASSERT_EQ(sqlite3_exec(db, schema_sql, NULL, NULL, NULL), SQLITE_OK);
+    HU_ASSERT_EQ(sqlite3_exec(db, seed_sql, NULL, NULL, NULL), SQLITE_OK);
+    const char *prev = getenv("HU_CHATDB");
+    char saved[512] = {0};
+    if (prev)
+        snprintf(saved, sizeof(saved), "%s", prev);
+    setenv("HU_CHATDB", path, 1);
+
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_channel_t ch;
+    HU_ASSERT_EQ(hu_imessage_create(&alloc, "+15559999999", 12, NULL, 0, &ch), HU_OK);
+    hu_imessage_send_observer_set(bnd_capture, NULL);
+    g_bnd_calls = 0;
+
+    /* Unlocked: the boundary is the fixture's latest from-me ROWID (MSG-002). */
+    HU_ASSERT_EQ(ch.vtable->react(ch.ctx, "+15559999999", 12, 1, HU_REACTION_HEART), HU_OK);
+    HU_ASSERT_EQ(g_bnd_calls, 1);
+    HU_ASSERT_EQ(g_bnd_prior, (int64_t)2);
+
+    /* Locked by another writer: the read gives up within its short budget. */
+    sqlite3 *locker = NULL;
+    HU_ASSERT_EQ(sqlite3_open(path, &locker), SQLITE_OK);
+    HU_ASSERT_EQ(sqlite3_exec(locker, "BEGIN EXCLUSIVE", NULL, NULL, NULL), SQLITE_OK);
+    int64_t t0 = bnd_mono_ms();
+    HU_ASSERT_EQ(ch.vtable->react(ch.ctx, "+15559999999", 12, 1, HU_REACTION_THUMBS_UP), HU_OK);
+    int64_t elapsed = bnd_mono_ms() - t0;
+    HU_ASSERT_EQ(g_bnd_calls, 2);
+    HU_ASSERT_EQ(g_bnd_prior, (int64_t)-1);
+    HU_ASSERT_TRUE(elapsed < 1000);
+    sqlite3_exec(locker, "ROLLBACK", NULL, NULL, NULL);
+    sqlite3_close(locker);
+
+    hu_imessage_send_observer_set(NULL, NULL);
+    hu_imessage_destroy(&ch);
+    if (saved[0])
+        setenv("HU_CHATDB", saved, 1);
+    else
+        unsetenv("HU_CHATDB");
+    sqlite3_close(db);
+    remove(path);
+}
+
 static void test_chatdb_voice_msg_has_attachment_flag(void) {
     sqlite3 *db = open_fixture();
     HU_ASSERT_NOT_NULL(db);
 
     /* Verify that the poll query sets has_audio=1 for voice.caf (ROWID 6),
      * which should cause has_attachment=true in production (has_image || has_audio). */
-    const char *sql =
-        "SELECT "
-        "  (SELECT COUNT(*) FROM message_attachment_join maj3 "
-        "   JOIN attachment a3 ON maj3.attachment_id = a3.ROWID "
-        "   WHERE maj3.message_id = m.ROWID AND a3.filename IS NOT NULL "
-        "   AND (LOWER(a3.filename) LIKE '%.caf' OR LOWER(a3.filename) LIKE '%.m4a' "
-        "     OR LOWER(a3.filename) LIKE '%.mp3' OR LOWER(a3.filename) LIKE '%.aac' "
-        "     OR LOWER(a3.filename) LIKE '%.opus')) > 0 AS has_audio, "
-        "  (SELECT COUNT(*) FROM message_attachment_join maj "
-        "   JOIN attachment a ON maj.attachment_id = a.ROWID "
-        "   WHERE maj.message_id = m.ROWID AND a.filename IS NOT NULL "
-        "   AND (LOWER(a.filename) LIKE '%.jpg' OR LOWER(a.filename) LIKE '%.jpeg' "
-        "     OR LOWER(a.filename) LIKE '%.png' OR LOWER(a.filename) LIKE '%.heic' "
-        "     OR LOWER(a.filename) LIKE '%.gif' OR LOWER(a.filename) LIKE '%.webp')) "
-        "   > 0 AS has_image "
-        "FROM message m WHERE m.ROWID = 6";
+    const char *sql = "SELECT "
+                      "  (SELECT COUNT(*) FROM message_attachment_join maj3 "
+                      "   JOIN attachment a3 ON maj3.attachment_id = a3.ROWID "
+                      "   WHERE maj3.message_id = m.ROWID AND a3.filename IS NOT NULL "
+                      "   AND (LOWER(a3.filename) LIKE '%.caf' OR LOWER(a3.filename) LIKE '%.m4a' "
+                      "     OR LOWER(a3.filename) LIKE '%.mp3' OR LOWER(a3.filename) LIKE '%.aac' "
+                      "     OR LOWER(a3.filename) LIKE '%.opus')) > 0 AS has_audio, "
+                      "  (SELECT COUNT(*) FROM message_attachment_join maj "
+                      "   JOIN attachment a ON maj.attachment_id = a.ROWID "
+                      "   WHERE maj.message_id = m.ROWID AND a.filename IS NOT NULL "
+                      "   AND (LOWER(a.filename) LIKE '%.jpg' OR LOWER(a.filename) LIKE '%.jpeg' "
+                      "     OR LOWER(a.filename) LIKE '%.png' OR LOWER(a.filename) LIKE '%.heic' "
+                      "     OR LOWER(a.filename) LIKE '%.gif' OR LOWER(a.filename) LIKE '%.webp')) "
+                      "   > 0 AS has_image "
+                      "FROM message m WHERE m.ROWID = 6";
 
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
@@ -739,7 +951,8 @@ static void test_chatdb_inline_reply_guid_lookup(void) {
         "  (SELECT ROWID FROM message WHERE guid = 'MSG-REPLY'));";
     char *err = NULL;
     sqlite3_exec(db, extra, NULL, NULL, &err);
-    if (err) sqlite3_free(err);
+    if (err)
+        sqlite3_free(err);
 
     /* Look up the original message text by GUID (same pattern as
      * hu_imessage_lookup_message_by_guid) */
@@ -814,7 +1027,8 @@ static void test_chatdb_retracted_detection(void) {
         "  VALUES ('MSG-UNSEND', 'oops', 1, 700000013000000000, 0, 0, 700000013500000000);";
     char *err = NULL;
     sqlite3_exec(db, extra, NULL, NULL, &err);
-    if (err) sqlite3_free(err);
+    if (err)
+        sqlite3_free(err);
 
     const char *sql = "SELECT CASE WHEN date_retracted > 0 THEN 1 ELSE 0 END "
                       "FROM message WHERE guid = 'MSG-UNSEND'";
@@ -834,14 +1048,14 @@ static void test_chatdb_edited_detection(void) {
     HU_ASSERT_NOT_NULL(db);
 
     /* Add an edited message */
-    const char *extra =
-        "INSERT INTO message (guid, text, handle_id, date, is_from_me,"
-        "  associated_message_type, date_edited)"
-        "  VALUES ('MSG-EDIT', 'corrected text', 1, 700000014000000000, 0, 0, "
-        "700000014500000000);";
+    const char *extra = "INSERT INTO message (guid, text, handle_id, date, is_from_me,"
+                        "  associated_message_type, date_edited)"
+                        "  VALUES ('MSG-EDIT', 'corrected text', 1, 700000014000000000, 0, 0, "
+                        "700000014500000000);";
     char *err = NULL;
     sqlite3_exec(db, extra, NULL, NULL, &err);
-    if (err) sqlite3_free(err);
+    if (err)
+        sqlite3_free(err);
 
     const char *sql = "SELECT CASE WHEN date_edited > 0 THEN 1 ELSE 0 END "
                       "FROM message WHERE guid = 'MSG-EDIT'";
@@ -860,10 +1074,9 @@ static void test_chatdb_no_sent_rowid_for_unknown_handle(void) {
     sqlite3 *db = open_fixture();
     HU_ASSERT_NOT_NULL(db);
 
-    const char *sql =
-        "SELECT MAX(m.ROWID) FROM message m "
-        "JOIN handle h ON m.handle_id = h.ROWID "
-        "WHERE m.is_from_me = 1 AND h.id = ?1";
+    const char *sql = "SELECT MAX(m.ROWID) FROM message m "
+                      "JOIN handle h ON m.handle_id = h.ROWID "
+                      "WHERE m.is_from_me = 1 AND h.id = ?1";
 
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
@@ -883,39 +1096,38 @@ static void test_chatdb_optimized_poll_exists_and_inline_retract(void) {
     HU_ASSERT_NOT_NULL(db);
 
     /* Insert a retracted message to verify inline CASE detection */
-    const char *extra =
-        "INSERT INTO message (guid, text, handle_id, date, is_from_me,"
-        "  associated_message_type, date_retracted)"
-        "  VALUES ('MSG-OPT-RETRACT', 'oops', 1, 700000020000000000, 0, 0,"
-        " 700000020500000000);"
-        "INSERT INTO chat_message_join (chat_id, message_id) "
-        "  VALUES (1, (SELECT ROWID FROM message WHERE guid='MSG-OPT-RETRACT'));";
+    const char *extra = "INSERT INTO message (guid, text, handle_id, date, is_from_me,"
+                        "  associated_message_type, date_retracted)"
+                        "  VALUES ('MSG-OPT-RETRACT', 'oops', 1, 700000020000000000, 0, 0,"
+                        " 700000020500000000);"
+                        "INSERT INTO chat_message_join (chat_id, message_id) "
+                        "  VALUES (1, (SELECT ROWID FROM message WHERE guid='MSG-OPT-RETRACT'));";
     char *err = NULL;
     sqlite3_exec(db, extra, NULL, NULL, &err);
-    if (err) sqlite3_free(err);
+    if (err)
+        sqlite3_free(err);
 
     /* Optimized poll SQL: EXISTS instead of COUNT, inline retract, chat_guid, unix_ts */
-    const char *sql =
-        "SELECT m.ROWID, m.guid, m.text, h.id, "
-        "  COALESCE("
-        "    (SELECT COUNT(DISTINCT chj2.handle_id) FROM chat_message_join cmj "
-        "     JOIN chat_handle_join chj2 ON chj2.chat_id = cmj.chat_id "
-        "     WHERE cmj.message_id = m.ROWID), 0) AS participant_count, "
-        "  EXISTS (SELECT 1 FROM message_attachment_join maj "
-        "   JOIN attachment a ON maj.attachment_id = a.ROWID "
-        "   WHERE maj.message_id = m.ROWID AND a.filename IS NOT NULL "
-        "   AND LOWER(a.filename) LIKE '%.jpg') AS has_image, "
-        "  CASE WHEN m.date_edited > 0 THEN 1 ELSE 0 END AS was_edited, "
-        "  CASE WHEN m.date_retracted > 0 THEN 1 ELSE 0 END AS was_retracted, "
-        "  m.date / 1000000000 + 978307200 AS unix_ts, "
-        "  (SELECT c.guid FROM chat_message_join cmj2 "
-        "   JOIN chat c ON cmj2.chat_id = c.ROWID "
-        "   WHERE cmj2.message_id = m.ROWID LIMIT 1) AS chat_guid "
-        "FROM message m "
-        "JOIN handle h ON m.handle_id = h.ROWID "
-        "WHERE m.is_from_me = 0 AND m.associated_message_type = 0 "
-        "AND m.ROWID > 0 "
-        "ORDER BY m.ROWID ASC LIMIT 20";
+    const char *sql = "SELECT m.ROWID, m.guid, m.text, h.id, "
+                      "  COALESCE("
+                      "    (SELECT COUNT(DISTINCT chj2.handle_id) FROM chat_message_join cmj "
+                      "     JOIN chat_handle_join chj2 ON chj2.chat_id = cmj.chat_id "
+                      "     WHERE cmj.message_id = m.ROWID), 0) AS participant_count, "
+                      "  EXISTS (SELECT 1 FROM message_attachment_join maj "
+                      "   JOIN attachment a ON maj.attachment_id = a.ROWID "
+                      "   WHERE maj.message_id = m.ROWID AND a.filename IS NOT NULL "
+                      "   AND LOWER(a.filename) LIKE '%.jpg') AS has_image, "
+                      "  CASE WHEN m.date_edited > 0 THEN 1 ELSE 0 END AS was_edited, "
+                      "  CASE WHEN m.date_retracted > 0 THEN 1 ELSE 0 END AS was_retracted, "
+                      "  m.date / 1000000000 + 978307200 AS unix_ts, "
+                      "  (SELECT c.guid FROM chat_message_join cmj2 "
+                      "   JOIN chat c ON cmj2.chat_id = c.ROWID "
+                      "   WHERE cmj2.message_id = m.ROWID LIMIT 1) AS chat_guid "
+                      "FROM message m "
+                      "JOIN handle h ON m.handle_id = h.ROWID "
+                      "WHERE m.is_from_me = 0 AND m.associated_message_type = 0 "
+                      "AND m.ROWID > 0 "
+                      "ORDER BY m.ROWID ASC LIMIT 20";
 
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
@@ -988,19 +1200,19 @@ static void test_chatdb_group_chat_participant_count(void) {
         "  VALUES (2, (SELECT ROWID FROM message WHERE guid='MSG-GRP'));";
     char *err = NULL;
     sqlite3_exec(db, extra, NULL, NULL, &err);
-    if (err) sqlite3_free(err);
+    if (err)
+        sqlite3_free(err);
 
     /* Verify participant count = 3 and chat_guid populated */
-    const char *sql =
-        "SELECT "
-        "  COALESCE("
-        "    (SELECT COUNT(DISTINCT chj2.handle_id) FROM chat_message_join cmj "
-        "     JOIN chat_handle_join chj2 ON chj2.chat_id = cmj.chat_id "
-        "     WHERE cmj.message_id = m.ROWID), 0) AS participant_count, "
-        "  (SELECT c.guid FROM chat_message_join cmj2 "
-        "   JOIN chat c ON cmj2.chat_id = c.ROWID "
-        "   WHERE cmj2.message_id = m.ROWID LIMIT 1) AS chat_guid "
-        "FROM message m WHERE m.guid = 'MSG-GRP'";
+    const char *sql = "SELECT "
+                      "  COALESCE("
+                      "    (SELECT COUNT(DISTINCT chj2.handle_id) FROM chat_message_join cmj "
+                      "     JOIN chat_handle_join chj2 ON chj2.chat_id = cmj.chat_id "
+                      "     WHERE cmj.message_id = m.ROWID), 0) AS participant_count, "
+                      "  (SELECT c.guid FROM chat_message_join cmj2 "
+                      "   JOIN chat c ON cmj2.chat_id = c.ROWID "
+                      "   WHERE cmj2.message_id = m.ROWID LIMIT 1) AS chat_guid "
+                      "FROM message m WHERE m.guid = 'MSG-GRP'";
 
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
@@ -1017,12 +1229,128 @@ static void test_chatdb_group_chat_participant_count(void) {
     sqlite3_close(db);
 }
 
+/* chat_handle_join never lists the owner: a 1:1 has 1 handle, a 3-person
+ * group (owner + 2) has 2. Real chat.db (2026-09-30): all 2,286 style-45
+ * chats have exactly 1 handle; 104 style-43 groups have exactly 2. The old
+ * `participant_count > 2` test called every one of those 104 a DM. These run
+ * the production SQL fragments + classifier against a fixture chat.db. */
+static const char *chat_kind_seed =
+    "INSERT INTO handle (id) VALUES ('kind_a@test.com');" /* 3 */
+    "INSERT INTO handle (id) VALUES ('kind_b@test.com');" /* 4 */
+    "INSERT INTO handle (id) VALUES ('kind_c@test.com');" /* 5 */
+    /* chat 2: 1:1 with handle 3 */
+    "INSERT INTO chat (ROWID, guid, style) VALUES (2, 'iMessage;-;kind_a@test.com', 45);"
+    "INSERT INTO chat_handle_join (chat_id, handle_id) VALUES (2, 3);"
+    /* chat 3: 3-person group = owner + handles 3,4 */
+    "INSERT INTO chat (ROWID, guid, style) VALUES (3, 'iMessage;+;chat3person', 43);"
+    "INSERT INTO chat_handle_join (chat_id, handle_id) VALUES (3, 3);"
+    "INSERT INTO chat_handle_join (chat_id, handle_id) VALUES (3, 4);"
+    /* chat 4: 4-person group = owner + handles 3,4,5 */
+    "INSERT INTO chat (ROWID, guid, style) VALUES (4, 'iMessage;+;chat4person', 43);"
+    "INSERT INTO chat_handle_join (chat_id, handle_id) VALUES (4, 3);"
+    "INSERT INTO chat_handle_join (chat_id, handle_id) VALUES (4, 4);"
+    "INSERT INTO chat_handle_join (chat_id, handle_id) VALUES (4, 5);"
+    /* chat 5: style unknown (NULL), 2 handles -> fallback must say group */
+    "INSERT INTO chat (ROWID, guid, style) VALUES (5, 'iMessage;+;chatnostyle', NULL);"
+    "INSERT INTO chat_handle_join (chat_id, handle_id) VALUES (5, 4);"
+    "INSERT INTO chat_handle_join (chat_id, handle_id) VALUES (5, 5);"
+    "INSERT INTO message (ROWID, guid, text, handle_id, date) VALUES "
+    "  (102, 'KIND-DM', 'hi', 3, 700000040000000000),"
+    "  (103, 'KIND-G3', 'hi all', 3, 700000041000000000),"
+    "  (104, 'KIND-G4', 'hi all', 3, 700000042000000000),"
+    "  (105, 'KIND-NS', 'hi all', 4, 700000043000000000);"
+    "INSERT INTO chat_message_join (chat_id, message_id) VALUES "
+    "  (2, 102), (3, 103), (4, 104), (5, 105);";
+
+/* Returns 1 group, 0 not group, -1 on query failure. */
+static int chat_kind_is_group_for(sqlite3 *db, const char *msg_guid, int *out_handles) {
+    const char *sql =
+        "SELECT " HU_IMESSAGE_SQL_CHAT_STYLE_OF_MESSAGE ", " HU_IMESSAGE_SQL_HANDLE_COUNT_OF_MESSAGE
+        " FROM message m WHERE m.guid = ?1";
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
+        return -1;
+    sqlite3_bind_text(stmt, 1, msg_guid, -1, SQLITE_STATIC);
+    int result = -1;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        int style = sqlite3_column_type(stmt, 0) == SQLITE_NULL ? HU_IMESSAGE_CHAT_STYLE_UNKNOWN
+                                                                : sqlite3_column_int(stmt, 0);
+        int handles = sqlite3_column_int(stmt, 1);
+        if (out_handles)
+            *out_handles = handles;
+        result = hu_imessage_chat_is_group(style, handles) ? 1 : 0;
+    }
+    sqlite3_finalize(stmt);
+    return result;
+}
+
+static sqlite3 *open_chat_kind_fixture(void) {
+    sqlite3 *db = open_fixture();
+    if (!db)
+        return NULL;
+    char *err = NULL;
+    if (sqlite3_exec(db, chat_kind_seed, NULL, NULL, &err) != SQLITE_OK) {
+        sqlite3_free(err);
+        sqlite3_close(db);
+        return NULL;
+    }
+    return db;
+}
+
+static void test_chatdb_one_to_one_is_not_group(void) {
+    sqlite3 *db = open_chat_kind_fixture();
+    HU_ASSERT_NOT_NULL(db);
+    int handles = -1;
+    HU_ASSERT_EQ(chat_kind_is_group_for(db, "KIND-DM", &handles), 0);
+    HU_ASSERT_EQ(handles, 1);
+    sqlite3_close(db);
+}
+
+static void test_chatdb_three_person_group_is_group(void) {
+    sqlite3 *db = open_chat_kind_fixture();
+    HU_ASSERT_NOT_NULL(db);
+    int handles = -1;
+    HU_ASSERT_EQ(chat_kind_is_group_for(db, "KIND-G3", &handles), 1);
+    HU_ASSERT_EQ(handles, 2); /* owner excluded: 3 people, 2 handles */
+    sqlite3_close(db);
+}
+
+static void test_chatdb_four_person_group_is_group(void) {
+    sqlite3 *db = open_chat_kind_fixture();
+    HU_ASSERT_NOT_NULL(db);
+    int handles = -1;
+    HU_ASSERT_EQ(chat_kind_is_group_for(db, "KIND-G4", &handles), 1);
+    HU_ASSERT_EQ(handles, 3);
+    sqlite3_close(db);
+}
+
+static void test_chatdb_group_fallback_without_style(void) {
+    sqlite3 *db = open_chat_kind_fixture();
+    HU_ASSERT_NOT_NULL(db);
+    int handles = -1;
+    HU_ASSERT_EQ(chat_kind_is_group_for(db, "KIND-NS", &handles), 1);
+    HU_ASSERT_EQ(handles, 2);
+    sqlite3_close(db);
+}
+
+static void test_chat_kind_style_decides_over_handle_count(void) {
+    /* A known style wins even when the handle count would say otherwise. */
+    HU_ASSERT_FALSE(hu_imessage_chat_is_group(HU_IMESSAGE_CHAT_STYLE_DIRECT, 2));
+    HU_ASSERT_TRUE(hu_imessage_chat_is_group(HU_IMESSAGE_CHAT_STYLE_GROUP, 1));
+    /* Unknown style falls back to handle count (owner excluded). */
+    HU_ASSERT_FALSE(hu_imessage_chat_is_group(HU_IMESSAGE_CHAT_STYLE_UNKNOWN, 0));
+    HU_ASSERT_FALSE(hu_imessage_chat_is_group(HU_IMESSAGE_CHAT_STYLE_UNKNOWN, 1));
+    HU_ASSERT_TRUE(hu_imessage_chat_is_group(HU_IMESSAGE_CHAT_STYLE_UNKNOWN, 2));
+}
+
 void run_imessage_chatdb_fixture_tests(void) {
     HU_TEST_SUITE("iMessage ChatDB Fixture");
     HU_RUN_TEST(test_chatdb_schema_creates_successfully);
     HU_RUN_TEST(test_chatdb_poll_query_returns_inbound);
     HU_RUN_TEST(test_chatdb_tapback_query_counts_reactions);
     HU_RUN_TEST(test_chatdb_history_query_returns_both_directions);
+    HU_RUN_TEST(test_chatdb_dm_history_style_decides);
+    HU_RUN_TEST(test_chatdb_shared_history_query_unchanged);
     HU_RUN_TEST(test_chatdb_attachment_join_works);
     HU_RUN_TEST(test_chatdb_chat_guid_lookup);
     HU_RUN_TEST(test_chatdb_max_rowid);
@@ -1035,15 +1363,22 @@ void run_imessage_chatdb_fixture_tests(void) {
     HU_RUN_TEST(test_chatdb_read_receipt_query);
     HU_RUN_TEST(test_chatdb_gif_tapback_count_query);
     HU_RUN_TEST(test_chatdb_latest_sent_rowid_query);
+    HU_RUN_TEST(test_chatdb_my_reaction_count_reads_the_real_db);
     HU_RUN_TEST(test_chatdb_voice_msg_has_attachment_flag);
     HU_RUN_TEST(test_chatdb_inline_reply_guid_lookup);
     HU_RUN_TEST(test_chatdb_voice_message_coalesce_text);
     HU_RUN_TEST(test_chatdb_retracted_detection);
     HU_RUN_TEST(test_chatdb_edited_detection);
     HU_RUN_TEST(test_chatdb_no_sent_rowid_for_unknown_handle);
+    HU_RUN_TEST(test_chatdb_tapback_boundary_gives_up_fast_on_locked_db);
     HU_RUN_TEST(test_chatdb_optimized_poll_exists_and_inline_retract);
     HU_RUN_TEST(test_chatdb_unix_timestamp_conversion);
     HU_RUN_TEST(test_chatdb_group_chat_participant_count);
+    HU_RUN_TEST(test_chatdb_one_to_one_is_not_group);
+    HU_RUN_TEST(test_chatdb_three_person_group_is_group);
+    HU_RUN_TEST(test_chatdb_four_person_group_is_group);
+    HU_RUN_TEST(test_chatdb_group_fallback_without_style);
+    HU_RUN_TEST(test_chat_kind_style_decides_over_handle_count);
 }
 #else
 void run_imessage_chatdb_fixture_tests(void) {

@@ -1,4 +1,6 @@
 #include "human/config_mutator.h"
+#include "human/config.h"
+#include "human/core/arena.h"
 #include "human/core/io_secure.h"
 #include "human/core/json.h"
 #include "human/core/paths.h"
@@ -18,6 +20,7 @@ static const char *ALLOWED_EXACT[] = {
     "memory.auto_save",    "memory.consolidation_interval_hours",
     "gateway.host",        "gateway.port",
     "tunnel.provider",     "agents.defaults.model.primary",
+    "workspace",
 };
 #define N_EXACT (sizeof(ALLOWED_EXACT) / sizeof(ALLOWED_EXACT[0]))
 
@@ -28,9 +31,8 @@ static const char *ALLOWED_PREFIX[] = {
 };
 #define N_PREFIX (sizeof(ALLOWED_PREFIX) / sizeof(ALLOWED_PREFIX[0]))
 
-#define CONFIG_MAX_SIZE (1024 * 1024)
+#define CONFIG_MAX_SIZE ((size_t)1024 * 1024)
 
-#if !defined(HU_IS_TEST) || !HU_IS_TEST
 /* Split "a.b.c" into tokens. *out_tokens and *out_buf must be freed by caller. */
 static hu_error_t split_path(hu_allocator_t *alloc, const char *path, char ***out_tokens,
                              size_t *out_count, char **out_buf, size_t *out_buf_len) {
@@ -75,7 +77,7 @@ static hu_error_t split_path(hu_allocator_t *alloc, const char *path, char ***ou
         p++;
     }
     if (idx != count) {
-        alloc->free(alloc->ctx, tokens, count * sizeof(char *));
+        alloc->free(alloc->ctx, (void *)tokens, count * sizeof(char *));
         alloc->free(alloc->ctx, buf, plen + 1);
         return HU_ERR_INVALID_ARGUMENT;
     }
@@ -125,51 +127,24 @@ static hu_json_value_t *ensure_and_walk(hu_allocator_t *alloc, hu_json_value_t *
     return cur;
 }
 
-/* Write content to path, optionally via atomic rename. */
+/* Write content to path atomically (0600: config files may hold api_keys).
+ * The only config.json writer, so no path can truncate it in place or
+ * report success for a write that did not land. */
 static hu_error_t write_config_file(hu_allocator_t *alloc, const char *path, const char *content,
                                     size_t content_len) {
-    size_t tmp_len = strlen(path) + 5;
-    char *tmp_path = (char *)alloc->alloc(alloc->ctx, tmp_len);
-    if (!tmp_path)
-        return HU_ERR_OUT_OF_MEMORY;
-    int tn = snprintf(tmp_path, tmp_len, "%s.tmp", path);
-    if (tn < 0 || (size_t)tn >= tmp_len) {
-        alloc->free(alloc->ctx, tmp_path, tmp_len);
-        return HU_ERR_INVALID_ARGUMENT;
-    }
-
-    /* Config files may contain provider api_keys (see config.json
-     * schema in src/config.c). Treat as secret — 0600. The mutator
-     * writes atomically via a .tmp + rename, both targets get the
-     * same mode. */
-    FILE *f = NULL;
-    if (hu_io_secure_open(tmp_path, HU_IO_PERM_SECRET, "wb", &f) != HU_OK || !f) {
-        alloc->free(alloc->ctx, tmp_path, tmp_len);
-        return HU_ERR_IO;
-    }
-    size_t n = fwrite(content, 1, content_len, f);
-    fclose(f);
-    if (n != content_len) {
-        (void)remove(tmp_path);
-        alloc->free(alloc->ctx, tmp_path, tmp_len);
-        return HU_ERR_IO;
-    }
-    if (rename(tmp_path, path) != 0) {
-        f = NULL;
-        if (hu_io_secure_open(path, HU_IO_PERM_SECRET, "wb", &f) == HU_OK && f) {
-            (void)fwrite(content, 1, content_len, f);
-            fclose(f);
-        }
-        (void)remove(tmp_path);
-    }
-    alloc->free(alloc->ctx, tmp_path, tmp_len);
-    return HU_OK;
+    (void)alloc;
+    return hu_io_secure_write_atomic(path, HU_IO_PERM_SECRET, content, content_len);
 }
 
 /* Read config file. Returns content (caller frees), or NULL/empty on missing. */
 static hu_error_t read_config_file(hu_allocator_t *alloc, const char *path, char **out_content,
                                    size_t *out_len, bool *existed) {
-    FILE *f = fopen(path, "rb");
+    /* Only a MISSING file reads as "{}": treating an unreadable one the same
+     * way would let the next write replace the user's config with one key. */
+    FILE *f = NULL;
+    hu_error_t oerr = hu_io_secure_open_read(path, &f);
+    if (oerr != HU_OK && oerr != HU_ERR_NOT_FOUND)
+        return oerr;
     if (!f) {
         *existed = false;
         char *empty = (char *)alloc->alloc(alloc->ctx, 4);
@@ -208,7 +183,6 @@ static hu_error_t read_config_file(hu_allocator_t *alloc, const char *path, char
     *out_len = n;
     return HU_OK;
 }
-#endif
 
 static bool is_allowed_path(const char *path) {
     if (!path || !path[0])
@@ -246,25 +220,6 @@ void hu_config_mutator_free_result(hu_allocator_t *alloc, hu_mutation_result_t *
     }
 }
 
-hu_error_t hu_config_mutator_default_path(hu_allocator_t *alloc, char **out_path) {
-    if (!alloc || !out_path)
-        return HU_ERR_INVALID_ARGUMENT;
-    const char *home = getenv("HOME");
-    if (!home)
-        home = ".";
-    size_t n = strlen(home) + 20;
-    char *p = (char *)alloc->alloc(alloc->ctx, n);
-    if (!p)
-        return HU_ERR_OUT_OF_MEMORY;
-    int pn = hu_paths_state_or(p, n, ".", "config.json");
-    if (pn < 0 || (size_t)pn >= n) {
-        alloc->free(alloc->ctx, p, n);
-        return HU_ERR_INVALID_ARGUMENT;
-    }
-    *out_path = p;
-    return HU_OK;
-}
-
 bool hu_config_mutator_path_requires_restart(const char *path) {
     if (!path)
         return false;
@@ -277,100 +232,15 @@ bool hu_config_mutator_path_requires_restart(const char *path) {
     return false;
 }
 
-hu_error_t hu_config_mutator_get_path_value_json(hu_allocator_t *alloc, const char *path,
-                                                 char **out_json) {
-    if (!alloc || !path || !path[0] || !out_json)
-        return HU_ERR_INVALID_ARGUMENT;
-    if (!is_allowed_path(path))
-        return HU_ERR_PERMISSION_DENIED;
-#if defined(HU_IS_TEST)
-    /* In test mode: return null for any path to avoid file I/O */
-    char *dup = hu_strdup(alloc, "null");
-    if (!dup)
-        return HU_ERR_OUT_OF_MEMORY;
-    *out_json = dup;
-    return HU_OK;
-#else
-    char *cfg_path = NULL;
-    hu_error_t err = hu_config_mutator_default_path(alloc, &cfg_path);
-    if (err != HU_OK)
-        return err;
-
-    char *content = NULL;
-    size_t content_len = 0;
-    bool existed = false;
-    err = read_config_file(alloc, cfg_path, &content, &content_len, &existed);
-    alloc->free(alloc->ctx, cfg_path, strlen(cfg_path) + 1);
-    if (err != HU_OK)
-        return err;
-
-    hu_json_value_t *root = NULL;
-    err = hu_json_parse(alloc, content, content_len, &root);
-    alloc->free(alloc->ctx, content, content_len + 1);
-    if (err != HU_OK)
-        return err;
-
-    if (root->type != HU_JSON_OBJECT) {
-        hu_json_free(alloc, root);
-        root = hu_json_object_new(alloc);
-        if (!root)
-            return HU_ERR_OUT_OF_MEMORY;
-    }
-
-    char **tokens = NULL;
-    size_t token_count = 0;
-    char *tok_buf = NULL;
-    size_t tok_buf_len = 0;
-    err = split_path(alloc, path, &tokens, &token_count, &tok_buf, &tok_buf_len);
-    if (err != HU_OK) {
-        hu_json_free(alloc, root);
-        return err;
-    }
-
-    hu_json_value_t *val = value_at_path(root, tokens, token_count);
-
-    char *json_str = NULL;
-    size_t json_len = 0;
-    if (val) {
-        err = hu_json_stringify(alloc, val, &json_str, &json_len);
-        if (err != HU_OK) {
-            alloc->free(alloc->ctx, tokens, token_count * sizeof(char *));
-            alloc->free(alloc->ctx, tok_buf, tok_buf_len);
-            hu_json_free(alloc, root);
-            return err;
-        }
-    } else {
-        json_str = hu_strdup(alloc, "null");
-        if (!json_str) {
-            alloc->free(alloc->ctx, tokens, token_count * sizeof(char *));
-            alloc->free(alloc->ctx, tok_buf, tok_buf_len);
-            hu_json_free(alloc, root);
-            return HU_ERR_OUT_OF_MEMORY;
-        }
-    }
-
-    alloc->free(alloc->ctx, tokens, token_count * sizeof(char *));
-    alloc->free(alloc->ctx, tok_buf, tok_buf_len);
-    hu_json_free(alloc, root);
-
-    *out_json = json_str;
-    return HU_OK;
-#endif
-}
-
-hu_error_t hu_config_mutator_mutate(hu_allocator_t *alloc, hu_mutation_action_t action,
-                                    const char *path, const char *value_raw,
-                                    hu_mutation_options_t options, hu_mutation_result_t *out) {
-    if (!alloc || !path || !out)
-        return HU_ERR_INVALID_ARGUMENT;
-
-    /* Trim path */
+/* Trim `path`, check it against the allowlist, and require a value for SET.
+ * On success *out_trimmed is a heap copy the caller frees (strlen + 1). */
+static hu_error_t prepare_path(hu_allocator_t *alloc, hu_mutation_action_t action, const char *path,
+                               const char *value_raw, char **out_trimmed) {
     while (*path == ' ' || *path == '\t')
         path++;
     size_t plen = strlen(path);
     while (plen > 0 && (path[plen - 1] == ' ' || path[plen - 1] == '\t'))
         plen--;
-
     if (plen == 0)
         return HU_ERR_INVALID_ARGUMENT;
     char *trimmed = (char *)alloc->alloc(alloc->ctx, plen + 1);
@@ -378,248 +248,265 @@ hu_error_t hu_config_mutator_mutate(hu_allocator_t *alloc, hu_mutation_action_t 
         return HU_ERR_OUT_OF_MEMORY;
     memcpy(trimmed, path, plen);
     trimmed[plen] = '\0';
-
     if (!is_allowed_path(trimmed)) {
         alloc->free(alloc->ctx, trimmed, plen + 1);
         return HU_ERR_PERMISSION_DENIED;
     }
-
     if (action == HU_MUTATION_SET && (!value_raw || !value_raw[0])) {
         alloc->free(alloc->ctx, trimmed, plen + 1);
         return HU_ERR_INVALID_ARGUMENT;
     }
-
-#if defined(HU_IS_TEST)
-    /* Stub: no file write in test */
-    out->path = trimmed;
-    out->changed = true;
-    out->applied = options.apply;
-    out->requires_restart = hu_config_mutator_path_requires_restart(trimmed);
-    out->old_value_json = hu_strdup(alloc, "null");
-    out->new_value_json = value_raw ? hu_strdup(alloc, value_raw) : hu_strdup(alloc, "null");
-    out->backup_path = NULL;
-    if (!out->old_value_json || !out->new_value_json) {
-        hu_config_mutator_free_result(alloc, out);
-        return HU_ERR_OUT_OF_MEMORY;
-    }
+    *out_trimmed = trimmed;
     return HU_OK;
-#else
-    char *cfg_path = NULL;
-    hu_error_t err = hu_config_mutator_default_path(alloc, &cfg_path);
-    if (err != HU_OK) {
-        alloc->free(alloc->ctx, trimmed, plen + 1);
-        return err;
-    }
+}
 
-    char *content = NULL;
-    size_t content_len = 0;
-    bool existed = false;
-    err = read_config_file(alloc, cfg_path, &content, &content_len, &existed);
-    if (err != HU_OK) {
-        alloc->free(alloc->ctx, cfg_path, strlen(cfg_path) + 1);
-        alloc->free(alloc->ctx, trimmed, plen + 1);
-        return err;
-    }
+static void free_str(hu_allocator_t *alloc, char *s) {
+    if (s)
+        alloc->free(alloc->ctx, s, strlen(s) + 1);
+}
 
-    hu_json_value_t *root = NULL;
-    err = hu_json_parse(alloc, content, content_len, &root);
-    if (err != HU_OK) {
-        alloc->free(alloc->ctx, content, content_len + 1);
-        alloc->free(alloc->ctx, cfg_path, strlen(cfg_path) + 1);
-        alloc->free(alloc->ctx, trimmed, plen + 1);
-        return err;
-    }
-
-    if (root->type != HU_JSON_OBJECT) {
-        hu_json_free(alloc, root);
-        root = hu_json_object_new(alloc);
-        if (!root) {
-            alloc->free(alloc->ctx, content, content_len + 1);
-            alloc->free(alloc->ctx, cfg_path, strlen(cfg_path) + 1);
-            alloc->free(alloc->ctx, trimmed, plen + 1);
-            return HU_ERR_OUT_OF_MEMORY;
-        }
-    }
-
+hu_error_t hu_config_mutator_build_patch(hu_allocator_t *alloc, const char *path,
+                                         const char *value_json, char **out, size_t *out_len) {
+    if (!alloc || !path || !value_json || !out || !out_len)
+        return HU_ERR_INVALID_ARGUMENT;
     char **tokens = NULL;
-    size_t token_count = 0;
+    size_t count = 0;
     char *tok_buf = NULL;
     size_t tok_buf_len = 0;
-    err = split_path(alloc, trimmed, &tokens, &token_count, &tok_buf, &tok_buf_len);
-    if (err != HU_OK) {
-        hu_json_free(alloc, root);
-        alloc->free(alloc->ctx, content, content_len + 1);
-        alloc->free(alloc->ctx, cfg_path, strlen(cfg_path) + 1);
-        alloc->free(alloc->ctx, trimmed, plen + 1);
+    hu_error_t err = split_path(alloc, path, &tokens, &count, &tok_buf, &tok_buf_len);
+    if (err != HU_OK)
         return err;
+    hu_json_value_t *root = hu_json_object_new(alloc);
+    hu_json_value_t *value = NULL;
+    if (!root) {
+        err = HU_ERR_OUT_OF_MEMORY;
+        goto done;
     }
+    err = hu_json_parse(alloc, value_json, strlen(value_json), &value);
+    if (err != HU_OK)
+        goto done;
+    hu_json_value_t *parent = ensure_and_walk(alloc, root, tokens, count);
+    if (!parent) {
+        err = HU_ERR_OUT_OF_MEMORY;
+        goto done;
+    }
+    err = hu_json_object_set(alloc, parent, tokens[count - 1], value);
+    if (err != HU_OK)
+        goto done;
+    value = NULL; /* owned by root */
+    err = hu_json_stringify(alloc, root, out, out_len);
+done:
+    if (value)
+        hu_json_free(alloc, value);
+    if (root)
+        hu_json_free(alloc, root);
+    alloc->free(alloc->ctx, (void *)tokens, count * sizeof(char *));
+    alloc->free(alloc->ctx, tok_buf, tok_buf_len);
+    return err;
+}
+
+/* A write must be a document the parser accepts: `doc` is parsed over the
+ * default config, and its keys and value types pass the strict document
+ * check. For a single-key mutation `doc` is the patch, not the whole file, so
+ * keys already in the file cannot block an unrelated edit. Whole-config
+ * judgments (provider, memory backend) are deliberately not applied: they
+ * would be passed on the scratch config's defaults, not on what was written,
+ * and a minimal build's default backend failed them for every write. */
+static hu_error_t validate_config_doc(hu_allocator_t *alloc, const char *doc, size_t doc_len) {
+    hu_json_value_t *root = NULL;
+    hu_error_t err = hu_json_parse(alloc, doc, doc_len, &root);
+    if (err != HU_OK)
+        return HU_ERR_INVALID_ARGUMENT;
+    if (root->type != HU_JSON_OBJECT) {
+        hu_json_free(alloc, root);
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+    hu_arena_t *arena = hu_arena_create(*alloc);
+    if (!arena) {
+        hu_json_free(alloc, root);
+        return HU_ERR_OUT_OF_MEMORY;
+    }
+    hu_config_t scratch;
+    memset(&scratch, 0, sizeof(scratch));
+    hu_allocator_t arena_alloc = hu_arena_allocator(arena);
+    hu_config_apply_defaults(&scratch, &arena_alloc);
+    scratch.arena = arena;
+    scratch.allocator = arena_alloc;
+    err = hu_config_parse_json(&scratch, doc, doc_len);
+    if (err == HU_OK)
+        err = hu_config_validate_document(root, true);
+    hu_config_deinit(&scratch);
+    hu_json_free(alloc, root);
+    return err == HU_OK ? HU_OK : HU_ERR_INVALID_ARGUMENT;
+}
+
+/* Copy the file's current bytes to "<path>.bak" (0600). Best effort: a
+ * missing backup does not block the write, and *out_backup stays NULL. */
+static void backup_config(hu_allocator_t *alloc, const char *cfg_path, const char *content,
+                          size_t content_len, char **out_backup) {
+    size_t bak_len = strlen(cfg_path) + 5;
+    char *backup_path = (char *)alloc->alloc(alloc->ctx, bak_len);
+    if (!backup_path)
+        return;
+    int n = snprintf(backup_path, bak_len, "%s.bak", cfg_path);
+    FILE *bak = NULL;
+    if (n < 0 || (size_t)n >= bak_len ||
+        hu_io_secure_open(backup_path, HU_IO_PERM_SECRET, "wb", &bak) != HU_OK || !bak) {
+        alloc->free(alloc->ctx, backup_path, bak_len);
+        return;
+    }
+    bool ok = fwrite(content, 1, content_len, bak) == content_len;
+    ok = (fclose(bak) == 0) && ok;
+    if (!ok) {
+        alloc->free(alloc->ctx, backup_path, bak_len);
+        return;
+    }
+    *out_backup = backup_path;
+}
+
+hu_error_t hu_config_mutator_mutate_at(hu_allocator_t *alloc, const char *cfg_path,
+                                       hu_mutation_action_t action, const char *path,
+                                       const char *value_raw, hu_mutation_options_t options,
+                                       hu_mutation_result_t *out) {
+    if (!alloc || !cfg_path || !cfg_path[0] || !path || !out)
+        return HU_ERR_INVALID_ARGUMENT;
+    char *trimmed = NULL;
+    hu_error_t err = prepare_path(alloc, action, path, value_raw, &trimmed);
+    if (err != HU_OK)
+        return err;
+
+    char *content = NULL, *old_json = NULL, *new_json = NULL, *rendered = NULL, *patch = NULL;
+    char *backup_path = NULL, *tok_buf = NULL;
+    size_t content_len = 0, tok_buf_len = 0, token_count = 0, len = 0;
+    char **tokens = NULL;
+    hu_json_value_t *root = NULL;
+    bool existed = false;
+
+    err = read_config_file(alloc, cfg_path, &content, &content_len, &existed);
+    if (err != HU_OK)
+        goto done;
+    /* An unparseable existing file is refused, never silently replaced by "{}"
+     * plus one key: that would erase everything the user had. */
+    err = hu_json_parse(alloc, content, content_len, &root);
+    if (err != HU_OK || root->type != HU_JSON_OBJECT) {
+        err = HU_ERR_INVALID_ARGUMENT;
+        goto done;
+    }
+    err = split_path(alloc, trimmed, &tokens, &token_count, &tok_buf, &tok_buf_len);
+    if (err != HU_OK)
+        goto done;
 
     hu_json_value_t *old_val = value_at_path(root, tokens, token_count);
-    char *old_value_json = NULL;
-    size_t old_len = 0;
-    if (old_val) {
-        err = hu_json_stringify(alloc, old_val, &old_value_json, &old_len);
-    } else {
-        old_value_json = hu_strdup(alloc, "null");
-    }
-    if (!old_value_json) {
-        alloc->free(alloc->ctx, tokens, token_count * sizeof(char *));
-        alloc->free(alloc->ctx, tok_buf, tok_buf_len);
-        hu_json_free(alloc, root);
-        alloc->free(alloc->ctx, content, content_len + 1);
-        alloc->free(alloc->ctx, cfg_path, strlen(cfg_path) + 1);
-        alloc->free(alloc->ctx, trimmed, plen + 1);
-        return HU_ERR_OUT_OF_MEMORY;
+    if (old_val)
+        err = hu_json_stringify(alloc, old_val, &old_json, &len);
+    else
+        old_json = hu_strdup(alloc, "null");
+    if (err != HU_OK || !old_json) {
+        err = err != HU_OK ? err : HU_ERR_OUT_OF_MEMORY;
+        goto done;
     }
 
     if (action == HU_MUTATION_SET) {
-        hu_json_value_t *parsed_val = NULL;
-        hu_error_t parse_err = hu_json_parse(alloc, value_raw, strlen(value_raw), &parsed_val);
-        if (parse_err != HU_OK) {
-            parsed_val = hu_json_string_new(alloc, value_raw, strlen(value_raw));
-        }
-        if (!parsed_val) {
-            alloc->free(alloc->ctx, old_value_json, strlen(old_value_json) + 1);
-            alloc->free(alloc->ctx, tokens, token_count * sizeof(char *));
-            alloc->free(alloc->ctx, tok_buf, tok_buf_len);
-            hu_json_free(alloc, root);
-            alloc->free(alloc->ctx, content, content_len + 1);
-            alloc->free(alloc->ctx, cfg_path, strlen(cfg_path) + 1);
-            alloc->free(alloc->ctx, trimmed, plen + 1);
-            return HU_ERR_OUT_OF_MEMORY;
-        }
-        hu_json_value_t *parent = ensure_and_walk(alloc, root, tokens, token_count);
+        /* value_raw is JSON; anything that does not parse is taken as a string. */
+        hu_json_value_t *val = NULL;
+        if (hu_json_parse(alloc, value_raw, strlen(value_raw), &val) != HU_OK)
+            val = hu_json_string_new(alloc, value_raw, strlen(value_raw));
+        hu_json_value_t *parent = val ? ensure_and_walk(alloc, root, tokens, token_count) : NULL;
         if (!parent || parent->type != HU_JSON_OBJECT) {
-            hu_json_free(alloc, parsed_val);
-            alloc->free(alloc->ctx, old_value_json, strlen(old_value_json) + 1);
-            alloc->free(alloc->ctx, tokens, token_count * sizeof(char *));
-            alloc->free(alloc->ctx, tok_buf, tok_buf_len);
-            hu_json_free(alloc, root);
-            alloc->free(alloc->ctx, content, content_len + 1);
-            alloc->free(alloc->ctx, cfg_path, strlen(cfg_path) + 1);
-            alloc->free(alloc->ctx, trimmed, plen + 1);
-            return HU_ERR_OUT_OF_MEMORY;
+            if (val)
+                hu_json_free(alloc, val);
+            err = val ? HU_ERR_INVALID_ARGUMENT : HU_ERR_OUT_OF_MEMORY;
+            goto done;
         }
-        err = hu_json_object_set(alloc, parent, tokens[token_count - 1], parsed_val);
+        err = hu_json_object_set(alloc, parent, tokens[token_count - 1], val);
         if (err != HU_OK) {
-            hu_json_free(alloc, parsed_val);
-            alloc->free(alloc->ctx, old_value_json, strlen(old_value_json) + 1);
-            alloc->free(alloc->ctx, tokens, token_count * sizeof(char *));
-            alloc->free(alloc->ctx, tok_buf, tok_buf_len);
-            hu_json_free(alloc, root);
-            alloc->free(alloc->ctx, content, content_len + 1);
-            alloc->free(alloc->ctx, cfg_path, strlen(cfg_path) + 1);
-            alloc->free(alloc->ctx, trimmed, plen + 1);
-            return err;
+            hu_json_free(alloc, val);
+            goto done;
         }
     } else {
         hu_json_value_t *parent =
             (token_count == 1) ? root : value_at_path(root, tokens, token_count - 1);
-        if (parent && parent->type == HU_JSON_OBJECT) {
+        if (parent && parent->type == HU_JSON_OBJECT)
             (void)hu_json_object_remove(alloc, parent, tokens[token_count - 1]);
-        }
     }
 
     hu_json_value_t *new_val = value_at_path(root, tokens, token_count);
-    char *new_value_json = NULL;
-    size_t new_len = 0;
-    if (new_val) {
-        err = hu_json_stringify(alloc, new_val, &new_value_json, &new_len);
-    } else {
-        new_value_json = hu_strdup(alloc, "null");
-    }
-    if (!new_value_json) {
-        alloc->free(alloc->ctx, old_value_json, strlen(old_value_json) + 1);
-        alloc->free(alloc->ctx, tokens, token_count * sizeof(char *));
-        alloc->free(alloc->ctx, tok_buf, tok_buf_len);
-        hu_json_free(alloc, root);
-        alloc->free(alloc->ctx, content, content_len + 1);
-        alloc->free(alloc->ctx, cfg_path, strlen(cfg_path) + 1);
-        alloc->free(alloc->ctx, trimmed, plen + 1);
-        return HU_ERR_OUT_OF_MEMORY;
+    if (new_val)
+        err = hu_json_stringify(alloc, new_val, &new_json, &len);
+    else
+        new_json = hu_strdup(alloc, "null");
+    if (err != HU_OK || !new_json) {
+        err = err != HU_OK ? err : HU_ERR_OUT_OF_MEMORY;
+        goto done;
     }
 
-    bool changed = (strcmp(old_value_json, new_value_json) != 0);
-    char *backup_path = NULL;
+    if (action == HU_MUTATION_SET) {
+        size_t patch_len = 0;
+        err = hu_config_mutator_build_patch(alloc, trimmed, new_json, &patch, &patch_len);
+        if (err == HU_OK)
+            err = validate_config_doc(alloc, patch, patch_len);
+        if (err != HU_OK)
+            goto done;
+    }
 
+    bool changed = strcmp(old_json, new_json) != 0;
     if (options.apply && changed) {
-        char *rendered = NULL;
         size_t rendered_len = 0;
         err = hu_json_stringify(alloc, root, &rendered, &rendered_len);
         if (err != HU_OK || !rendered) {
-            alloc->free(alloc->ctx, old_value_json, strlen(old_value_json) + 1);
-            alloc->free(alloc->ctx, new_value_json, strlen(new_value_json) + 1);
-            alloc->free(alloc->ctx, tokens, token_count * sizeof(char *));
-            alloc->free(alloc->ctx, tok_buf, tok_buf_len);
-            hu_json_free(alloc, root);
-            alloc->free(alloc->ctx, content, content_len + 1);
-            alloc->free(alloc->ctx, cfg_path, strlen(cfg_path) + 1);
-            alloc->free(alloc->ctx, trimmed, plen + 1);
-            return err;
+            err = err != HU_OK ? err : HU_ERR_OUT_OF_MEMORY;
+            goto done;
         }
-        size_t rn = rendered_len > 0 ? rendered_len : strlen(rendered);
-        if (rn == 0 || rendered[rn - 1] != '\n') {
-            char *with_nl = (char *)alloc->alloc(alloc->ctx, rn + 2);
-            if (with_nl) {
-                memcpy(with_nl, rendered, rn);
-                with_nl[rn] = '\n';
-                with_nl[rn + 1] = '\0';
-                alloc->free(alloc->ctx, rendered, rn + 1);
-                rendered = with_nl;
-                rn++;
-            }
-        }
-        if (existed) {
-            size_t bak_len = strlen(cfg_path) + 5;
-            backup_path = (char *)alloc->alloc(alloc->ctx, bak_len);
-            if (backup_path) {
-                int bkn = snprintf(backup_path, bak_len, "%s.bak", cfg_path);
-                if (bkn < 0 || (size_t)bkn >= bak_len) {
-                    alloc->free(alloc->ctx, backup_path, bak_len);
-                    backup_path = NULL;
-                } else {
-                    /* Config backup — must match the original's
-                     * 0600 mode so a backup doesn't accidentally
-                     * become world-readable. */
-                    FILE *bak = NULL;
-                    if (hu_io_secure_open(backup_path, HU_IO_PERM_SECRET, "wb", &bak) == HU_OK &&
-                        bak) {
-                        (void)fwrite(content, 1, content_len, bak);
-                        fclose(bak);
-                    }
-                }
-            }
-        }
-        err = write_config_file(alloc, cfg_path, rendered, rn);
-        alloc->free(alloc->ctx, rendered, strlen(rendered) + 1);
-        if (err != HU_OK) {
-            alloc->free(alloc->ctx, old_value_json, strlen(old_value_json) + 1);
-            alloc->free(alloc->ctx, new_value_json, strlen(new_value_json) + 1);
-            if (backup_path)
-                alloc->free(alloc->ctx, backup_path, strlen(backup_path) + 1);
-            alloc->free(alloc->ctx, tokens, token_count * sizeof(char *));
-            alloc->free(alloc->ctx, tok_buf, tok_buf_len);
-            hu_json_free(alloc, root);
-            alloc->free(alloc->ctx, content, content_len + 1);
-            alloc->free(alloc->ctx, cfg_path, strlen(cfg_path) + 1);
-            alloc->free(alloc->ctx, trimmed, plen + 1);
-            return err;
-        }
+        if (existed)
+            backup_config(alloc, cfg_path, content, content_len, &backup_path);
+        err = write_config_file(alloc, cfg_path, rendered, strlen(rendered));
+        if (err != HU_OK)
+            goto done;
     }
-
-    alloc->free(alloc->ctx, tokens, token_count * sizeof(char *));
-    alloc->free(alloc->ctx, tok_buf, tok_buf_len);
-    hu_json_free(alloc, root);
-    alloc->free(alloc->ctx, content, content_len + 1);
-    alloc->free(alloc->ctx, cfg_path, strlen(cfg_path) + 1);
 
     out->path = trimmed;
     out->changed = changed;
     out->applied = options.apply && changed;
     out->requires_restart = hu_config_mutator_path_requires_restart(trimmed);
-    out->old_value_json = old_value_json;
-    out->new_value_json = new_value_json;
+    out->old_value_json = old_json;
+    out->new_value_json = new_json;
     out->backup_path = backup_path;
-    return HU_OK;
-#endif
+    trimmed = old_json = new_json = backup_path = NULL; /* owned by *out */
+
+done:
+    free_str(alloc, trimmed);
+    free_str(alloc, old_json);
+    free_str(alloc, new_json);
+    free_str(alloc, backup_path);
+    free_str(alloc, rendered);
+    free_str(alloc, patch);
+    if (content)
+        alloc->free(alloc->ctx, content, content_len + 1);
+    if (tokens)
+        alloc->free(alloc->ctx, (void *)tokens, token_count * sizeof(char *));
+    if (tok_buf)
+        alloc->free(alloc->ctx, tok_buf, tok_buf_len);
+    if (root)
+        hu_json_free(alloc, root);
+    return err;
+}
+
+hu_error_t hu_config_mutator_replace_at(hu_allocator_t *alloc, const char *cfg_path,
+                                        const char *raw, size_t raw_len) {
+    if (!alloc || !cfg_path || !cfg_path[0] || !raw || raw_len == 0 || raw_len > CONFIG_MAX_SIZE)
+        return HU_ERR_INVALID_ARGUMENT;
+    hu_error_t err = validate_config_doc(alloc, raw, raw_len);
+    if (err != HU_OK)
+        return err;
+    char *content = NULL, *backup_path = NULL;
+    size_t content_len = 0;
+    bool existed = false;
+    if (read_config_file(alloc, cfg_path, &content, &content_len, &existed) == HU_OK) {
+        if (existed)
+            backup_config(alloc, cfg_path, content, content_len, &backup_path);
+        alloc->free(alloc->ctx, content, content_len + 1);
+    }
+    free_str(alloc, backup_path);
+    /* Verbatim: the caller's document is what lands, byte for byte. */
+    return write_config_file(alloc, cfg_path, raw, raw_len);
 }

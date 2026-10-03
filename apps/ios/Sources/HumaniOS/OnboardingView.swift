@@ -23,7 +23,8 @@ struct OnboardingView: View {
 
     private let pages: [(String, String, String)] = [
         ("sparkles", "Welcome to h-uman", "Your autonomous AI assistant runtime. Minimal footprint, maximum capability."),
-        ("bolt.fill", "Lightning Fast", "~1696 KB binary, <6 MB RAM, <30 ms startup. Zero dependencies beyond libc."),
+        // fp-template: ("bolt.fill", "Lightning Fast", "{{binary_mb}} binary, {{idle_rss_bound}} RAM, {{startup_bound}} startup. Zero dependencies beyond libc."),
+        ("bolt.fill", "Lightning Fast", "~3 MB binary, <9 MB RAM, <6 ms startup. Zero dependencies beyond libc."),
         ("bubble.left.and.bubble.right.fill", "34 Channels", "Connect Telegram, Discord, Slack, email, and 30 more messaging platforms."),
     ]
 

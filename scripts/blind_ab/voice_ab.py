@@ -54,8 +54,13 @@ AXES = {
     "model": ("sonic-3.6", "sonic-3"),
     "speed": ("0.85", "0.95"),
     "prep": ("on", "off"),
+    # Ferni (voiceai's production voice, FERNI_VOICE_ID) vs the persona's own
+    # clone. Not in the default rotation: it answers "is it the voice or the
+    # delivery?", and the question it asks is about a real person, not "you".
+    "voice": ("ferni", "clone"),
 }
 AXIS_ORDER = ("model", "speed", "prep")
+VOICE_IDS = {"ferni": "fdeb5d75-4f2e-4224-9e98-6aa6aa1188bc"}
 MAX_ASKS = 3
 REASK_AFTER_SECS = 24 * 3600
 
@@ -88,7 +93,7 @@ def usable_texts(lines, lo=60, hi=220):
     return out
 
 
-def plan_pairs(texts, n_pairs, seed):
+def plan_pairs(texts, n_pairs, seed, axes=AXIS_ORDER):
     """Deterministic plan: axes round-robin, one text per pair, side assignment
     by seeded RNG so neither variant is always 'A'. Returns (pairs, key)."""
     rng = random.Random(seed)
@@ -96,7 +101,7 @@ def plan_pairs(texts, n_pairs, seed):
     rng.shuffle(texts)
     pairs, key = [], {}
     for i in range(n_pairs):
-        axis = AXIS_ORDER[i % len(AXIS_ORDER)]
+        axis = axes[i % len(axes)]
         v1, v2 = AXES[axis]
         text = texts[i % len(texts)]
         first_is_v1 = rng.random() < 0.5
@@ -119,12 +124,16 @@ def preview_argv(human_bin, persona, text, axis, variant, out_path):
         argv += ["--speed", variant]
     elif axis == "prep" and variant == "off":
         argv += ["--raw"]
+    elif axis == "voice" and variant in VOICE_IDS:
+        argv += ["--voice", VOICE_IDS[variant]]
     return argv
 
 
 def compose_question(pair, answered, total):
+    ask = ("Which sounds more like a real person talking?" if pair.get("axis") == "voice"
+           else "Which sounds more like you?")
     return (f"[h-uman voice {answered + 1}/{total}] two clips follow, A then B. "
-            f"Same words, one difference. Which sounds more like you?\n"
+            f"Same words, one difference. {ask}\n"
             f"reply A or B (optionally + 1-5 confidence, e.g. \"B 4\")")
 
 
@@ -143,7 +152,8 @@ def score_sheet(pairs, key):
     """Per axis: how often variant 1 (the candidate) beat variant 2.
     Returns {axis: {"v1","v2","n","v1_wins","p","ci","verdict"}}."""
     out = {}
-    for axis in AXIS_ORDER:
+    extra = [a for a in AXES if a not in AXIS_ORDER and any(p["axis"] == a for p in pairs)]
+    for axis in list(AXIS_ORDER) + extra:
         v1, v2 = AXES[axis]
         n = wins = 0
         for p in pairs:
@@ -250,7 +260,12 @@ def cmd_gen(a):
     if len(texts) < a.pairs:
         print(f"only {len(texts)} usable texts for {a.pairs} pairs", file=sys.stderr)
         return 1
-    pairs, key = plan_pairs(texts, a.pairs, a.seed)
+    axes = tuple(x.strip() for x in a.axes.split(",")) if a.axes else AXIS_ORDER
+    unknown = [x for x in axes if x not in AXES]
+    if unknown:
+        print(f"unknown axes: {unknown}; known: {sorted(AXES)}", file=sys.stderr)
+        return 1
+    pairs, key = plan_pairs(texts, a.pairs, a.seed, axes)
     hb = human_bin()
     for p in pairs:
         for side in ("A", "B"):
@@ -370,6 +385,7 @@ def main(argv=None):
     g.add_argument("--pairs", type=int, default=12)
     g.add_argument("--seed", type=int, default=7)
     g.add_argument("--persona", default="seth")
+    g.add_argument("--axes", default="", help="comma list, e.g. voice (default: model,speed,prep)")
     g.add_argument("--corpus", default=CORPUS)
     g.add_argument("--dry-run", action="store_true")
     t = sub.add_parser("tick")

@@ -224,10 +224,13 @@ typedef enum hu_certainty_level {
     HU_GENUINELY_UNSURE,
 } hu_certainty_level_t;
 
-/* Classify how certain the system should present itself based on
- * the query complexity and domain. */
-hu_certainty_level_t hu_certainty_classify(const char *msg, size_t msg_len, bool has_memory_context,
-                                           uint32_t tool_results_count);
+/* How certain the reply should present itself, from learned signals only:
+ * HU_UNCERTAIN when the agent's recent self-assessed confidence
+ * (hu_metacog_trajectory_confidence) is below HU_SELF_UNCERTAINTY_THRESHOLD
+ * AND this turn's retrieval found nothing relevant (`retrieval_relevant`:
+ * memory recall that survived Self-RAG verification, or graph grounding — NOT
+ * the always-present core-memory block). HU_CERTAIN (no directive) otherwise. */
+hu_certainty_level_t hu_certainty_classify(bool retrieval_relevant, float self_confidence);
 
 /* Build a prompt directive that instructs the model to express genuine
  * uncertainty — not hedging, but authentic "I'm not sure about this." */

@@ -25,13 +25,52 @@
 extern "C" {
 #endif
 
+/* Entity-casing axis (2026-09-22). The specificity gate's `proper` class was
+ * failing 0.08 vs 0.27 per reply at matched length; the cause is not missing
+ * facts — at matched length the daemon names 229 insider entities against the
+ * persona's 252 (91%, parity) — but CASING: the persona capitalizes an entity
+ * mention 26.6% of the time (67/252) and the served adapter 3.1% (7/229), an
+ * 8.6x deficit. The tell is unnatural CONSISTENCY (97/3 lowercase vs the
+ * persona's 73/27), the same defect shape action C already fixes for sentence
+ * starts, on a different axis.
+ *
+ * PER-TOKEN rates, not one global rate: the persona capitalizes "Vanguard"
+ * far more often than "tampa", so a single rate applied uniformly would
+ * capitalize the wrong words — closing the metric while introducing a new
+ * divergence. The table therefore doubles as an ALLOWLIST: a token the
+ * persona never capitalizes is never in it and is never touched.
+ *
+ * Bounded and POD on purpose: hu_style_card_resolve() takes no allocator, so
+ * the card cannot own heap. Overflow keeps the highest-n tokens (the ones
+ * carrying the most mentions) and drops the rare tail. */
+#define HU_STYLE_CARD_MAX_ENTITY_TOKENS 64
+#define HU_STYLE_CARD_ENTITY_TOKEN_CAP  24 /* bytes incl NUL */
+/* Below this many measured mentions a token's rate is noise; the measurement
+ * script omits it and the governor would ignore it anyway. */
+#define HU_STYLE_CARD_ENTITY_MIN_MENTIONS 3
+
+typedef struct hu_style_entity_token {
+    char token[HU_STYLE_CARD_ENTITY_TOKEN_CAP]; /* lowercase, NUL-terminated */
+    double cap_rate;                            /* [0,1]: share written capitalized */
+    unsigned n;                                 /* mentions measured */
+} hu_style_entity_token_t;
+
 typedef struct hu_style_card {
     double lowercase_start_rate;   /* first letter is lowercase */
     double no_terminal_punct_rate; /* message ends with no . ? ! … */
     double question_rate;          /* ends with '?' */
     double exclamation_rate;       /* ends with '!' */
     double emoji_rate;             /* contains >= 1 emoji */
-    unsigned n;                    /* messages measured (0 for the default) */
+    /* Contains lol/lmao/haha/hehe (word-bounded). Optional: -1 when the card
+     * predates the axis, and nothing about laughter renders then. Added
+     * 2026-09-30: the twin laughed in 14% of its texts over a week, Seth 3%. */
+    double laugh_rate;
+    /* Share of replies carrying a second thought (a second bubble or a second
+     * sentence), scripts/reply_pairs.has_second_beat. Optional: -1 when the
+     * card predates the axis. Seth 50%, the twin 35% (2026-10-02). Renders
+     * only with HU_STYLE_SECOND_BEAT=live (hu_style_second_beat_mode). */
+    double second_beat_rate;
+    unsigned n; /* messages measured (0 for the default) */
     /* Judge-free pair axis (scripts/reply_pairs.py): how the persona answers
      * a LONG or question-bearing inbound. substantive_n == 0 when the card
      * predates the axis; nothing renders below HU_STYLE_CARD_SUBSTANTIVE_MIN_N. */
@@ -42,6 +81,14 @@ typedef struct hu_style_card {
     /* Share opening on reflexive agreement (yeah / exactly / totally…); -1 when
      * the card predates the axis (2026-09-13: persona 0.06, twin 0.46–0.62). */
     double substantive_agreement_opener_rate;
+    /* Entity-casing axis (see above). entity_cap_rate is the corpus-wide
+     * share of entity mentions written capitalized, PER MENTION rather than
+     * per message — the only axis on this card that is not a per-message
+     * fraction. -1 when the card predates the axis; entity_token_count is
+     * then 0 and the governor's action D stays inert. */
+    double entity_cap_rate;
+    unsigned entity_token_count;
+    hu_style_entity_token_t entity_tokens[HU_STYLE_CARD_MAX_ENTITY_TOKENS];
     bool from_card;        /* true = loaded from a card file */
     char window_start[16]; /* YYYY-MM-DD, empty for the default */
     char window_end[16];
@@ -68,6 +115,13 @@ hu_error_t hu_style_card_load_for_persona(hu_allocator_t *alloc, const char *nam
  * back so a missing card is a visible fact, not a silent regression to
  * stale numbers. NULL name -> default (no log). */
 void hu_style_card_resolve(const char *name, size_t name_len, hu_style_card_t *out);
+
+/* HU_STYLE_SECOND_BEAT (off | shadow | live, default off): render the card's
+ * second-beat rate into the casual rules. It changes what gets sent, so the
+ * line is A/B-gated: do not flip to default-ON without the measurement
+ * (the twin's second-beat and question rates against Seth's, judged
+ * non-inferior on humanness). SHADOW renders nothing. */
+hu_gate_mode_t hu_style_second_beat_mode(void);
 
 /* Render the casual register's rule 2 (capitalization / terminal
  * punctuation / question / emoji / exclamation) from the card's numbers.

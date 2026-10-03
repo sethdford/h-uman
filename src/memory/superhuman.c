@@ -4,11 +4,15 @@
 #include "human/context/conversation.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/core/log.h"
 #include "human/core/string.h"
 #include "human/memory.h"
+#include "human/memory/prospective_policy.h"
+#include "human/memory/prospective_repo.h"
 #include "human/memory/sql_transaction.h"
 #include <sqlite3.h>
 #include <stdarg.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -189,6 +193,57 @@ void hu_superhuman_inside_joke_free(hu_allocator_t *alloc, hu_inside_joke_t *arr
  * Commitments
  * ────────────────────────────────────────────────────────────────────────── */
 
+/* Prospective memory v2 (docs/superpowers/specs/2026-09-30-prospective-
+ * memory-v2-design.md §4.1): every dated intention is also a time-cued row in
+ * prospective_memories, keyed "<kind>:<rowid>" of the ledger row just
+ * inserted. Best-effort — that ledger row is the record; a failed mirror is
+ * logged and the time path misses this one item. A commitment and its paired
+ * delayed follow-up collapse into one row (the upsert dedupes on contact +
+ * action, IGNORING due_at -- see prospective_repo.h's
+ * hu_prospective_repo_upsert_time contract).
+ *
+ * Controller ruling F4: a dated intention is either the CONTACT's own
+ * ("I'll send the photos", who="them" -- the F20 keeper in daemon.c stores
+ * these, and its paired delayed_followup_schedule call for the SAME
+ * commitment carries the same who) or the OWNER's (who NULL or "me" -- the
+ * promise keeper and the unrelated daemon_dated_followup.c situation-frame
+ * path, which has no ownership concept at all). What text each mirrors as
+ * is decided ONCE, by hu_prospective_mirror_action (prospective_policy.h),
+ * which the one-time backfill (hu_prospective_v2_backfill) also uses, so a
+ * live row and a backfilled row for the same ledger item are identical and
+ * the F20 pair lands on the SAME rephrased text. A contact-owned mirror whose
+ * rephrasing is not safe is skipped -- the ledger row stays the record, and
+ * the skip is logged with a running count so the miss is visible, never
+ * silent (fail toward silence, not toward misattribution). Atomic: the
+ * daemon calls into this from multiple threads (M1 fix round), so a plain
+ * size_t++ would race. */
+static atomic_size_t s_commitment_mirror_skipped = 0;
+
+static void pm_mirror_owned_time(sqlite3 *db, const char *kind, const char *contact,
+                                 size_t contact_len, const char *text, size_t text_len,
+                                 int64_t due_at, const char *who, size_t who_len) {
+    bool is_followup = strcmp(kind, "followup") == 0;
+    char buf[HU_PROSPECTIVE_MIRROR_CAP];
+    const char *action = NULL;
+    size_t action_len = 0;
+    hu_prospective_mirror_t m = hu_prospective_mirror_action(
+        is_followup, text, text_len, who, who_len, buf, sizeof(buf), &action, &action_len);
+    if (m == HU_PM_MIRROR_SKIP_TOO_LONG || m == HU_PM_MIRROR_SKIP_UNSAFE) {
+        size_t skipped = atomic_fetch_add(&s_commitment_mirror_skipped, 1) + 1;
+        hu_log_warn("superhuman", NULL,
+                    "prospective time mirror skipped (%zu total): contact %s %s", skipped, kind,
+                    m == HU_PM_MIRROR_SKIP_TOO_LONG ? "text too long to rephrase safely"
+                                                    : "could not be rephrased safely");
+        return;
+    }
+    int64_t rowid = sqlite3_last_insert_rowid(db);
+    if (hu_prospective_repo_mirror_time(db, is_followup, rowid, contact, contact_len, action,
+                                        action_len, due_at, HU_PM_PENDING, (int64_t)time(NULL),
+                                        NULL) != HU_OK)
+        hu_log_warn("superhuman", NULL, "prospective time mirror failed for %s:%lld", kind,
+                    (long long)rowid);
+}
+
 hu_error_t hu_superhuman_commitment_store(void *sqlite_ctx, hu_allocator_t *alloc,
                                           const char *contact_id, size_t contact_id_len,
                                           const char *description, size_t desc_len, const char *who,
@@ -220,32 +275,34 @@ hu_error_t hu_superhuman_commitment_store(void *sqlite_ctx, hu_allocator_t *allo
 
     rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
-    return (rc == SQLITE_DONE) ? HU_OK : HU_ERR_MEMORY_BACKEND;
+    if (rc != SQLITE_DONE)
+        return HU_ERR_MEMORY_BACKEND;
+    if (deadline > 0)
+        pm_mirror_owned_time(db, "commitment", contact_id, contact_id_len, description, desc_len,
+                             deadline, who, who_len);
+    return HU_OK;
 }
 
-hu_error_t hu_superhuman_commitment_list_due(void *sqlite_ctx, hu_allocator_t *alloc,
-                                             int64_t now_ts, size_t limit,
-                                             hu_superhuman_commitment_t **out, size_t *out_count) {
-    if (!sqlite_ctx || !alloc || !out || !out_count)
+/* Rows of `sql` (which binds ?1 = ts, ?2 = limit and selects the eight
+ * commitment columns in struct order), allocated into *out. */
+static hu_error_t list_commitments(void *sqlite_ctx, hu_allocator_t *alloc, const char *sql,
+                                   int64_t ts, size_t limit, hu_superhuman_commitment_t **rows_out,
+                                   size_t *count_out) {
+    if (!sqlite_ctx || !alloc || !rows_out || !count_out)
         return HU_ERR_INVALID_ARGUMENT;
-    *out = NULL;
-    *out_count = 0;
+    *rows_out = NULL;
+    *count_out = 0;
 
     sqlite3 *db = get_db(sqlite_ctx);
     if (!db)
         return HU_ERR_NOT_SUPPORTED;
 
     sqlite3_stmt *stmt = NULL;
-    int rc = sqlite3_prepare_v2(
-        db,
-        "SELECT id,contact_id,description,who,deadline,status,created_at,followed_up_at "
-        "FROM commitments WHERE status='pending' AND deadline IS NOT NULL AND deadline<=? "
-        "ORDER BY deadline LIMIT ?",
-        -1, &stmt, NULL);
+    int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK)
         return HU_ERR_MEMORY_BACKEND;
 
-    sqlite3_bind_int64(stmt, 1, now_ts);
+    sqlite3_bind_int64(stmt, 1, ts);
     sqlite3_bind_int64(stmt, 2, (int64_t)(limit > 0 ? limit : 100));
 
     size_t cap = 16;
@@ -297,8 +354,8 @@ hu_error_t hu_superhuman_commitment_list_due(void *sqlite_ctx, hu_allocator_t *a
     if (step_rc != SQLITE_DONE) {
         if (arr)
             alloc->free(alloc->ctx, arr, cap * sizeof(hu_superhuman_commitment_t));
-        *out = NULL;
-        *out_count = 0;
+        *rows_out = NULL;
+        *count_out = 0;
         return HU_ERR_MEMORY_BACKEND;
     }
 
@@ -306,9 +363,31 @@ hu_error_t hu_superhuman_commitment_list_due(void *sqlite_ctx, hu_allocator_t *a
         alloc->free(alloc->ctx, arr, cap * sizeof(hu_superhuman_commitment_t));
         arr = NULL;
     }
-    *out = arr;
-    *out_count = count;
+    *rows_out = arr;
+    *count_out = count;
     return HU_OK;
+}
+
+hu_error_t hu_superhuman_commitment_list_due(void *sqlite_ctx, hu_allocator_t *alloc,
+                                             int64_t now_ts, size_t limit,
+                                             hu_superhuman_commitment_t **out, size_t *out_count) {
+    return list_commitments(
+        sqlite_ctx, alloc,
+        "SELECT id,contact_id,description,who,deadline,status,created_at,followed_up_at "
+        "FROM commitments WHERE status='pending' AND deadline IS NOT NULL AND deadline<=? "
+        "ORDER BY deadline LIMIT ?",
+        now_ts, limit, out, out_count);
+}
+
+hu_error_t hu_superhuman_commitment_list_recent(void *sqlite_ctx, hu_allocator_t *alloc,
+                                                int64_t since_ts, size_t limit,
+                                                hu_superhuman_commitment_t **out,
+                                                size_t *out_count) {
+    return list_commitments(
+        sqlite_ctx, alloc,
+        "SELECT id,contact_id,description,who,deadline,status,created_at,followed_up_at "
+        "FROM commitments WHERE created_at>=? ORDER BY created_at DESC, id DESC LIMIT ?",
+        since_ts, limit, out, out_count);
 }
 
 hu_error_t hu_superhuman_commitment_mark_followed_up(void *sqlite_ctx, int64_t id) {
@@ -506,7 +585,8 @@ hu_error_t hu_superhuman_temporal_get_quiet_hours(void *sqlite_ctx, hu_allocator
 hu_error_t hu_superhuman_delayed_followup_schedule(void *sqlite_ctx, hu_allocator_t *alloc,
                                                    const char *contact_id, size_t contact_id_len,
                                                    const char *topic, size_t topic_len,
-                                                   int64_t scheduled_at) {
+                                                   int64_t scheduled_at, const char *who,
+                                                   size_t who_len) {
     (void)alloc;
     if (!sqlite_ctx || !contact_id || contact_id_len == 0 || !topic || topic_len == 0)
         return HU_ERR_INVALID_ARGUMENT;
@@ -528,7 +608,12 @@ hu_error_t hu_superhuman_delayed_followup_schedule(void *sqlite_ctx, hu_allocato
 
     rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
-    return (rc == SQLITE_DONE) ? HU_OK : HU_ERR_MEMORY_BACKEND;
+    if (rc != SQLITE_DONE)
+        return HU_ERR_MEMORY_BACKEND;
+    if (scheduled_at > 0)
+        pm_mirror_owned_time(db, "followup", contact_id, contact_id_len, topic, topic_len,
+                             scheduled_at, who, who_len);
+    return HU_OK;
 }
 
 hu_error_t hu_superhuman_delayed_followup_list_due(void *sqlite_ctx, hu_allocator_t *alloc,
@@ -627,7 +712,19 @@ hu_error_t hu_superhuman_delayed_followup_mark_sent(void *sqlite_ctx, int64_t id
     sqlite3_bind_int64(stmt, 1, id);
     rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
-    return (rc == SQLITE_DONE) ? HU_OK : HU_ERR_MEMORY_BACKEND;
+    if (rc != SQLITE_DONE)
+        return HU_ERR_MEMORY_BACKEND;
+    /* Known gap 2: the legacy path delivered this follow-up, so its v2 time
+     * twin ("followup:<id>", or the collapsed F20 row it mirrors into) is
+     * done too -- or the time path could surface the same topic again. Only
+     * when this call actually marked it; best-effort like the mirror: the
+     * ledger row is the record, and the ledger is left exactly as the
+     * legacy path wrote it. */
+    if (sqlite3_changes(db) > 0 &&
+        hu_prospective_repo_settle_followup_twin(db, id, (int64_t)time(NULL), NULL) != HU_OK)
+        hu_log_warn("superhuman", NULL, "prospective time twin of followup:%lld not settled",
+                    (long long)id);
+    return HU_OK;
 }
 
 hu_error_t hu_superhuman_delayed_followup_pending_exists(void *sqlite_ctx, const char *contact_id,
@@ -654,6 +751,18 @@ hu_error_t hu_superhuman_delayed_followup_pending_exists(void *sqlite_ctx, const
         return HU_ERR_MEMORY_BACKEND;
     *out_exists = (rc == SQLITE_ROW);
     return HU_OK;
+}
+
+hu_error_t hu_superhuman_ledger_v2_owned(void *sqlite_ctx, bool is_followup, int64_t id,
+                                         bool *owned) {
+    if (owned)
+        *owned = false;
+    if (!sqlite_ctx || !owned)
+        return HU_ERR_INVALID_ARGUMENT;
+    sqlite3 *db = get_db(sqlite_ctx);
+    if (!db)
+        return HU_ERR_NOT_SUPPORTED;
+    return hu_prospective_repo_ledger_v2_owned(db, is_followup, id, owned);
 }
 
 void hu_superhuman_delayed_followup_free(hu_allocator_t *alloc, hu_delayed_followup_t *arr,
@@ -1742,6 +1851,18 @@ hu_error_t hu_superhuman_commitment_list_due(void *sqlite_ctx, hu_allocator_t *a
     return HU_ERR_NOT_SUPPORTED;
 }
 
+hu_error_t hu_superhuman_commitment_list_recent(void *sqlite_ctx, hu_allocator_t *alloc,
+                                                int64_t since_ts, size_t limit,
+                                                hu_superhuman_commitment_t **out,
+                                                size_t *out_count) {
+    (void)sqlite_ctx, (void)alloc, (void)since_ts, (void)limit;
+    if (out)
+        *out = NULL;
+    if (out_count)
+        *out_count = 0;
+    return HU_ERR_NOT_SUPPORTED;
+}
+
 hu_error_t hu_superhuman_commitment_mark_followed_up(void *sqlite_ctx, int64_t id) {
     (void)sqlite_ctx;
     (void)id;
@@ -1808,7 +1929,8 @@ hu_error_t hu_superhuman_temporal_get_quiet_hours(void *sqlite_ctx, hu_allocator
 hu_error_t hu_superhuman_delayed_followup_schedule(void *sqlite_ctx, hu_allocator_t *alloc,
                                                    const char *contact_id, size_t contact_id_len,
                                                    const char *topic, size_t topic_len,
-                                                   int64_t scheduled_at) {
+                                                   int64_t scheduled_at, const char *who_arg,
+                                                   size_t who_arg_len) {
     (void)sqlite_ctx;
     (void)alloc;
     (void)contact_id;
@@ -1816,6 +1938,8 @@ hu_error_t hu_superhuman_delayed_followup_schedule(void *sqlite_ctx, hu_allocato
     (void)topic;
     (void)topic_len;
     (void)scheduled_at;
+    (void)who_arg;
+    (void)who_arg_len;
     return HU_ERR_NOT_SUPPORTED;
 }
 
@@ -1850,6 +1974,16 @@ hu_error_t hu_superhuman_delayed_followup_pending_exists(void *sqlite_ctx, const
     (void)topic_len;
     if (out_exists)
         *out_exists = false;
+    return HU_ERR_NOT_SUPPORTED;
+}
+
+hu_error_t hu_superhuman_ledger_v2_owned(void *sqlite_ctx, bool is_followup, int64_t id,
+                                         bool *owned) {
+    (void)sqlite_ctx;
+    (void)is_followup;
+    (void)id;
+    if (owned)
+        *owned = false;
     return HU_ERR_NOT_SUPPORTED;
 }
 

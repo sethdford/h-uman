@@ -3351,6 +3351,38 @@ static void split_into_texts_exact_boundary(void) {
     HU_ASSERT_STR_EQ(chunks[0], "Hello world.");
 }
 
+/* Long replies break at thought boundaries too (2026-09-30): a sentence end in
+ * the window, else a comma, else the next sentence end or comma past the
+ * window (a longer bubble beats a mid-clause cut); the last space only when
+ * there is no punctuation at all. */
+static void split_into_texts_long_sentence_breaks_at_a_comma(void) {
+    const char *msg = "so i was thinking we could drive up to the cabin on friday after work, "
+                      "grab groceries on the way and then spend the whole weekend doing nothing";
+    char chunks[4][512];
+    size_t n = hu_conversation_split_into_texts(msg, strlen(msg), 100, chunks, 4);
+    HU_ASSERT_EQ(2, (int)n);
+    HU_ASSERT_STR_EQ(chunks[0],
+                     "so i was thinking we could drive up to the cabin on friday after work,");
+}
+
+static void split_into_texts_reaches_past_the_window_for_a_boundary(void) {
+    const char *msg = "honestly the thing that got me about the whole trip was how quiet it was up "
+                      "there at night with no cars. anyway we should go back sometime soon";
+    char chunks[4][512];
+    size_t n = hu_conversation_split_into_texts(msg, strlen(msg), 100, chunks, 4);
+    HU_ASSERT_EQ(2, (int)n);
+    HU_ASSERT_STR_EQ(chunks[1], "anyway we should go back sometime soon");
+}
+
+static void split_into_texts_never_drops_the_tail(void) {
+    const char *msg = "one two three four five. six seven eight nine ten. eleven twelve thirteen "
+                      "fourteen. fifteen sixteen seventeen. eighteen nineteen twenty the end.";
+    char chunks[2][512];
+    size_t n = hu_conversation_split_into_texts(msg, strlen(msg), 30, chunks, 2);
+    HU_ASSERT_EQ(2, (int)n);
+    HU_ASSERT_NOT_NULL(strstr(chunks[1], "twenty the end."));
+}
+
 static void split_into_texts_respects_max_chunks(void) {
     const char *msg = "A. B. C. D. E. F. G. H.";
     char chunks[2][512];
@@ -3703,6 +3735,33 @@ static void strip_channel_tag_sys_markers(void) {
 
 /* ── Formal structure stripping tests ─────────────────────────────── */
 
+/* The memo direction says "Voice memo, a few connected thoughts"; GLM opened
+ * a reply with "Voice memo:\n\n" and, when the memo fell back to text, the
+ * label went out as a text (2026-10-01). */
+static void strip_formal_leading_delivery_label(void) {
+    char buf[128];
+    strcpy(buf, "Voice memo:\n\n\"Let's see... A for the first one");
+    size_t len = hu_conversation_strip_formal_structure(buf, strlen(buf));
+    HU_ASSERT_STR_EQ(buf, "\"Let's see... A for the first one");
+    HU_ASSERT_EQ(len, strlen(buf));
+    strcpy(buf, "voice note: ugh ok so");
+    len = hu_conversation_strip_formal_structure(buf, strlen(buf));
+    HU_ASSERT_STR_EQ(buf, "ugh ok so");
+    strcpy(buf, "Text: running late");
+    len = hu_conversation_strip_formal_structure(buf, strlen(buf));
+    HU_ASSERT_STR_EQ(buf, "running late");
+    /* only a label that opens the reply; words that merely start like one stay */
+    strcpy(buf, "voice memos are weird lol");
+    len = hu_conversation_strip_formal_structure(buf, strlen(buf));
+    HU_ASSERT_STR_EQ(buf, "voice memos are weird lol");
+    strcpy(buf, "lol\nvoice memo: later");
+    len = hu_conversation_strip_formal_structure(buf, strlen(buf));
+    HU_ASSERT_STR_EQ(buf, "lol\nvoice memo: later");
+    strcpy(buf, "Voice memo:");
+    len = hu_conversation_strip_formal_structure(buf, strlen(buf));
+    HU_ASSERT_EQ(len, (size_t)0);
+}
+
 static void strip_formal_numbered_list(void) {
     char buf[128];
     strcpy(buf, "1. First thing\n2. Second thing\n3. Third thing");
@@ -3719,9 +3778,14 @@ static void strip_formal_em_dash(void) {
     const char *input = "hello \xe2\x80\x94 world";
     strcpy(buf, input);
     size_t len = hu_conversation_strip_formal_structure(buf, strlen(buf));
-    HU_ASSERT(strstr(buf, ",") != NULL);
-    HU_ASSERT(len < strlen(input));
-    (void)len;
+    /* Exactly "hello, world": the space before the dash goes too. "a comma
+     * is present" let "hello , world" through, and 7 of 119 live replies
+     * went out like that ("same here , coffee's kickin in", 2026-09-29). */
+    HU_ASSERT_STR_EQ(buf, "hello, world");
+    HU_ASSERT_EQ(len, strlen("hello, world"));
+    strcpy(buf, "got it\xe2\x80\x94i'll sign");
+    len = hu_conversation_strip_formal_structure(buf, strlen(buf));
+    HU_ASSERT_STR_EQ(buf, "got it, i'll sign");
 }
 
 static void strip_formal_no_change(void) {
@@ -5189,6 +5253,7 @@ void run_conversation_tests(void) {
 
     /* Formal structure stripping */
     HU_RUN_TEST(strip_formal_numbered_list);
+    HU_RUN_TEST(strip_formal_leading_delivery_label);
     HU_RUN_TEST(strip_formal_em_dash);
     HU_RUN_TEST(strip_formal_no_change);
     HU_RUN_TEST(strip_formal_en_dash);
@@ -5380,6 +5445,9 @@ void run_conversation_tests(void) {
     /* Split edge cases */
     HU_RUN_TEST(split_into_texts_exact_boundary);
     HU_RUN_TEST(split_into_texts_respects_max_chunks);
+    HU_RUN_TEST(split_into_texts_long_sentence_breaks_at_a_comma);
+    HU_RUN_TEST(split_into_texts_reaches_past_the_window_for_a_boundary);
+    HU_RUN_TEST(split_into_texts_never_drops_the_tail);
     HU_RUN_TEST(split_for_cadence_text_fast_bursts_multi_sentence);
     HU_RUN_TEST(split_for_cadence_text_fast_single_sentence_stays_one);
     HU_RUN_TEST(split_for_cadence_text_fast_below_floor_stays_one);

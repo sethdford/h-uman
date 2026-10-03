@@ -29,14 +29,17 @@
 #include <string.h>
 #include <unistd.h>
 
-static hu_allocator_t test_alloc(void) { return hu_system_allocator(); }
+static hu_allocator_t test_alloc(void) {
+    return hu_system_allocator();
+}
 
 /* Capture stdout into a temp file across one call. Returns the captured
  * bytes in a static buffer (caller must not free). The buffer is cleared
  * on each call so consecutive captures do not bleed. */
 static char captured_buf[16384];
 
-static char *capture_stdout_run(hu_error_t (*fn)(hu_allocator_t *, int, char **, hu_w16_cli_status_t *),
+static char *capture_stdout_run(hu_error_t (*fn)(hu_allocator_t *, int, char **,
+                                                 hu_w16_cli_status_t *),
                                 hu_allocator_t *alloc, int argc, char **argv,
                                 hu_w16_cli_status_t *status, hu_error_t *out_err) {
     captured_buf[0] = '\0';
@@ -88,9 +91,8 @@ static void test_w16_cli_unknown_suite_returns_error(void) {
     hu_allocator_t alloc = test_alloc();
     hu_w16_cli_status_t status;
     hu_w16_cli_status_init(&status, &alloc);
-    char *argv[] = {"human", "ev" "al", "--w16", "no-such-suite"};
-    hu_error_t err =
-        hu_cmd_eval_w16_dispatch_for_test(&alloc, 4, argv, &status);
+    char *argv[] = {"human", "eval", "--w16", "no-such-suite"};
+    hu_error_t err = hu_cmd_eval_w16_dispatch_for_test(&alloc, 4, argv, &status);
     HU_ASSERT(err != HU_OK);
     HU_ASSERT_TRUE(status.requested);
     HU_ASSERT_FALSE(status.dispatched);
@@ -106,10 +108,10 @@ static void test_w16_cli_legacy_bridge_backend_runs(void) {
     hu_allocator_t alloc = test_alloc();
     hu_w16_cli_status_t status;
     hu_w16_cli_status_init(&status, &alloc);
-    char *argv[] = {"human", "ev" "al", "--w16", "legacy-bridge"};
+    char *argv[] = {"human", "eval", "--w16", "legacy-bridge"};
     hu_error_t err = HU_OK;
-    char *out = capture_stdout_run(hu_cmd_eval_w16_dispatch_for_test, &alloc, 4, argv,
-                                   &status, &err);
+    char *out =
+        capture_stdout_run(hu_cmd_eval_w16_dispatch_for_test, &alloc, 4, argv, &status, &err);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_TRUE(status.requested);
     HU_ASSERT_TRUE(status.dispatched);
@@ -134,10 +136,10 @@ static void test_w16_cli_offline_judge_no_network(void) {
     hu_allocator_t alloc = test_alloc();
     hu_w16_cli_status_t status;
     hu_w16_cli_status_init(&status, &alloc);
-    char *argv[] = {"human", "ev" "al", "--w16", "locomo", "--offline"};
+    char *argv[] = {"human", "eval", "--w16", "locomo", "--offline"};
     hu_error_t err = HU_OK;
-    char *out = capture_stdout_run(hu_cmd_eval_w16_dispatch_for_test, &alloc, 5, argv,
-                                   &status, &err);
+    char *out =
+        capture_stdout_run(hu_cmd_eval_w16_dispatch_for_test, &alloc, 5, argv, &status, &err);
 
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_TRUE(status.offline);
@@ -176,10 +178,9 @@ static void test_w16_cli_status_struct_populated(void) {
     HU_ASSERT_NULL(status.suite_name);
     HU_ASSERT_EQ(status.status, HU_OK);
 
-    char *argv[] = {"human", "ev" "al", "--w16", "legacy-bridge", "--offline"};
+    char *argv[] = {"human", "eval", "--w16", "legacy-bridge", "--offline"};
     hu_error_t err = HU_OK;
-    (void)capture_stdout_run(hu_cmd_eval_w16_dispatch_for_test, &alloc, 5, argv, &status,
-                             &err);
+    (void)capture_stdout_run(hu_cmd_eval_w16_dispatch_for_test, &alloc, 5, argv, &status, &err);
 
     /* Post-conditions: every flag the dispatcher tracks must be set. */
     HU_ASSERT_EQ(err, HU_OK);

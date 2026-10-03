@@ -1,6 +1,6 @@
 # human
 
-Autonomous AI assistant runtime in C11. ~1696 KB binary. Zero dependencies. 50+ providers.
+Autonomous AI assistant runtime in C11. <!-- fp:binary_mb -->~3 MB<!-- /fp --> binary. Zero dependencies. 50+ providers.
 
 ## Install
 

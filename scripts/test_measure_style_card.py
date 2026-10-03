@@ -52,6 +52,41 @@ def synthetic_corpus(n=400):
     return out
 
 
+class LaughAxisAndDaemonSends(unittest.TestCase):
+    """2026-09-30: the twin laughed in 14% of its texts over a week, Seth in
+    3%, and the card had no axis for it. And the card was measured from every
+    is_from_me row, so the twin's own sends (~12%) were measured as Seth."""
+
+    def test_laugh_rate_counts_word_bounded_laughs(self):
+        msgs = []
+        for i in range(400):
+            text = "Yeah ok sounds good"
+            if i % 25 == 0:
+                text = "lol yeah ok"            # 4%
+            elif i % 25 == 1:
+                text = "grabbing a lollipop"    # not a laugh
+            msgs.append((T0 + datetime.timedelta(minutes=i), text))
+        card = msc.build_card(msgs, persona="test", window_start=T0 - datetime.timedelta(days=1),
+                              window_end=T0 + datetime.timedelta(days=1), min_n=300,
+                              n_resamples=200)
+        self.assertIn("laugh_rate", msc.CARD_AXES)
+        self.assertAlmostEqual(card["axes"]["laugh_rate"]["value"], 0.04, places=9)
+
+    def test_daemon_sends_are_not_measured_as_seth(self):
+        # fetch_outbound_messages yields NAIVE UTC datetimes (Apple epoch);
+        # daemon records are true epochs. Reading the naive value as local
+        # time put every message hours off, and the first live run excluded 0
+        # of 1,500. The records here are built the way the real ones are.
+        t = T0.replace(tzinfo=datetime.timezone.utc).timestamp()
+        msgs = [(T0, "how can I help you with your question about AI?"),
+                (T0 + datetime.timedelta(seconds=30), "Haha"),
+                (T0 + datetime.timedelta(minutes=1), "grabbing dinner, back in a bit")]
+        records = [(t + 5, "how can i help you with your question about ai"),
+                   (t + 31, "haha")]
+        kept = [text for _, text in msc.drop_daemon_sends(msgs, records)]
+        self.assertEqual(kept, ["grabbing dinner, back in a bit"])
+
+
 class BuildCard(unittest.TestCase):
     def test_axes_match_known_synthetic_rates(self):
         msgs = synthetic_corpus(400)
@@ -122,6 +157,33 @@ class RunCli(unittest.TestCase):
             self.assertEqual(sr["min_n"], msc.SUBSTANTIVE_MIN_N)
             for _, reply in pairs:  # no reply text on the card
                 self.assertNotIn(reply, json.dumps(card))
+
+    def test_second_beat_axis_counts_replies_with_two_thoughts(self):
+        """2026-10-02: 52% of Seth's replies carried a second beat (a second
+        bubble, or a second sentence) against 35% of the twin's."""
+        runs = [["Excellent!", "We gonna hang out soon?"],   # two bubbles
+                ["Did they reach out yet?"],                   # one thought
+                ["Got it. appreciate you looking out"],        # one bubble, two sentences
+                ["ok"],
+                ["Sorry crisis at work", "Our internet is down"],
+                ["Mr. Smith said 3.5 is fine"]]                # abbreviation/decimal: one thought
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "test.style-card.json")
+            rc = msc.run(self._args(out), messages=synthetic_corpus(400), reply_runs=runs)
+            self.assertEqual(rc, 0)
+            axis = json.load(open(out))["axes"]["second_beat_rate"]
+            self.assertEqual(axis["n"], 6)
+            self.assertAlmostEqual(axis["value"], 3 / 6)
+            for run in runs:  # no reply text on the card ("ok" alone is inside "tokens")
+                for bubble in run:
+                    if len(bubble) > 3:
+                        self.assertNotIn(bubble, open(out).read())
+
+    def test_no_reply_runs_writes_no_second_beat_axis(self):
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "test.style-card.json")
+            self.assertEqual(msc.run(self._args(out), messages=synthetic_corpus(400)), 0)
+            self.assertNotIn("second_beat_rate", json.load(open(out))["axes"])
 
     def test_no_pairs_given_and_axis_disabled_writes_no_axis(self):
         with tempfile.TemporaryDirectory() as d:

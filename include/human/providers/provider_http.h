@@ -30,4 +30,10 @@ hu_error_t hu_provider_http_post_json_opts(hu_allocator_t *alloc, const char *ur
                                            const hu_http_request_opts_t *opts,
                                            hu_json_value_t **parsed_out);
 
+/* Maps a non-2xx response to an error. 401 -> PROVIDER_AUTH, 429 -> RATE_LIMITED;
+ * 415, or a 422 whose body says "unsupported_modality" (a text-only server sent an
+ * image), -> NOT_SUPPORTED so callers can stop sending that modality; anything else
+ * -> PROVIDER_RESPONSE. `body` may be NULL. */
+hu_error_t hu_provider_http_status_error(long status, const char *body, size_t body_len);
+
 #endif /* HU_PROVIDER_HTTP_H */

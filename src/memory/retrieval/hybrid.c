@@ -3,6 +3,7 @@
 #include "human/core/log.h"
 #include "human/core/string.h"
 #include "human/memory.h"
+#include "human/memory/context_relevance.h"
 #include "human/memory/graph.h"
 #include "human/memory/rerank.h"
 #include "human/memory/retrieval.h"
@@ -295,6 +296,10 @@ static hu_error_t hybrid_reconstruct(hu_allocator_t *alloc, hu_memory_t *backend
 
     hu_memory_entry_t *pool = NULL;
     size_t pool_count = 0;
+    /* Stays on RRF under HU_HYBRID_FUSION=score: that gate covers only the
+     * plain merge in hu_hybrid_retrieve. Reconstruction's scene-select and
+     * sufficiency floor were tuned on RRF scores; moving them is its own
+     * measured change. */
     hu_error_t err = hu_rrf_merge(alloc, src_lists, src_lens, num_sources, (unsigned)HU_RRF_K,
                                   pool_cap, &pool, &pool_count);
     if (err != HU_OK || pool_count == 0)
@@ -717,6 +722,18 @@ static hu_error_t hybrid_reconstruct_commit(
  * fails or returns nothing, or the caller set min_score (recall has no
  * score threshold to honour, and the fraction is what min_score means).
  *
+ * lexical_scores (HU_HYBRID_FUSION=score, and only when a dense leg will be
+ * fused with this one): score fusion reads magnitudes, so the recall list
+ * carries the engine's own BM25 turned higher-is-better
+ * (hu_rerank_bm25_to_relevance) instead of 1/(rank+1). The fallback's
+ * matched-word fraction is already higher-is-better and is kept as-is, so
+ * either path hands the merge the same convention. On the sqlite engine the
+ * recall also reports the graph-rerank boost it added to each bm25() (a
+ * lower-is-better score, so the addition reads as a penalty); the conversion
+ * takes it out and adds it back on the higher-is-better side, so a boosted
+ * row ranks at or above its unboosted self instead of dragging the rows
+ * below it down through the monotone clamp.
+ *
  * Reconstructive mode (Contract C2, CLI-only -- no daemon path sets it)
  * keeps the fraction leg: its scene-select stage and its ablation tests were
  * tuned against that leg's tied-score truncation (tests/test_hybrid_
@@ -725,7 +742,8 @@ static hu_error_t hybrid_reconstruct_commit(
  * change, not a side effect of fixing the production merge. */
 static hu_error_t hybrid_keyword_leg(hu_allocator_t *alloc, hu_memory_t *backend, const char *query,
                                      size_t query_len, const hu_retrieval_options_t *opts,
-                                     size_t limit, hu_retrieval_result_t *out) {
+                                     size_t limit, bool lexical_scores,
+                                     hu_retrieval_result_t *out) {
     out->entries = NULL;
     out->count = 0;
     out->scores = NULL;
@@ -735,31 +753,45 @@ static hu_error_t hybrid_keyword_leg(hu_allocator_t *alloc, hu_memory_t *backend
         !reconstructive) {
         hu_memory_entry_t *entries = NULL;
         size_t count = 0;
-        hu_error_t err = backend->vtable->recall(backend->ctx, alloc, query, query_len, limit,
-                                                 opts ? opts->session_id : NULL,
-                                                 opts ? opts->session_id_len : 0, &entries, &count);
-        if (err == HU_OK && entries && count > 0) {
-            double *scores = (double *)alloc->alloc(alloc->ctx, count * sizeof(double));
-            if (!scores) {
-                for (size_t i = 0; i < count; i++)
-                    hu_memory_entry_free_fields(alloc, &entries[i]);
-                alloc->free(alloc->ctx, entries, count * sizeof(hu_memory_entry_t));
-                return HU_ERR_OUT_OF_MEMORY;
-            }
-            for (size_t i = 0; i < count; i++) {
-                scores[i] = 1.0 / (double)(i + 1);
+        double *boosts = NULL; /* score mode, sqlite engine only */
+        const char *sid = opts ? opts->session_id : NULL;
+        size_t sid_len = opts ? opts->session_id_len : 0;
+        hu_error_t err = HU_ERR_NOT_SUPPORTED;
+#ifdef HU_ENABLE_SQLITE
+        if (lexical_scores)
+            err = hu_sqlite_memory_recall_with_boosts(backend, alloc, query, query_len, limit, sid,
+                                                      sid_len, &entries, &count, &boosts);
+#endif
+        if (err == HU_ERR_NOT_SUPPORTED)
+            err = backend->vtable->recall(backend->ctx, alloc, query, query_len, limit, sid,
+                                          sid_len, &entries, &count);
+        double *scores = (err == HU_OK && entries && count > 0)
+                             ? (double *)alloc->alloc(alloc->ctx, count * sizeof(double))
+                             : NULL;
+        if (scores) {
+            for (size_t i = 0; i < count; i++)
+                scores[i] = lexical_scores ? entries[i].score : 1.0 / (double)(i + 1);
+            if (lexical_scores)
+                hu_rerank_bm25_to_relevance(scores, boosts, count, scores);
+            for (size_t i = 0; i < count; i++)
                 entries[i].score = scores[i];
-            }
+        }
+        if (boosts)
+            alloc->free(alloc->ctx, boosts, count * sizeof(double));
+        if (scores) {
             out->entries = entries;
             out->count = count;
             out->scores = scores;
             return hu_retrieval_filter_by_namespace(alloc, out, opts);
         }
+        bool oom = err == HU_OK && entries && count > 0;
         if (entries) {
             for (size_t i = 0; i < count; i++)
                 hu_memory_entry_free_fields(alloc, &entries[i]);
             alloc->free(alloc->ctx, entries, count * sizeof(hu_memory_entry_t));
         }
+        if (oom)
+            return HU_ERR_OUT_OF_MEMORY;
     }
     return hu_keyword_retrieve(alloc, backend, query, query_len, opts, out);
 }
@@ -787,9 +819,29 @@ hu_error_t hu_hybrid_retrieve(hu_allocator_t *alloc, hu_memory_t *backend, hu_em
     (void)graph;
 #endif
 
+    bool has_vector = embedder && embedder->vtable && vector_store && vector_store->vtable;
+
+    /* HU_HYBRID_FUSION=score activation gated on TWO measurements, both
+     * required, score vs rrf:
+     *  1. the offline leave-one-conversation-out sweep
+     *     (scripts/tune_fusion_alpha.py: Hit@1/R@5/R@10/NDCG@5 on LoCoMo-10 +
+     *     LongMemEval-S) -- it SELECTS alpha, but it runs raw-SQL-seeded dbs
+     *     in fresh CLI processes, so it never sees the production-only
+     *     lexical inputs: graph-rerank boosts and spreading-activation /
+     *     hierarchy rows (the in-memory graph index is filled only by
+     *     store() in a long-lived process), the graph context row (the CLI
+     *     passes graph=NULL; the daemon does not), or the LIVE semantic
+     *     filter + byte clamp applied to the dense leg;
+     *  2. the paired live gate on the real memory db and prompt path:
+     *     scripts/eval_semantic_live_gate.py --fusion score --alpha A
+     *     (both arms recall via the plain hybrid call; baseline arm rrf).
+     * Default stays rrf until both pass. Read once so the keyword leg's
+     * score convention and the merge below always agree. */
+    hu_hybrid_fusion_t fusion = has_vector ? hu_hybrid_fusion_mode() : HU_HYBRID_FUSION_RRF;
+
     hu_retrieval_result_t keyword_result = {0};
-    hu_error_t err =
-        hybrid_keyword_leg(alloc, backend, query, query_len, opts, limit, &keyword_result);
+    hu_error_t err = hybrid_keyword_leg(alloc, backend, query, query_len, opts, limit,
+                                        fusion == HU_HYBRID_FUSION_SCORE, &keyword_result);
     if (err != HU_OK)
         return err;
 
@@ -838,8 +890,6 @@ hu_error_t hu_hybrid_retrieve(hu_allocator_t *alloc, hu_memory_t *backend, hu_em
     hu_retrieval_result_t *graph_result_ptr = NULL;
 #endif
 
-    bool has_vector = embedder && embedder->vtable && vector_store && vector_store->vtable;
-
     if (!has_vector) {
         /* Contract C2: attempt reconstruction with whatever is available
          * (keyword + graph, no semantic). Falls through to the existing
@@ -859,25 +909,41 @@ hu_error_t hu_hybrid_retrieve(hu_allocator_t *alloc, hu_memory_t *backend, hu_em
         }
 #ifdef HU_ENABLE_SQLITE
         if (graph_result.count > 0) {
-            /* Merge keyword + graph */
-            size_t kw_count = keyword_result.count;
-            size_t gr_count = graph_result.count;
-            size_t total = kw_count + gr_count;
+            /* Merge graph + keyword, capped at `limit`. Graph leads, as in the
+             * vector path's RRF list below ("graph first so it gets rank 1"),
+             * so the cap drops the keyword tail rather than the graph row.
+             *
+             * Entries are MOVED, not copied: struct copy, then zero the source
+             * slot, so hu_retrieval_result_free() on each leg releases only its
+             * arrays plus whatever the cap left behind. Copying and then
+             * freeing both legs (the previous code) freed every returned
+             * key/content -- the caller read freed memory and freed it again.
+             *
+             * No key dedupe: the graph leg is one synthesized context row
+             * keyed "graph", not a stored memory, so it cannot repeat a
+             * keyword hit (RRF's key merge in the vector path has nothing to
+             * collapse here either). */
+            size_t total = graph_result.count + keyword_result.count;
+            if (total > limit)
+                total = limit;
             hu_memory_entry_t *merged =
                 (hu_memory_entry_t *)alloc->alloc(alloc->ctx, total * sizeof(hu_memory_entry_t));
             double *scores = (double *)alloc->alloc(alloc->ctx, total * sizeof(double));
             if (merged && scores) {
-                if (kw_count > 0) {
-                    memcpy(merged, keyword_result.entries, kw_count * sizeof(hu_memory_entry_t));
-                    memcpy(scores, keyword_result.scores, kw_count * sizeof(double));
+                hu_retrieval_result_t *legs[2] = {&graph_result, &keyword_result};
+                size_t n = 0;
+                for (size_t l = 0; l < 2; l++) {
+                    hu_retrieval_result_t *leg = legs[l];
+                    for (size_t i = 0; i < leg->count && n < total; i++, n++) {
+                        merged[n] = leg->entries[i];
+                        scores[n] = leg->scores ? leg->scores[i] : leg->entries[i].score;
+                        memset(&leg->entries[i], 0, sizeof(leg->entries[i]));
+                    }
                 }
-                memcpy(merged + kw_count, graph_result.entries,
-                       gr_count * sizeof(hu_memory_entry_t));
-                memcpy(scores + kw_count, graph_result.scores, gr_count * sizeof(double));
                 hu_retrieval_result_free(alloc, &keyword_result);
                 hu_retrieval_result_free(alloc, &graph_result);
                 out->entries = merged;
-                out->count = total;
+                out->count = n; /* == total: the legs hold at least `total` rows */
                 out->scores = scores;
                 return hu_retrieval_filter_by_namespace(alloc, out, opts);
             }
@@ -886,15 +952,21 @@ hu_error_t hu_hybrid_retrieve(hu_allocator_t *alloc, hu_memory_t *backend, hu_em
             if (scores)
                 alloc->free(alloc->ctx, scores, total * sizeof(double));
         }
+        /* OOM above (or no graph row): return the keyword leg alone. */
+        hu_retrieval_result_free(alloc, &graph_result);
 #endif
         *out = keyword_result;
         return hu_retrieval_filter_by_namespace(alloc, out, opts);
     }
 
     hu_retrieval_result_t semantic_result = {0};
-    err = hu_semantic_retrieve(alloc, embedder, vector_store, query, query_len, opts,
-                               &semantic_result);
+    /* The query embedding is kept only for HU_CONTEXT_RELEVANCE's null sample. */
+    hu_embedding_t query_emb = {0};
+    err = hu_semantic_retrieve_ex(alloc, embedder, vector_store, query, query_len, opts,
+                                  &semantic_result,
+                                  hu_context_relevance_mode() != HU_GATE_OFF ? &query_emb : NULL);
     if (err != HU_OK) {
+        hu_embedding_free(alloc, &query_emb);
         hu_retrieval_result_free(alloc, &keyword_result);
 #ifdef HU_ENABLE_SQLITE
         hu_retrieval_result_free(alloc, &graph_result);
@@ -934,6 +1006,14 @@ hu_error_t hu_hybrid_retrieve(hu_allocator_t *alloc, hu_memory_t *backend, hu_em
          * observed on casual exchanges in the 2026-09-05 SOTA gate. */
         hu_gate_mode_t reg_gate = hu_semantic_recall_register_gate_mode();
         bool admits = hu_semantic_recall_register_admits(query, query_len);
+        size_t recall_budget = hu_semantic_recall_max_bytes();
+        /* HU_CONTEXT_RELEVANCE (default OFF; LIVE gated on the replay +
+         * memory-probe measurement in docs/guides/context-relevance.md):
+         * LIVE replaces the word-count cliff with a relevance threshold and a
+         * small casual budget; SHADOW only logs what it would inject. */
+        if (hu_context_relevance_semantic(alloc, &semantic_result, !admits, &recall_budget,
+                                          vector_store, &query_emb))
+            reg_gate = HU_GATE_OFF;
         if (reg_gate != HU_GATE_OFF && !admits) {
             if (reg_gate == HU_GATE_LIVE) {
                 hu_log_info("semantic_recall_register", NULL,
@@ -958,14 +1038,15 @@ hu_error_t hu_hybrid_retrieve(hu_allocator_t *alloc, hu_memory_t *backend, hu_em
              * the remaining 6/40 empties of that gate) so an excluded hit never
              * consumes byte budget. */
             size_t filtered = hu_semantic_recall_filter_result(alloc, &semantic_result);
-            size_t kept = hu_semantic_recall_clamp_result(alloc, &semantic_result,
-                                                          hu_semantic_recall_max_bytes(),
+            size_t kept = hu_semantic_recall_clamp_result(alloc, &semantic_result, recall_budget,
                                                           HU_SEMANTIC_RECALL_HIT_MAX_BYTES);
             hu_log_info("semantic_recall", NULL,
                         "live: sem=%zu filtered=%zu kept=%zu bytes=%zu budget=%zu", before,
-                        filtered, semantic_result.count, kept, hu_semantic_recall_max_bytes());
+                        filtered, semantic_result.count, kept, recall_budget);
         }
     }
+
+    hu_embedding_free(alloc, &query_emb);
 
     /* Contract C2: attempt reconstruction with keyword + semantic (+ graph).
      * Falls through to the plain RRF+cross-encoder merge below when
@@ -1050,8 +1131,23 @@ hu_error_t hu_hybrid_retrieve(hu_allocator_t *alloc, hu_memory_t *backend, hu_em
 #endif
 
     size_t merged_count = 0;
-    err = hu_rerank_rrf(kw_sr, kw_total, sem_sr, sem_count, merged, max_merged, &merged_count,
-                        (float)HU_RRF_K);
+    if (fusion == HU_HYBRID_FUSION_SCORE) {
+        /* The graph row is a synthesized context blob with a constant 0.9, not
+         * a BM25 score; RRF ranks it first in this list, so tie it with the
+         * best lexical hit (normalised 1.0) rather than mixing scales. */
+        if (kw_fill > 0 && kw_fill < kw_total) {
+            float best = kw_sr[kw_fill].score;
+            for (size_t i = kw_fill + 1; i < kw_total; i++)
+                best = kw_sr[i].score > best ? kw_sr[i].score : best;
+            for (size_t g = 0; g < kw_fill; g++)
+                kw_sr[g].score = best;
+        }
+        err = hu_rerank_score_fusion(kw_sr, kw_total, sem_sr, sem_count, merged, max_merged,
+                                     &merged_count, hu_hybrid_fusion_alpha());
+    } else {
+        err = hu_rerank_rrf(kw_sr, kw_total, sem_sr, sem_count, merged, max_merged, &merged_count,
+                            (float)HU_RRF_K);
+    }
     hu_rerank_free_results(kw_sr, kw_total);
     hu_rerank_free_results(sem_sr, sem_count);
     alloc->free(alloc->ctx, kw_sr, kw_total * sizeof(hu_search_result_t));

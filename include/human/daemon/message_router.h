@@ -2,6 +2,7 @@
 #define HU_DAEMON_MESSAGE_ROUTER_H
 
 #include "human/behavior/tapback_band.h"          /* hu_tapback_band_t */
+#include "human/channel.h"                        /* hu_reaction_type_t */
 #include "human/channels/imessage_action.h"       /* hu_reply_style_t */
 #include "human/channels/imessage_action_facts.h" /* hu_conversation_snapshot_t */
 #include "human/core/allocator.h"
@@ -16,6 +17,7 @@ extern "C" {
 
 struct hu_config;
 struct hu_agent;
+struct hu_channel_loop_msg;
 
 /* Cross-channel context formatting helpers — DDD Phase 2.5 (follow-on slice),
  * extracted from daemon.c. These build the human-readable "cross-channel
@@ -98,14 +100,16 @@ hu_conversation_snapshot_t hu_daemon_snapshot_for_msg(int64_t msg_timestamp_sec)
  * the stale-tapback demotion), and react message id from the inbound msg. */
 struct hu_channel_loop_msg;
 
-/* Same, reporting whether TEXT reached the contact: false when the dispatch
- * ended as a bare tapback, was dropped by the parrot guard, or failed. The
- * underlying form (hu_daemon_dispatch_imessage_reply in human/daemon.h) has
- * the same _ex variant. */
+/* Same, reporting whether TEXT reached the contact: false when the bubble was
+ * dropped by the parrot guard or the send failed. The text is always sent;
+ * `director_reaction` is the reaction the director asked to add alongside it
+ * (HU_REACTION_NONE = none — the reply-style predicate never invents one).
+ * The underlying form (hu_daemon_dispatch_imessage_reply in human/daemon.h)
+ * has the same _ex variant. */
 hu_error_t hu_daemon_dispatch_imessage_reply_msg_ex(
     void *ch, const void *persona, const struct hu_agent *agent, const struct hu_config *config,
     const char *target, size_t target_len, const struct hu_channel_loop_msg *msg, const char *body,
-    size_t body_len, bool *out_text_sent);
+    size_t body_len, bool *out_text_sent, hu_reaction_type_t director_reaction);
 struct hu_channel;
 struct hu_persona;
 struct hu_conversation_snapshot;
@@ -114,7 +118,7 @@ hu_error_t hu_daemon_dispatch_imessage_reply_ex(
     const struct hu_config *config, const char *target, size_t target_len,
     const char *parent_msg_guid, size_t parent_guid_len, const char *body, size_t body_len,
     const struct hu_conversation_snapshot *snapshot, int64_t inferred_message_id_for_react,
-    bool *out_text_sent);
+    bool *out_text_sent, hu_reaction_type_t director_reaction);
 
 /* Record one production_outcomes row for a reply that was actually DELIVERED,
  * with the text exactly as sent (after the shaping stages and the dispatch
@@ -126,11 +130,111 @@ hu_error_t hu_daemon_dispatch_imessage_reply_ex(
  * as delivered text. Call from the send funnel, BEFORE
  * hu_daemon_register_reply_for_reactions (which attaches the message_ref to
  * this row). HU_OK no-op when the agent has no collector, the text or prompt
- * is empty; the SQLite write error otherwise (logged). */
+ * is empty; the SQLite write error otherwise (logged). Also hands the
+ * delivered text to hu_daemon_prospective_delivered (a no-op unless
+ * HU_PROSPECTIVE is shadow/live). */
 hu_error_t hu_daemon_record_delivered_reply(struct hu_agent *agent, const char *ch_name,
                                             const char *target, size_t target_len,
                                             const char *prompt, size_t prompt_len, const char *text,
                                             size_t text_len);
+
+/* A reply whose text reached nobody: the session store already holds it as
+ * an assistant turn (it is saved before sending), so append a system note
+ * right after it. The next turn's history restore carries the note, and the
+ * model does not treat the lost reply as said (2026-09-26). */
+#define HU_DAEMON_UNDELIVERED_NOTE                                                          \
+    "[delivery] Your previous reply was NOT delivered: the send failed and they never saw " \
+    "it. Do not refer to it as something you said."
+struct hu_session_store;
+/* Did this reply reach nobody because sending failed? `any_send_err`: a
+ * vtable->send for this reply returned an error (every build); the counter
+ * pair brackets the reply with hu_daemon_send_failure_total(). False when any
+ * bubble was delivered or nothing failed (a deliberate non-send). */
+bool hu_daemon_reply_lost(bool delivered, bool any_send_err, uint64_t fails_before,
+                          uint64_t fails_after);
+hu_error_t hu_daemon_note_reply_undelivered(struct hu_session_store *store, const char *session,
+                                            size_t session_len);
+
+/* Burst re-poll triage. The re-poll before a reply has already consumed every
+ * message in `burst` (the channel's read cursor moved past them), so a message
+ * from a sender other than `batch_key` must not be dropped: it is appended to
+ * msgs[*count..cap) for the tick's batch loop to reach after the current turn.
+ * Until 2026-09-30 those were silently discarded (Dermot twice on 09-24, while
+ * Lexi's turn was reading). Returns how many could not be kept (msgs full),
+ * each logged as a warning. */
+size_t hu_daemon_burst_carry(struct hu_channel_loop_msg *msgs, size_t *count, size_t cap,
+                             const struct hu_channel_loop_msg *burst, size_t burst_count,
+                             const char *batch_key);
+
+/* Where an inbound photo gets described. When the config declares a cloud
+ * substitute for `model` (reliability.model_fallbacks, i.e. the primary is a
+ * local model the cloud doesn't know), vision goes straight to the first
+ * fallback provider with that substitute: the local primary is text-only, and
+ * its 422s on every photo opened the primary's circuit breaker (2026-09-30).
+ * Returns false (use the agent's own provider) when nothing is declared. */
+bool hu_daemon_vision_route(const struct hu_config *cfg, const char *model, size_t model_len,
+                            const char **provider_out, const char **model_out);
+
+/* "Reply no sooner than": the director's chosen delay runs alongside the
+ * turn's work instead of before it. hold() records until_ms (monotonic, as
+ * hu_time_get_current_ms) for one contact, replacing any earlier hold; NULL
+ * clears it. wait_ms() is how long a reply to that contact must still wait
+ * (0 for any other contact or once the time has passed). The reply dispatch
+ * waits it out and clears it, so a burst's later bubbles do not wait again. */
+void hu_daemon_reply_hold(const char *key, size_t key_len, int64_t until_ms);
+int64_t hu_daemon_reply_hold_wait_ms(const char *key, size_t key_len, int64_t now_ms);
+/* hold() for `ms` from now. */
+void hu_daemon_reply_hold_for(const char *key, size_t key_len, uint32_t ms);
+
+struct hu_persona;
+/* Rating-tool traffic on the owner's number (hu_share_is_tool_traffic): the
+ * batch gets no reply and teaches nothing. Checked before any per-batch
+ * bookkeeping. Logs when it withholds. */
+bool hu_daemon_tool_traffic(const struct hu_persona *p, const char *key, size_t key_len,
+                            const char *text, size_t len, void *observer);
+
+/* 1:1 only: a hurt signal the HU_HURT_HANDOFF gate hands to the owner, so the
+ * daemon does not auto-reply (see hurt_handoff.h). */
+bool hu_daemon_hurt_withheld(const struct hu_persona *p, const char *key, size_t key_len,
+                             const char *text, size_t len, bool is_group);
+
+/* Inbound text whose U+FFFC attachment vision could not describe (it is not
+ * `buf`, where a description is written): the placeholder is replaced by a
+ * note that a picture came and did not load, kept after any text, written to
+ * buf. Anything else is returned unchanged. *len is updated. */
+const char *hu_daemon_unseen_photo(const char *text, size_t *len, char *buf, size_t cap);
+
+/* local_only: an image the model may not see. A bare "[Photo]" becomes
+ * "[They sent a photo]"; a caption is kept (U+FFFC dropped) with the note on
+ * the next line. Written to buf; *len is updated. Returns text unchanged only
+ * when buf is too small. */
+const char *hu_daemon_photo_placeholder(const char *text, size_t *len, char *buf, size_t cap);
+
+/* local_only photo note, local vision first (HU_LOCAL_VISION, see
+ * context/local_vision.h). LIVE and the loopback caption/OCR succeeded: the
+ * image becomes "[They sent a photo: <description>]" (a caption is kept, as
+ * above). Anything else — OFF, SHADOW, a failure, a timeout — is exactly
+ * hu_daemon_photo_placeholder. path is the NUL-terminated attachment path. */
+const char *hu_daemon_local_photo(const char *path, const char *text, size_t *len, char *buf,
+                                  size_t cap);
+
+/* Quality-retry draft. The quality gate used to free a reply before asking for
+ * a better one; when the retry came back empty the contact got nothing (Lexi,
+ * 2026-09-23). keep() takes ownership of the draft for `key` (dropping any
+ * earlier one); settle() then always runs on the next result: an empty
+ * *response for the same key gets the draft back, anything else drops it.
+ * Returns true when *response is non-empty afterwards. */
+void hu_daemon_quality_draft_keep(hu_allocator_t *alloc, const char *key, size_t key_len,
+                                  char *draft, size_t draft_len);
+bool hu_daemon_quality_draft_settle(hu_allocator_t *alloc, const char *key, size_t key_len,
+                                    char **response, size_t *response_len);
+
+/* hu_vision_describe_image on the provider hu_daemon_vision_route picks, else
+ * on agent->provider with `model`. */
+hu_error_t hu_daemon_describe_image(hu_allocator_t *alloc, struct hu_agent *agent,
+                                    const struct hu_config *cfg, const char *path, size_t path_len,
+                                    const char *model, size_t model_len, char **desc_out,
+                                    size_t *desc_len);
 
 #ifdef __cplusplus
 }

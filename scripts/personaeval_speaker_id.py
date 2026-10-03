@@ -27,6 +27,7 @@ Usage:
   python3 scripts/personaeval_speaker_id.py --score-runs --model /tmp/seth_clf.json
 """
 
+import os
 import argparse
 import json
 import math
@@ -209,7 +210,7 @@ def train_classifier():
 
 
 # --- Compatibility wrappers for sota_summarize.py and ad-hoc callers ---
-def load_classifier(path: str = "/tmp/seth_speaker_id.json") -> dict:
+def load_classifier(path: str = os.path.expanduser("~/.human/models/seth_speaker_id.json")) -> dict:
     """Load a trained classifier from JSON. Mirrors `json.loads(read_text)`
     but gives callers a stable function name."""
     return json.loads(Path(path).read_text())
@@ -279,8 +280,8 @@ def main():
     p.add_argument("--classify", action="store_true")
     p.add_argument("--text")
     p.add_argument("--score-runs", action="store_true")
-    p.add_argument("--out", default="/tmp/seth_speaker_id.json")
-    p.add_argument("--model", default="/tmp/seth_speaker_id.json")
+    p.add_argument("--out", default=os.path.expanduser("~/.human/models/seth_speaker_id.json"))
+    p.add_argument("--model", default=os.path.expanduser("~/.human/models/seth_speaker_id.json"))
     args = p.parse_args()
     if args.train:
         model = train_classifier()

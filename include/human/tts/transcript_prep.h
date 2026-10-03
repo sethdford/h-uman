@@ -20,6 +20,7 @@ typedef struct hu_prep_config {
     bool nonverbals_enabled;
     bool strip_ssml;
     bool thinking_sounds; /* prepend "hmm"/"well" for complex responses */
+    bool laughter_cue;    /* the reply laughed (lol/haha, removed by speech cleanup) */
     uint32_t seed;
     uint8_t hour_local;
 } hu_prep_config_t;
@@ -75,6 +76,10 @@ float hu_emotion_to_volume(const char *emotion);
  * Writes cleaned result into `out` (max `cap` bytes). Returns output length.
  */
 size_t hu_transcript_strip_junk(const char *text, size_t text_len, char *out, size_t cap);
+
+/* True when `p` starts an emoji (the emoji blocks only — General Punctuation
+ * such as curly quotes and dashes is text). */
+bool hu_transcript_is_emoji(const char *p, size_t remain);
 
 /*
  * Smooth difficult consonant clusters for clearer TTS pronunciation.

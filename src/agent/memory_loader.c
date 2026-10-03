@@ -1,11 +1,14 @@
 #include "human/agent/memory_loader.h"
+#include "human/agent/curiosity_gaps.h"
 #include "human/agent/world_model_bridge.h" /* hu_w7_render_world_model + hu_persona_context_t */
 #include "human/core/error.h"
 #include "human/core/json.h"
 #include "human/core/log.h"
+#include "human/core/log_redact.h"
 #include "human/core/string.h"
 #include "human/memory/personal_model.h"
 #include "human/memory/retrieval/adaptive.h"
+#include "human/memory/semantic_recall.h" /* hu_semantic_recall_hit_is_excluded */
 #include "human/memory/trust.h"
 #include "human/memory/wiki_page.h"
 #include <string.h>
@@ -15,6 +18,7 @@
 #include "human/memory/retrieval/strategy_learner.h"
 #endif
 #include "human/core/gate_mode.h"
+#include "human/memory/confidence_boundary.h"
 #include "human/memory/contact_insights_repo.h"
 #include <stdatomic.h>
 
@@ -78,6 +82,10 @@ void hu_memory_loader_set_wiki_mode_for_test(int mode) {
  * gate: prompt bytes per turn must go DOWN, specificity flat or up. */
 #define HU_WIKI_MAX_BYTES 1200
 
+/* Per-memory share of the recall budget. Real memory rows run 50-1,000 chars
+ * (2026-10-02); 600 keeps several in view instead of one monster. */
+#define HU_RECALL_ITEM_MAX_CHARS 600
+
 static const char k_wiki_header[] =
     "### Your page on them (compiled nightly from what you know; weave in, never recite):\n";
 
@@ -93,8 +101,8 @@ static void append_contact_wiki(hu_memory_loader_t *loader, hu_gate_mode_t mode,
                      mode == HU_GATE_LIVE ? "live" : "shadow");
     if (mode == HU_GATE_SHADOW) {
         hu_log_info("wiki-head", NULL,
-                    "shadow: would add %zu bytes of page head for %.*s (prompt unchanged)",
-                    wiki_len, (int)session_id_len, session_id);
+                    "shadow: would add %zu bytes of page head for %s (prompt unchanged)", wiki_len,
+                    HU_LOG_WHO(session_id, session_id_len));
         return;
     }
     const size_t hdr_len = sizeof(k_wiki_header) - 1;
@@ -115,14 +123,87 @@ static void append_contact_wiki(hu_memory_loader_t *loader, hu_gate_mode_t mode,
 /* HU_INSIGHT_MAX_ITEMS / MAX_BYTES / MIN_CONFIDENCE live in memory_loader.h so
  * the overuse scan (daemon_insight_overuse.c) re-renders exactly this block. */
 
+#ifdef HU_ENABLE_SQLITE
+/* Contact scope (2026-10-01): a recalled row stored for another contact is
+ * dropped; global rows (no session: facts about Seth) stay. The semantic index
+ * keeps only key and text, so the owner is read back from memories by key; a
+ * key no longer stored (an orphaned vector) is dropped too. Returns the new
+ * count; the array is shrunk to it so the caller's count-sized free matches. */
+static size_t keep_contact_scope(hu_memory_loader_t *loader, hu_memory_entry_t **entries,
+                                 size_t count, const char *sid, size_t sid_len) {
+    if (!sid || sid_len == 0 || !*entries || count == 0)
+        return count;
+    hu_memory_entry_t *e = *entries;
+    size_t keep = 0;
+    for (size_t i = 0; i < count; i++) {
+        char owner[128];
+        const char *key = e[i].key && e[i].key_len ? e[i].key : e[i].id;
+        size_t key_len = e[i].key && e[i].key_len ? e[i].key_len : e[i].id_len;
+        if (key &&
+            hu_sqlite_memory_session_of(loader->memory, key, key_len, owner, sizeof(owner)) &&
+            hu_retrieval_session_in_scope(owner, strlen(owner), sid, sid_len)) {
+            if (keep != i)
+                e[keep] = e[i];
+            keep++;
+        } else {
+            hu_memory_entry_free_fields(loader->alloc, &e[i]);
+        }
+    }
+    if (keep == count)
+        return count;
+    if (keep == 0) {
+        loader->alloc->free(loader->alloc->ctx, e, count * sizeof(hu_memory_entry_t));
+        *entries = NULL;
+        return 0;
+    }
+    hu_memory_entry_t *shrunk = (hu_memory_entry_t *)loader->alloc->realloc(
+        loader->alloc->ctx, e, count * sizeof(hu_memory_entry_t), keep * sizeof(hu_memory_entry_t));
+    if (shrunk)
+        *entries = shrunk;
+    else
+        memset(&e[keep], 0, (count - keep) * sizeof(hu_memory_entry_t)); /* keep the size honest */
+    return shrunk ? keep : count;
+}
+#endif
+
 #ifdef HU_ENABLE_SQLITE /* only the SQLite build renders the block (see below) */
 static const char k_insight_header[] =
     "### What you actually remember about them (weave in naturally, never recite):\n";
+
+/* The gap line to add to the insight block this turn, or NULL (HU_CURIOSITY_GAPS;
+ * SHADOW logs what it would have offered and returns NULL). */
+static const char *curiosity_gap_for(hu_memory_loader_t *loader, const char *query,
+                                     size_t query_len, const char *sid, size_t sid_len) {
+    hu_gate_mode_t cg = hu_curiosity_gaps_mode();
+    if (cg == HU_GATE_OFF || !loader->offer_curiosity_gap)
+        return NULL;
+    int64_t now_s = (int64_t)time(NULL);
+    int64_t since_ms = (now_s - (int64_t)HU_CURIOSITY_RECENT_DAYS * 86400) * 1000;
+    char *recent = NULL;
+    size_t recent_len = 0;
+    if (hu_contact_insights_recent_text(loader->memory, loader->alloc, sid, sid_len, since_ms,
+                                        HU_INSIGHT_MIN_CONFIDENCE, &recent, &recent_len) != HU_OK)
+        return NULL;
+    hu_curiosity_topic_t t = hu_curiosity_gap_offer(sid, sid_len, query, query_len, recent,
+                                                    recent_len, now_s, cg == HU_GATE_LIVE);
+    if (recent)
+        loader->alloc->free(loader->alloc->ctx, recent, recent_len + 1);
+    if (t == HU_CURIOSITY_NONE)
+        return NULL;
+    const char *line = hu_curiosity_gap_line(t);
+    if (cg == HU_GATE_SHADOW) {
+        hu_log_info("curiosity-gaps", NULL,
+                    "shadow: would offer topic=%d for %s (prompt unchanged)", (int)t,
+                    HU_LOG_WHO(sid, sid_len));
+        return NULL;
+    }
+    return line;
+}
 #endif
 
-static void append_contact_insights(hu_memory_loader_t *loader, const char *session_id,
-                                    size_t session_id_len, char **out_context,
-                                    size_t *out_context_len) {
+static void append_contact_insights(hu_memory_loader_t *loader, const char *query, size_t query_len,
+                                    const char *session_id, size_t session_id_len,
+                                    char **out_context, size_t *out_context_len) {
     hu_gate_mode_t mode = hu_memory_loader_insight_mode();
     if (mode == HU_GATE_OFF || !loader->memory)
         return;
@@ -132,6 +213,8 @@ static void append_contact_insights(hu_memory_loader_t *loader, const char *sess
      * if(HU_ENABLE_SQLITE)); without it there is nothing to render. Left as
      * an unconditional call, minimal-build / no-sqlite / cross-arm64 fail to
      * link on hu_contact_insights_render (Human CI 2026-09-06). */
+    (void)query;
+    (void)query_len;
     (void)session_id;
     (void)session_id_len;
     (void)out_context;
@@ -140,32 +223,47 @@ static void append_contact_insights(hu_memory_loader_t *loader, const char *sess
 #else
     char *lines = NULL;
     size_t lines_len = 0;
-    hu_error_t rerr = hu_contact_insights_render(
-        loader->memory, loader->alloc, session_id, session_id_len, HU_INSIGHT_MAX_ITEMS,
-        HU_INSIGHT_MAX_BYTES, HU_INSIGHT_MIN_CONFIDENCE, &lines, &lines_len);
-    if (rerr != HU_OK || !lines || lines_len == 0)
+    hu_error_t rerr = hu_contact_insights_render_for_query(
+        loader->memory, loader->alloc, session_id, session_id_len, query, query_len,
+        HU_INSIGHT_MAX_ITEMS, HU_INSIGHT_MAX_BYTES, HU_INSIGHT_MIN_CONFIDENCE, &lines, &lines_len);
+    if (rerr != HU_OK) {
+        lines = NULL;
+        lines_len = 0;
+    }
+    const char *gap = mode == HU_GATE_LIVE
+                          ? curiosity_gap_for(loader, query, query_len, session_id, session_id_len)
+                          : NULL;
+    size_t gap_len = gap ? strlen(gap) : 0;
+    if (lines_len == 0 && gap_len == 0) {
+        if (lines)
+            loader->alloc->free(loader->alloc->ctx, lines, lines_len + 1);
         return;
+    }
     static atomic_bool announced = false;
     hu_log_info_once(&announced, "insight-stream", NULL,
                      "insight stream active: mode=%s (set HU_INSIGHT_STREAM=off to disable)",
                      mode == HU_GATE_LIVE ? "live" : "shadow");
     if (mode == HU_GATE_SHADOW) {
         hu_log_info("insight-stream", NULL,
-                    "shadow: would add %zu bytes of insights for %.*s (prompt unchanged)",
-                    lines_len, (int)session_id_len, session_id);
+                    "shadow: would add %zu bytes of insights for %s (prompt unchanged)", lines_len,
+                    HU_LOG_WHO(session_id, session_id_len));
     } else {
         const size_t hdr_len = sizeof(k_insight_header) - 1;
-        size_t block_len = hdr_len + lines_len;
+        size_t block_len = hdr_len + lines_len + gap_len;
         char *block = (char *)loader->alloc->alloc(loader->alloc->ctx, block_len + 1);
         if (block) {
             memcpy(block, k_insight_header, hdr_len);
-            memcpy(block + hdr_len, lines, lines_len);
+            if (lines_len)
+                memcpy(block + hdr_len, lines, lines_len);
+            if (gap_len)
+                memcpy(block + hdr_len + lines_len, gap, gap_len);
             block[block_len] = '\0';
             append_section(loader, out_context, out_context_len, block, block_len);
             loader->alloc->free(loader->alloc->ctx, block, block_len + 1);
         }
     }
-    loader->alloc->free(loader->alloc->ctx, lines, lines_len + 1);
+    if (lines)
+        loader->alloc->free(loader->alloc->ctx, lines, lines_len + 1);
 #endif
 }
 
@@ -202,6 +300,7 @@ hu_error_t hu_memory_loader_init(hu_memory_loader_t *loader, hu_allocator_t *all
     loader->facade = NULL;
     loader->personal_model = NULL;
     loader->persona_ctx = NULL;
+    loader->offer_curiosity_gap = false;
     return HU_OK;
 }
 
@@ -209,6 +308,11 @@ void hu_memory_loader_set_facade(hu_memory_loader_t *loader, struct hu_w7_facade
     if (!loader)
         return;
     loader->facade = facade;
+}
+
+void hu_memory_loader_set_offer_gap(hu_memory_loader_t *loader, bool offer) {
+    if (loader)
+        loader->offer_curiosity_gap = offer;
 }
 
 void hu_memory_loader_set_personal_model(hu_memory_loader_t *loader, struct hu_personal_model *pm) {
@@ -259,7 +363,8 @@ hu_error_t hu_memory_loader_load(hu_memory_loader_t *loader, const char *query, 
                 if (hu_strategy_learner_create(loader->alloc, sl_db, &sl) == HU_OK) {
                     hu_query_category_t qcat =
                         hu_strategy_classify_query(query ? query : "", query_len);
-                    hu_retrieval_strategy_t learned = hu_strategy_learner_recommend(&sl, qcat);
+                    hu_retrieval_strategy_t learned =
+                        hu_strategy_learner_recommend_gated(&sl, qcat);
                     switch (learned) {
                     case HU_RSTRAT_KEYWORD:
                         qa.recommended_strategy = HU_ADAPTIVE_KEYWORD_ONLY;
@@ -300,9 +405,9 @@ hu_error_t hu_memory_loader_load(hu_memory_loader_t *loader, const char *query, 
                         hu_strategy_learner_init_tables(&sl);
                         hu_query_category_t qcat =
                             hu_strategy_classify_query(query ? query : "", query_len);
-                        hu_strategy_learner_record(&sl, qcat, HU_RSTRAT_GRAPH,
-                                                   pe == HU_OK && planner_len > 0,
-                                                   (int64_t)time(NULL));
+                        hu_strategy_learner_record_gated(&sl, qcat, HU_RSTRAT_GRAPH,
+                                                         pe == HU_OK && planner_len > 0,
+                                                         (int64_t)time(NULL));
                         hu_strategy_learner_deinit(&sl);
                     }
                 }
@@ -347,6 +452,7 @@ hu_error_t hu_memory_loader_load(hu_memory_loader_t *loader, const char *query, 
             res.scores = NULL;
 
 #ifdef HU_ENABLE_SQLITE
+            count = keep_contact_scope(loader, &entries, count, session_id, session_id_len);
             if (loader->memory && loader->memory->ctx && count > 0) {
                 sqlite3 *sl_db = hu_sqlite_memory_get_db(loader->memory);
                 if (sl_db) {
@@ -367,8 +473,8 @@ hu_error_t hu_memory_loader_load(hu_memory_loader_t *loader, const char *query, 
                             used_strat = HU_RSTRAT_HYBRID;
                             break;
                         }
-                        hu_strategy_learner_record(&sl, qcat, used_strat, count > 0,
-                                                   (int64_t)time(NULL));
+                        hu_strategy_learner_record_gated(&sl, qcat, used_strat, count > 0,
+                                                         (int64_t)time(NULL));
                         hu_strategy_learner_deinit(&sl);
                     }
                 }
@@ -449,6 +555,11 @@ hu_error_t hu_memory_loader_load(hu_memory_loader_t *loader, const char *query, 
                                   ? hu_wiki_recall_cap(loader->max_context_chars, wiki_len)
                                   : loader->max_context_chars;
 
+    /* Confidence boundary (HU_CONFIDENCE_BOUNDARY): a global row another
+     * contact's conversation wrote (experience, promises) passes
+     * keep_contact_scope; this drops it in LIVE, counts it in SHADOW. */
+    count = hu_confidence_filter_entries(loader->memory, loader->alloc, HU_CB_PATH_SEMANTIC,
+                                         &entries, count, session_id, session_id_len);
     if (!entries || count == 0)
         goto supplement;
 
@@ -475,6 +586,12 @@ hu_error_t hu_memory_loader_load(hu_memory_loader_t *loader, const char *query, 
          * not here in the recall list). */
         if (e->trust_tier == (int)HU_TRUST_UNTRUSTED)
             continue;
+        /* Same content policy as semantic recall: experience scaffolding (global
+         * turn logs holding other contacts' messages) and AI-identity
+         * confrontations never reach a reply prompt. Keyword recall skipped
+         * this check until 2026-10-02. */
+        if (hu_semantic_recall_hit_is_excluded(e->key, e->key_len, e->content, e->content_len))
+            continue;
         if (e->trust_tier <= (int)HU_TRUST_THIRD_PARTY && e->key && e->key_len > 0) {
             bool shadowed = false;
             for (size_t k = 0; k < count; k++) {
@@ -497,6 +614,14 @@ hu_error_t hu_memory_loader_load(hu_memory_loader_t *loader, const char *query, 
         size_t content_len = e->content_len;
         const char *timestamp = e->timestamp ? e->timestamp : "";
         size_t timestamp_len = e->timestamp_len ? e->timestamp_len : strlen(timestamp);
+
+        /* One memory may not take the whole budget: a single 7,680-char row
+         * crowded out every other memory on 2026-10-02. */
+        if (content_len > HU_RECALL_ITEM_MAX_CHARS) {
+            content_len = HU_RECALL_ITEM_MAX_CHARS;
+            while (content_len > 0 && ((unsigned char)content[content_len] & 0xC0) == 0x80)
+                content_len--;
+        }
 
         /* Format: ### Memory: {key}\n{content}\n(stored: {timestamp})\n\n */
         size_t overhead = 26 + key_len + timestamp_len;
@@ -585,7 +710,8 @@ supplement:
      * the memory span head-first, so these survive longest; and the model
      * reads them closest to the guard tail. */
     if (err == HU_OK && session_id && session_id_len > 0)
-        append_contact_insights(loader, session_id, session_id_len, out_context, out_context_len);
+        append_contact_insights(loader, query, query_len, session_id, session_id_len, out_context,
+                                out_context_len);
     if (err == HU_OK && session_id && session_id_len > 0)
         append_contact_wiki(loader, wiki_mode, wiki_text, wiki_len, session_id, session_id_len,
                             out_context, out_context_len);

@@ -3,6 +3,7 @@
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/log.h"
+#include "human/core/post_send_defer.h"
 #include "human/core/string.h"
 #include "human/memory.h"
 #include "human/platform.h"
@@ -15,9 +16,11 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "human/memory/confidence_repo.h"
 #include "human/memory/encrypted_store.h"
 #include "human/memory/entropy_gate.h"
 #include "human/memory/graph_index.h"
+#include "human/memory/prospective_repo.h"
 #include "human/memory/semantic_recall.h"
 #include "human/memory/sql_common.h"
 #include "human/memory/vector.h"
@@ -674,16 +677,8 @@ static const char *impl_name(void *ctx) {
 /* Embed one stored row into the semantic index. A failure here is logged and
  * NOT propagated: the row is stored; the vector is a derived index that the
  * reindex path can rebuild. */
-static void semantic_index_row(hu_sqlite_memory_t *self, const char *key, size_t key_len,
-                               const char *content, size_t content_len) {
-    if (!self || !self->sem_embedder || !self->sem_embedder->vtable || !self->sem_store ||
-        !self->sem_store->vtable || !key || key_len == 0 || !content || content_len == 0)
-        return;
-    /* Index policy: episodic "experience:" rows are stored (keyword recall,
-     * experience_log) but never embedded — they are harness scaffolding, not
-     * memories about the contact (semantic_recall.h). */
-    if (!hu_semantic_recall_key_is_indexable(key, key_len))
-        return;
+static void semantic_index_row_now(hu_sqlite_memory_t *self, const char *key, size_t key_len,
+                                   const char *content, size_t content_len) {
     hu_embedding_t emb = {0};
     hu_error_t err = self->sem_embedder->vtable->embed(self->sem_embedder->ctx, self->alloc,
                                                        content, content_len, &emb);
@@ -698,6 +693,72 @@ static void semantic_index_row(hu_sqlite_memory_t *self, const char *key, size_t
         hu_log_warn("memory.semantic", NULL, "vector insert failed for key %.*s: %s", (int)key_len,
                     key, hu_error_string(err));
     self->alloc->free(self->alloc->ctx, emb.values, emb.dim * sizeof(float));
+}
+
+/* HU_POST_SEND_DEFER (core/post_send_defer.h): the embedding of a row stored
+ * during a reply turn runs after the send. The row itself is stored now. */
+typedef struct sem_index_job {
+    hu_sqlite_memory_t *self;
+    char *key;
+    size_t key_len;
+    char *content;
+    size_t content_len;
+} sem_index_job_t;
+
+static void sem_index_job_run(void *arg) {
+    sem_index_job_t *j = (sem_index_job_t *)arg;
+    semantic_index_row_now(j->self, j->key, j->key_len, j->content, j->content_len);
+}
+
+static void sem_index_job_free(void *arg) {
+    sem_index_job_t *j = (sem_index_job_t *)arg;
+    hu_allocator_t *a = j->self->alloc;
+    a->free(a->ctx, j->key, j->key_len + 1);
+    a->free(a->ctx, j->content, j->content_len + 1);
+    a->free(a->ctx, j, sizeof(*j));
+}
+
+static bool semantic_index_row_defer(hu_sqlite_memory_t *self, const char *key, size_t key_len,
+                                     const char *content, size_t content_len) {
+    hu_gate_mode_t mode = hu_post_send_defer_window_mode();
+    if (mode == HU_GATE_OFF)
+        return false;
+    if (mode != HU_GATE_LIVE) { /* SHADOW: count it, copy nothing; the caller embeds inline */
+        (void)hu_post_send_defer_offer(HU_POST_SEND_JOB_EMBED, sem_index_job_run, NULL, NULL);
+        return false;
+    }
+    sem_index_job_t *j = (sem_index_job_t *)self->alloc->alloc(self->alloc->ctx, sizeof(*j));
+    if (!j)
+        return false;
+    j->self = self;
+    j->key = hu_strndup(self->alloc, key, key_len);
+    j->key_len = key_len;
+    j->content = hu_strndup(self->alloc, content, content_len);
+    j->content_len = content_len;
+    if (j->key && j->content &&
+        hu_post_send_defer_offer(HU_POST_SEND_JOB_EMBED, sem_index_job_run, sem_index_job_free, j))
+        return true;
+    if (j->key)
+        self->alloc->free(self->alloc->ctx, j->key, key_len + 1);
+    if (j->content)
+        self->alloc->free(self->alloc->ctx, j->content, content_len + 1);
+    self->alloc->free(self->alloc->ctx, j, sizeof(*j));
+    return false;
+}
+
+static void semantic_index_row(hu_sqlite_memory_t *self, const char *key, size_t key_len,
+                               const char *content, size_t content_len) {
+    if (!self || !self->sem_embedder || !self->sem_embedder->vtable || !self->sem_store ||
+        !self->sem_store->vtable || !key || key_len == 0 || !content || content_len == 0)
+        return;
+    /* Index policy: episodic "experience:" rows are stored (keyword recall,
+     * experience_log) but never embedded — they are harness scaffolding, not
+     * memories about the contact (semantic_recall.h). */
+    if (!hu_semantic_recall_key_is_indexable(key, key_len))
+        return;
+    if (semantic_index_row_defer(self, key, key_len, content, content_len))
+        return;
+    semantic_index_row_now(self, key, key_len, content, content_len);
 }
 
 static hu_error_t impl_store(void *ctx, const char *key, size_t key_len, const char *content,
@@ -767,6 +828,7 @@ static hu_error_t impl_store(void *ctx, const char *key, size_t key_len, const c
 
     if (rc != SQLITE_DONE)
         return HU_ERR_MEMORY_STORE;
+    hu_confidence_repo_stamp(self->db, key, key_len, session_id, session_id_len);
 
     /* Feed into MAGMA graph index for multi-dimensional reranking */
     if (self->graph_initialized && content && content_len > 0) {
@@ -822,6 +884,7 @@ static hu_error_t impl_store_ex(void *ctx, const char *key, size_t key_len, cons
     hu_str_free(self->alloc, id);
     if (rc != SQLITE_DONE)
         return HU_ERR_MEMORY_STORE;
+    hu_confidence_repo_stamp(self->db, key, key_len, session_id, session_id_len);
 
     if (self->graph_initialized && content && content_len > 0) {
         (void)hu_graph_index_add(&self->graph_index, key, key_len, content, content_len,
@@ -833,9 +896,13 @@ static hu_error_t impl_store_ex(void *ctx, const char *key, size_t key_len, cons
     return HU_OK;
 }
 
-static hu_error_t impl_recall(void *ctx, hu_allocator_t *alloc, const char *query, size_t query_len,
-                              size_t limit, const char *session_id, size_t session_id_len,
-                              hu_memory_entry_t **out, size_t *out_count) {
+/* boosts: NULL, or a zeroed `limit`-sized array that receives, per returned
+ * row, the graph-rerank boost folded into that row's score (0 for rows the
+ * rerank did not touch). Keeps impl_recall's output unchanged either way. */
+static hu_error_t recall_ranked(void *ctx, hu_allocator_t *alloc, const char *query,
+                                size_t query_len, size_t limit, const char *session_id,
+                                size_t session_id_len, hu_memory_entry_t **out, size_t *out_count,
+                                double *boosts) {
     hu_sqlite_memory_t *self = (hu_sqlite_memory_t *)ctx;
     *out = NULL;
     *out_count = 0;
@@ -930,8 +997,12 @@ static hu_error_t impl_recall(void *ctx, hu_allocator_t *alloc, const char *quer
                         }
                         (void)hu_graph_index_rerank(&self->graph_index, query, query_len, rkeys,
                                                     rkl, scores, count);
-                        for (size_t ri = 0; ri < count; ri++)
+                        for (size_t ri = 0; ri < count; ri++) {
+                            if (boosts)
+                                boosts[ri] = scores[ri] -
+                                             (isnan(entries[ri].score) ? 0.5 : entries[ri].score);
                             entries[ri].score = scores[ri];
+                        }
                     }
                     if (rkeys)
                         alloc->free(alloc->ctx, (void *)rkeys, count * sizeof(const char *));
@@ -1114,8 +1185,11 @@ static hu_error_t impl_recall(void *ctx, hu_allocator_t *alloc, const char *quer
                             size_t wp = 0;
                             for (size_t ei = 0; ei < echunks_count; ei++) {
                                 if (echunks[ei].passed) {
-                                    if (wp != ei)
+                                    if (wp != ei) {
                                         entries[wp] = entries[ei];
+                                        if (boosts)
+                                            boosts[wp] = boosts[ei];
+                                    }
                                     wp++;
                                 } else {
                                     free_entry(alloc, &entries[ei]);
@@ -1191,6 +1265,51 @@ static hu_error_t impl_recall(void *ctx, hu_allocator_t *alloc, const char *quer
     *out = entries;
     *out_count = count;
     return HU_OK;
+}
+
+static hu_error_t impl_recall(void *ctx, hu_allocator_t *alloc, const char *query, size_t query_len,
+                              size_t limit, const char *session_id, size_t session_id_len,
+                              hu_memory_entry_t **out, size_t *out_count) {
+    return recall_ranked(ctx, alloc, query, query_len, limit, session_id, session_id_len, out,
+                         out_count, NULL);
+}
+
+hu_error_t hu_sqlite_memory_recall_with_boosts(hu_memory_t *mem, hu_allocator_t *alloc,
+                                               const char *query, size_t query_len, size_t limit,
+                                               const char *session_id, size_t session_id_len,
+                                               hu_memory_entry_t **out, size_t *out_count,
+                                               double **boosts_out) {
+    if (!out || !out_count || !boosts_out)
+        return HU_ERR_INVALID_ARGUMENT;
+    *out = NULL;
+    *out_count = 0;
+    *boosts_out = NULL;
+    if (!alloc || !mem || !mem->ctx || !mem->vtable || mem->vtable->name != impl_name)
+        return HU_ERR_NOT_SUPPORTED;
+    if (limit == 0)
+        return HU_OK;
+    double *scratch = (double *)alloc->alloc(alloc->ctx, limit * sizeof(double));
+    if (!scratch)
+        return HU_ERR_OUT_OF_MEMORY;
+    memset(scratch, 0, limit * sizeof(double));
+    hu_error_t err = recall_ranked(mem->ctx, alloc, query, query_len, limit, session_id,
+                                   session_id_len, out, out_count, scratch);
+    if (err == HU_OK && *out_count > 0) {
+        double *b = (double *)alloc->alloc(alloc->ctx, *out_count * sizeof(double));
+        if (b) {
+            memcpy(b, scratch, *out_count * sizeof(double));
+            *boosts_out = b;
+        } else {
+            for (size_t i = 0; i < *out_count; i++)
+                hu_memory_entry_free_fields(alloc, &(*out)[i]);
+            alloc->free(alloc->ctx, *out, *out_count * sizeof(hu_memory_entry_t));
+            *out = NULL;
+            *out_count = 0;
+            err = HU_ERR_OUT_OF_MEMORY;
+        }
+    }
+    alloc->free(alloc->ctx, scratch, limit * sizeof(double));
+    return err;
 }
 
 static hu_error_t impl_get(void *ctx, hu_allocator_t *alloc, const char *key, size_t key_len,
@@ -1300,6 +1419,14 @@ static hu_error_t impl_forget(void *ctx, const char *key, size_t key_len, bool *
     }
     *deleted = sqlite3_changes(self->db) > 0;
     sqlite3_finalize(stmt);
+    /* The vector side keeps its own copy of the text, so an orphaned vector
+     * is still recallable: drop it with the row. Best effort, as on store. */
+    if (*deleted && self->sem_store && self->sem_store->vtable && self->sem_store->vtable->remove) {
+        hu_error_t rerr = self->sem_store->vtable->remove(self->sem_store->ctx, key, key_len);
+        if (rerr != HU_OK)
+            hu_log_warn("memory.semantic", NULL, "vector remove failed for key %.*s: %s",
+                        (int)key_len, key, hu_error_string(rerr));
+    }
     return HU_OK;
 }
 
@@ -1784,6 +1911,15 @@ hu_memory_t hu_sqlite_memory_create(hu_allocator_t *alloc, const char *db_path) 
             sqlite3_free(e);
     }
 
+    /* Prospective memory v2 (docs/superpowers/specs/2026-09-30-prospective-
+     * memory-v2-design.md §4.1): additive typed columns + fired -> status. */
+    if (hu_prospective_repo_ensure_schema(db) != HU_OK)
+        hu_log_warn("memory.sqlite", NULL, "prospective_memories v2 migration failed");
+    /* Confidence boundary provenance (confidence_repo.h): source_contact +
+     * share_level, backfilled conservatively. Metadata only. */
+    if (hu_confidence_repo_ensure_schema(db) < 0)
+        hu_log_warn("memory.sqlite", NULL, "memories provenance migration failed");
+
     hu_sqlite_memory_t *self =
         (hu_sqlite_memory_t *)alloc->alloc(alloc->ctx, sizeof(hu_sqlite_memory_t));
     if (!self) {
@@ -2090,6 +2226,31 @@ sqlite3 *hu_sqlite_memory_get_db(hu_memory_t *mem) {
     return ((hu_sqlite_memory_t *)mem->ctx)->db;
 }
 
+bool hu_sqlite_memory_session_of(hu_memory_t *mem, const char *key, size_t key_len, char *buf,
+                                 size_t cap) {
+    sqlite3 *db = hu_sqlite_memory_get_db(mem);
+    if (!db || !key || key_len == 0 || !buf || cap == 0)
+        return false;
+    buf[0] = '\0';
+    sqlite3_stmt *st = NULL;
+    if (sqlite3_prepare_v2(db, "SELECT COALESCE(session_id, '') FROM memories WHERE key = ?1", -1,
+                           &st, NULL) != SQLITE_OK)
+        return false;
+    sqlite3_bind_text(st, 1, key, (int)key_len, SQLITE_STATIC);
+    bool found = sqlite3_step(st) == SQLITE_ROW;
+    if (found) {
+        const char *sid = (const char *)sqlite3_column_text(st, 0);
+        size_t n = sid ? strlen(sid) : 0;
+        if (n >= cap)
+            n = cap - 1;
+        if (n)
+            memcpy(buf, sid, n);
+        buf[n] = '\0';
+    }
+    sqlite3_finalize(st);
+    return found;
+}
+
 #else /* !HU_ENABLE_SQLITE */
 #include "human/memory.h"
 
@@ -2108,6 +2269,16 @@ hu_memory_t hu_sqlite_memory_create(hu_allocator_t *alloc, const char *db_path) 
 hu_session_store_t hu_sqlite_memory_get_session_store(hu_memory_t *mem) {
     (void)mem;
     return (hu_session_store_t){.ctx = NULL, .vtable = NULL};
+}
+
+bool hu_sqlite_memory_session_of(hu_memory_t *mem, const char *key, size_t key_len, char *buf,
+                                 size_t cap) {
+    (void)mem;
+    (void)key;
+    (void)key_len;
+    if (buf && cap)
+        buf[0] = '\0';
+    return false;
 }
 
 #endif

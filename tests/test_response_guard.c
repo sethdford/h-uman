@@ -1015,6 +1015,41 @@ static void guard_ex_rejects_director_echo(void) {
     HU_ASSERT(report.detected_director_echo);
 }
 
+/* G6 scope: content the director told the reply to say is not an echo.
+ * 2026-09-30 "admit he hasn't really thought about it yet" made the reply
+ * "honestly haven't really thought about it yet..." a REJECT, and the retry
+ * sent a fragment. The instruction words around it still count. */
+static const char G6_ADMIT_DIRECTOR[] = "Keep it light and non-committal, admit he hasn't really "
+                                        "thought about it yet, a few connected thoughts";
+
+static bool g6_flags(const char *director, const char *reply) {
+    hu_allocator_t alloc = A();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_OK;
+    hu_guard_report_t report;
+    memset(&report, 0, sizeof(report));
+    hu_guard_context_t ctx = {0};
+    ctx.director_text = director;
+    ctx.director_len = strlen(director);
+    (void)hu_response_guard_check_ex(&alloc, reply, strlen(reply), &ctx, &out, &out_len, &outcome,
+                                     &report);
+    if (outcome == HU_GUARD_REWROTE && out) /* only a rewrite hands back an allocation */
+        alloc.free(alloc.ctx, out, out_len + 1);
+    return report.detected_director_echo;
+}
+
+static void guard_g6_passes_content_the_director_asked_for(void) {
+    HU_ASSERT(!g6_flags(G6_ADMIT_DIRECTOR, "honestly haven't really thought about it yet. usually "
+                                           "just the kids and me, maybe some friends"));
+    HU_ASSERT(!g6_flags("be brief and warm, tell her you're running about ten minutes late",
+                        "hey running about ten minutes late, sorry!"));
+}
+
+static void guard_g6_still_catches_instruction_words_beside_content(void) {
+    HU_ASSERT(g6_flags(G6_ADMIT_DIRECTOR, "keep it light and non-committal lol"));
+}
+
 /* G5 negative — recent_avg_len=0 (no history) disables the check.
  * A long response should pass through. */
 static void guard_ex_passes_long_response_when_no_avg(void) {
@@ -1916,6 +1951,24 @@ static void agent_recent_assistant_avg_len_empty_history_returns_zero(void) {
     HU_ASSERT_EQ(hu_agent_internal_recent_assistant_avg_len(&agent, 0), 0u);
 }
 
+/* Voice-first memos (review C2, 2026-09-28): a memo turn has no texting
+ * baseline, so G5 (both agent_turn.c and agent_stream.c) cannot shrink it. */
+static void agent_recent_assistant_avg_len_is_zero_on_a_memo_turn(void) {
+    char body[] = "hey what's up";
+    hu_owned_message_t msgs[1];
+    memset(msgs, 0, sizeof(msgs));
+    msgs[0].role = HU_ROLE_ASSISTANT;
+    msgs[0].content = body;
+    msgs[0].content_len = strlen(body);
+    hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    agent.history = msgs;
+    agent.history_count = 1;
+    HU_ASSERT_TRUE(hu_agent_internal_recent_assistant_avg_len(&agent, 5) > 0);
+    agent.voice_memo_turn = true;
+    HU_ASSERT_EQ(hu_agent_internal_recent_assistant_avg_len(&agent, 5), 0u);
+}
+
 static void agent_recent_assistant_avg_len_mixed_roles_skips_non_assistant(void) {
     char a1[] = "twelve bytes";       /* len=12 */
     char a2[] = "ten bytes!";         /* len=10 */
@@ -2388,6 +2441,37 @@ static void dpo_path_for_day_returns_zero_on_tiny_buffer(void) {
         (size_t)0);
 }
 
+/* Replay-harness review (PR #594): the live logger built its path from $HOME,
+ * so a replay pointed at a scratch HU_STATE_DIR still appended guard
+ * rejections to the real ~/.human/training-data. It must follow the state dir. */
+static void dpo_log_path_follows_state_dir_not_home(void) {
+    char prev_home[1024] = "", prev_state[1024] = "";
+    const char *h = getenv("HOME"), *st = getenv("HU_STATE_DIR");
+    bool had_home = h != NULL, had_state = st != NULL;
+    snprintf(prev_home, sizeof(prev_home), "%s", h ? h : "");
+    snprintf(prev_state, sizeof(prev_state), "%s", st ? st : "");
+    setenv("HOME", "/nonexistent-home", 1);
+    setenv("HU_STATE_DIR", "/run/replay/state", 1);
+    char buf[512];
+    size_t n = hu_response_guard_dpo_log_path((int64_t)1779840000, buf, sizeof(buf));
+    char unset_buf[512];
+    unsetenv("HU_STATE_DIR");
+    size_t n2 = hu_response_guard_dpo_log_path((int64_t)1779840000, unset_buf, sizeof(unset_buf));
+    if (had_home)
+        setenv("HOME", prev_home, 1);
+    else
+        unsetenv("HOME");
+    if (had_state)
+        setenv("HU_STATE_DIR", prev_state, 1);
+    else
+        unsetenv("HU_STATE_DIR");
+    HU_ASSERT_TRUE(n > 0);
+    HU_ASSERT_STR_EQ(buf, "/run/replay/state/training-data/m3-dpo-rejections-2026-05-27.jsonl");
+    HU_ASSERT_TRUE(n2 > 0);
+    HU_ASSERT_STR_EQ(unset_buf,
+                     "/nonexistent-home/.human/training-data/m3-dpo-rejections-2026-05-27.jsonl");
+}
+
 /* ── Sprint 41 follow-up #4 — per-channel G9 disable list ─────────────── */
 
 static void g9_disabled_for_channel_returns_false_when_list_empty(void) {
@@ -2447,82 +2531,13 @@ static void g9_disabled_for_channel_jordan_case_bypassed_when_channel_listed(voi
 
 /* ── Task 10 (AC-9): Learned per-contact G5 baseline ─────────────────── */
 
-static void g5_learned_baseline_within_normal_range_passes(void) {
-    /* AC-9: Seth-normal length to a contact should pass when within the
-     * learned baseline. If Seth habitually sends 500-char messages to a
-     * contact, a 400-char reply should not trip G5. */
-    hu_allocator_t alloc = A();
-    const char *response = "This is a reasonable message that Seth might send to a "
-                           "contact he talks to regularly. It's around 200 chars long "
-                           "and should be perfectly fine because the contact is used to "
-                           "getting messages of this length.";
-    size_t response_len = strlen(response);
-
-    hu_guard_context_t ctx = {0};
-    ctx.learned_avg_message_length = 250; /* Seth sends 250-char messages to this contact */
-    ctx.recent_avg_len = 50;              /* rolling avg would flag this as anomalous (4x) */
-
-    char *out = NULL;
-    size_t out_len = 0;
-    hu_guard_outcome_t outcome = HU_GUARD_OK;
-    hu_guard_report_t report = {0};
-
-    HU_ASSERT_EQ(hu_response_guard_check_ex(&alloc, response, response_len, &ctx, &out, &out_len,
-                                            &outcome, &report),
-                 HU_OK);
-    HU_ASSERT_EQ((int)outcome, (int)HU_GUARD_OK);
-    HU_ASSERT_FALSE(report.detected_length_anomaly);
-}
-
-static void g5_learned_baseline_genuinely_anomalous_still_rejected(void) {
-    /* AC-9: a genuinely huge dump (5x learned baseline) should still be
-     * rejected, showing the learned baseline doesn't disable length checking,
-     * just relaxes it for normal contact behavior. */
-    hu_allocator_t alloc = A();
-    const char *response = "This is a deliberately enormous response designed to be way "
-                           "bigger than the learned baseline. " /* ~100 chars so far */
-                           "The contact usually gets 250-char messages, but we're sending "
-                           "800 characters here, which is 3x the learned baseline and should "
-                           "be rejected as a length anomaly. This simulates a context dump or "
-                           "prompt leak that happens to come from the model despite having a "
-                           "learned baseline context. The absolute floor (320 chars) allows "
-                           "legitimate but longish messages, but 800 is way outside normal. "
-                           "This entire string is designed to exceed 800 characters to trigger "
-                           "the anomaly rejection, even with the learned baseline in place. "
-                           "We pad it further to be certain the byte count clears the 800 mark: "
-                           "the guard must treat a payload of this magnitude as a clear outlier "
-                           "regardless of how chatty the contact normally is, because no human "
-                           "texting a friend dumps this many characters in a single turn. The "
-                           "learned baseline relaxes the threshold for normal variation, not for "
-                           "a wall of text like this one, which is unmistakably a context leak.";
-    size_t response_len = strlen(response);
-    HU_ASSERT(response_len > 800); /* verify test setup */
-
-    hu_guard_context_t ctx = {0};
-    ctx.learned_avg_message_length = 250; /* Seth sends 250-char messages to this contact */
-
-    char *out = NULL;
-    size_t out_len = 0;
-    hu_guard_outcome_t outcome = HU_GUARD_OK;
-    hu_guard_report_t report = {0};
-
-    HU_ASSERT_EQ(hu_response_guard_check_ex(&alloc, response, response_len, &ctx, &out, &out_len,
-                                            &outcome, &report),
-                 HU_OK);
-    HU_ASSERT_EQ((int)outcome, (int)HU_GUARD_REJECT);
-    HU_ASSERT_TRUE(report.detected_length_anomaly);
-}
-
 static void g5_without_learned_baseline_falls_back_to_rolling_avg(void) {
-    /* AC-9: when learned_avg_message_length is 0 (not available), fall back to
-     * the rolling average + multiplier. This ensures backward compatibility
-     * when no personal model data exists. */
+    /* G5 judges the rolling average + multiplier. */
     hu_allocator_t alloc = A();
     const char *response = "Short reply";
     size_t response_len = strlen(response);
 
     hu_guard_context_t ctx = {0};
-    ctx.learned_avg_message_length = 0; /* no learned baseline */
     ctx.recent_avg_len = 50;
     ctx.length_anomaly_mult = 8;
 
@@ -2541,7 +2556,7 @@ static void g5_without_learned_baseline_falls_back_to_rolling_avg(void) {
 
 static void g5_absolute_floor_prevents_death_spiral(void) {
     /* AC-9: the absolute floor (320 chars) prevents the forced-short →
-     * low-avg → reject death-spiral. Even with a near-zero learned baseline,
+     * low-avg → reject death-spiral. Even with a near-zero rolling average,
      * natural-length messages below 320 should not be rejected. */
     hu_allocator_t alloc = A();
     const char *response = "This is a completely normal response that's maybe 100 chars "
@@ -2551,7 +2566,7 @@ static void g5_absolute_floor_prevents_death_spiral(void) {
     HU_ASSERT(response_len < 320); /* verify floor */
 
     hu_guard_context_t ctx = {0};
-    ctx.learned_avg_message_length = 10; /* contact sends VERY short messages */
+    ctx.recent_avg_len = 10; /* contact gets VERY short messages */
 
     char *out = NULL;
     size_t out_len = 0;
@@ -2756,6 +2771,8 @@ void run_response_guard_tests(void) {
     HU_RUN_TEST(guard_g5_does_not_fire_below_absolute_floor);
     HU_RUN_TEST(guard_ex_rejects_length_anomaly);
     HU_RUN_TEST(guard_ex_rejects_director_echo);
+    HU_RUN_TEST(guard_g6_passes_content_the_director_asked_for);
+    HU_RUN_TEST(guard_g6_still_catches_instruction_words_beside_content);
     HU_RUN_TEST(guard_ex_passes_long_response_when_no_avg);
     HU_RUN_TEST(guard_ex_passes_legit_5x_response);
     HU_RUN_TEST(guard_ex_passes_short_director_text);
@@ -2765,6 +2782,7 @@ void run_response_guard_tests(void) {
      * call sites (agent_stream.c, agent_turn.c) to populate
      * `hu_guard_context_t.recent_avg_len` and enforce G5 at runtime. */
     HU_RUN_TEST(agent_recent_assistant_avg_len_empty_history_returns_zero);
+    HU_RUN_TEST(agent_recent_assistant_avg_len_is_zero_on_a_memo_turn);
     HU_RUN_TEST(agent_recent_assistant_avg_len_mixed_roles_skips_non_assistant);
     HU_RUN_TEST(agent_recent_assistant_avg_len_uses_most_recent_n);
 
@@ -2872,6 +2890,7 @@ void run_response_guard_tests(void) {
     HU_RUN_TEST(dpo_path_for_day_rolls_at_utc_midnight);
     HU_RUN_TEST(dpo_path_for_day_returns_zero_on_null_home);
     HU_RUN_TEST(dpo_path_for_day_returns_zero_on_tiny_buffer);
+    HU_RUN_TEST(dpo_log_path_follows_state_dir_not_home);
 
     /* Sprint 41 follow-up #4 — per-channel G9 disable list. */
     HU_RUN_TEST(g9_disabled_for_channel_returns_false_when_list_empty);
@@ -2880,9 +2899,8 @@ void run_response_guard_tests(void) {
     HU_RUN_TEST(g9_disabled_for_channel_does_not_partial_match);
     HU_RUN_TEST(g9_disabled_for_channel_jordan_case_bypassed_when_channel_listed);
 
-    /* Task 10 (AC-9) — learned per-contact G5 baseline. */
-    HU_RUN_TEST(g5_learned_baseline_within_normal_range_passes);
-    HU_RUN_TEST(g5_learned_baseline_genuinely_anomalous_still_rejected);
+    /* G5 rolling-average fallback + absolute floor. (The learned per-contact
+     * baseline was never assigned in src; removed 2026-10-01.) */
     HU_RUN_TEST(g5_without_learned_baseline_falls_back_to_rolling_avg);
     HU_RUN_TEST(g5_absolute_floor_prevents_death_spiral);
 

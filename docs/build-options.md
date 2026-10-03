@@ -11,7 +11,7 @@ GENERATED FILE. Do not hand-edit — regenerate with:
 bash scripts/dev/build-options-table.sh --write
 ```
 
-Reflects `CMakeLists.txt` + `CMakePresets.json` as of commit `d3be0c4cb` (the most recent commit to touch either file) — keyed to a commit rather than wall-clock time so re-running this script with no changes to either file produces byte-identical output.
+Reflects `CMakeLists.txt` + `CMakePresets.json` as of commit `071c88b26` (the most recent commit to touch either file) — keyed to a commit rather than wall-clock time so re-running this script with no changes to either file produces byte-identical output.
 
 The "Presets ON" column lists every `configurePresets` entry (after resolving `inherits` chains) whose effective cache value for that option is `ON` — either because the preset (or a preset it inherits from) sets it explicitly, or because no preset in the chain overrides it and the option's own default (below) is `ON`.
 
@@ -47,7 +47,6 @@ The "Presets ON" column lists every `configurePresets` entry (after resolving `i
 | `HU_ENABLE_ML` | OFF | dev, prod, release, dev-neural, rl_sota, release-reproducible | Build ML training subsystem (BPE tokenizer, dataloader, experiment loop) |
 | `HU_ENABLE_NEURAL_MEMORY` | OFF | dev-neural | W10 neural memory placeholder (schema/ONNX path; default OFF) |
 | `HU_ENABLE_SELF_MODEL` | OFF | *(none)* | Build agent behavioral self-model (per-turn observation ring buffer) |
-| `HU_ENABLE_ACTION_LAYERS` | OFF | *(none)* | Inject drift + TOM-clarification directives into per-turn prompts (Spec 2026-05-24) |
 | `HU_ENABLE_FEEDS` | OFF | dev, prod, release, dev-neural, rl_sota, release-reproducible | Build feed ingestion and research agent |
 | `HU_ENABLE_SOCIAL` | OFF | *(none)* | Build social feed ingestion (Facebook, Instagram) |
 | `HU_ENABLE_EMBEDDED_MODEL` | OFF | dev, prod, release, dev-neural, rl_sota, release-reproducible | Enable embedded model provider (llama.cpp/llama-cli) |

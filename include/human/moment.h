@@ -117,6 +117,18 @@ hu_error_t hu_moment_compose_from_inputs(
     const char *contact_tz, /* IANA name, e.g. "America/Los_Angeles"; NULL = use local */
     int64_t now_s, hu_moment_t *out);
 
+/* Same, for composing the reply to `answering_text` — the inbound message
+ * being answered, which is NOT in `history` (history is the thread before
+ * it). The sign-off / defer cues read that text instead of history's last
+ * inbound, so "night!" after a gap matches the night sign-off. NULL or ""
+ * behaves exactly like hu_moment_compose_from_inputs. */
+hu_error_t hu_moment_compose_for_reply(const struct hu_persona_t *persona,
+                                       const struct hu_persona_overlay_t *overlay,
+                                       const struct hu_conversation_history_t *history,
+                                       int64_t last_their_ts_s, int64_t last_our_ts_s,
+                                       const char *contact_tz, const char *answering_text,
+                                       int64_t now_s, hu_moment_t *out);
+
 /* Render struct → prompt fragment (≤ ~256 chars). */
 hu_error_t hu_moment_render_prompt(const hu_moment_t *moment, char *buf, size_t buf_cap,
                                    size_t *out_len);

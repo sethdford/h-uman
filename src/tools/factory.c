@@ -102,7 +102,6 @@
 #include "human/tools/send_voice_message.h"
 #include "human/tools/skill_write.h"
 #include "human/tools/spawn.h"
-#include "human/tools/task_tools.h"
 #include "human/tools/tool_search.h"
 #include "human/tools/voice_clone.h"
 #include "human/tools/web_fetch.h"
@@ -703,34 +702,6 @@ hu_error_t hu_tools_create_default(hu_allocator_t *alloc, const char *workspace_
 
     /* ask_user tool */
     tools[idx] = hu_tool_ask_user_create(alloc, NULL);
-    if (!tools[idx].ctx || !tools[idx].vtable) {
-        goto fail;
-    }
-    idx++;
-
-    /* task_create tool */
-    tools[idx] = hu_tool_task_create(alloc, NULL);
-    if (!tools[idx].ctx || !tools[idx].vtable) {
-        goto fail;
-    }
-    idx++;
-
-    /* task_update tool */
-    tools[idx] = hu_tool_task_update(alloc, NULL);
-    if (!tools[idx].ctx || !tools[idx].vtable) {
-        goto fail;
-    }
-    idx++;
-
-    /* task_list tool */
-    tools[idx] = hu_tool_task_list(alloc, NULL);
-    if (!tools[idx].ctx || !tools[idx].vtable) {
-        goto fail;
-    }
-    idx++;
-
-    /* task_get tool */
-    tools[idx] = hu_tool_task_get(alloc, NULL);
     if (!tools[idx].ctx || !tools[idx].vtable) {
         goto fail;
     }

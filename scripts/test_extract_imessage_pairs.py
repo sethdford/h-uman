@@ -51,7 +51,11 @@ import unittest
 sys.path.insert(0, os.path.dirname(__file__))
 from extract_imessage_pairs import (
     DECODE_FAILURE_BUDGET,
+    collapse_turns,
+    extract_ground_truth,
     extract_text_from_attributed_body,
+    extract_training_pairs,
+    mark_daemon_sends,
     report_decode_failures,
 )
 
@@ -371,6 +375,98 @@ class TestAllDecodersAgree(unittest.TestCase):
         self.assertIsNotNone(
             self._load("blind_ab/imessage_text.py", "decode_attributed_body")
         )
+
+
+def _msg(text, from_me, ts):
+    return {"text": text, "is_from_me": from_me, "timestamp": ts, "contact": "+15550000001",
+            "chat_id": "+15550000001", "rowid": ts, "datetime": ""}
+
+
+class TestDaemonSendsAreNotSeth(unittest.TestCase):
+    """chat.db marks the daemon's sends is_from_me too. 2026-09-30: 135 of
+    1,303 training pairs ended in daemon text ("<channel|>yum, save me a
+    piece!", "how can I help you with your question about AI?"), and the
+    nightly SFT set trained on 126 of them as Seth."""
+
+    RECORDS = [(1_000_000.0, "how can i help you with your question about ai")]
+
+    def test_a_from_me_row_matching_a_daemon_record_in_time_is_not_seth(self):
+        msgs = [_msg("How can I help you with your question about AI?", True, 1_000_100)]
+        mark_daemon_sends(msgs, self.RECORDS)
+        self.assertFalse(msgs[0]["is_seth"])
+
+    def test_the_same_words_far_from_any_daemon_record_stay_seth(self):
+        msgs = [_msg("How can I help you with your question about AI?", True, 2_000_000)]
+        mark_daemon_sends(msgs, self.RECORDS)
+        self.assertTrue(msgs[0]["is_seth"])
+
+    def test_short_generic_replies_are_never_matched(self):
+        msgs = [_msg("lol", True, 1_000_000)]
+        mark_daemon_sends(msgs, [(1_000_000.0, "lol yeah")])
+        self.assertTrue(msgs[0]["is_seth"])
+
+    def test_inbound_messages_are_never_seth(self):
+        msgs = [_msg("hey", False, 1_000_000)]
+        mark_daemon_sends(msgs, self.RECORDS)
+        self.assertFalse(msgs[0]["is_seth"])
+
+    def test_training_pairs_skip_a_daemon_reply_but_keep_seths(self):
+        window = [_msg("what's up", False, 999_000),
+                  _msg("How can I help you with your question about AI?", True, 1_000_100),
+                  _msg("nothing much", False, 1_000_200),
+                  _msg("cool, grabbing dinner in a bit", True, 1_000_300)]
+        mark_daemon_sends(window, self.RECORDS)
+        targets = [p["messages"][-1]["content"] for p in extract_training_pairs([window])]
+        self.assertEqual(targets, ["cool, grabbing dinner in a bit"])
+
+
+class TestRepliesAreWholeTurns(unittest.TestCase):
+    """Each training example ended in ONE bubble. Seth's "Excellent!" then
+    "We gonna hang out soon?" became two examples, so the model never saw a
+    reply that carries two thoughts: 50% of Seth's replies do, 35% of the
+    twin's (2026-10-02), and a prompt rule moved it only 28% -> 34%."""
+
+    WINDOW = [_msg("got the job!!", False, 1000),
+              _msg("Excellent!", True, 1010),
+              _msg("We gonna hang out soon?", True, 1025),
+              _msg("yes!! friday?", False, 1100),
+              _msg("Friday works", True, 1120)]
+
+    def test_consecutive_bubbles_of_one_speaker_become_one_turn(self):
+        turns = collapse_turns(self.WINDOW)
+        self.assertEqual([t["text"] for t in turns],
+                         ["got the job!!", "Excellent!\nWe gonna hang out soon?", "yes!! friday?",
+                          "Friday works"])
+        self.assertEqual(turns[1]["timestamp"], 1010)  # when the reply started
+
+    def test_a_long_pause_starts_a_new_turn(self):
+        window = [_msg("hey", False, 1000), _msg("on my way", True, 1010),
+                  _msg("ok here now", True, 1010 + 600)]
+        self.assertEqual(len(collapse_turns(window)), 3)
+
+    def test_daemon_bubbles_never_merge_into_seths_turn(self):
+        window = [_msg("hey", False, 1000), _msg("How can I help you with that?", True, 1005),
+                  _msg("lol ignore that", True, 1010)]
+        mark_daemon_sends(window, [(1000.0, "how can i help you with that")])
+        turns = collapse_turns(window)
+        self.assertEqual([t["text"] for t in turns],
+                         ["hey", "How can I help you with that?", "lol ignore that"])
+
+    def test_training_targets_are_whole_replies_with_whole_context(self):
+        pairs = extract_training_pairs([self.WINDOW])
+        targets = [p["messages"][-1]["content"] for p in pairs]
+        self.assertEqual(targets, ["Excellent!\nWe gonna hang out soon?", "Friday works"])
+        last = pairs[1]["messages"]
+        self.assertEqual([m["role"] for m in last], ["user", "assistant", "user", "assistant"])
+        self.assertEqual(last[1]["content"], "Excellent!\nWe gonna hang out soon?")
+
+    def test_ground_truth_pairs_whole_turns(self):
+        gt = extract_ground_truth([self.WINDOW])
+        self.assertEqual([(g["incoming"], g["seth_reply"]) for g in gt],
+                         [("got the job!!", "Excellent!\nWe gonna hang out soon?"),
+                          ("yes!! friday?", "Friday works")])
+        self.assertEqual(gt[1]["context_turns"][-1],
+                         {"from": "seth", "text": "Excellent!\nWe gonna hang out soon?"})
 
 
 if __name__ == "__main__":

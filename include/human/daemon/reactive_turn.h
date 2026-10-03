@@ -18,6 +18,7 @@
 #include "human/agent/inner_thoughts.h" /* hu_inner_thought_store_t */
 #include "human/channel.h"              /* hu_channel_history_entry_t */
 #include "human/context/repair.h"       /* hu_repair_signal_t */
+#include "human/core/post_send_defer.h" /* the reply turn's post-send window */
 #include "human/daemon.h"               /* hu_service_channel_t */
 #include "human/daemon_proactive.h"     /* hu_proactive_context_t */
 #include "human/persona.h"              /* hu_contact_profile_t */
@@ -49,6 +50,7 @@ typedef struct hu_reactive_turn_ctx {
     const char *combined; /* the batched inbound text */
     size_t combined_len;
     bool llm_decides; /* channels.<ch>.daemon.llm_decides */
+    bool is_group;    /* group thread: prospective reminders never fire here */
 
     /* ── Loop-lifetime state the slices read/write in place ───────────── */
     hu_daemon_comfort_pending_t *comfort_pending;  /* HU_COMFORT_PENDING_MAX slots */
@@ -72,12 +74,19 @@ typedef struct hu_reactive_turn_ctx {
     size_t ctx_count;
 } hu_reactive_turn_ctx_t;
 
+/* Session messages restored into agent history per turn: the newest this many.
+ * The recent thread reaches the model through the system prompt's
+ * conversation context; restoring a contact's whole stored history pushed
+ * long threads past the 100-message compaction threshold, and every turn paid
+ * a ~13 s summary call whose result the history budget then dropped. */
+#define HU_DAEMON_RESTORE_RECENT 24
+
 /* Slice A: clear the agent's history, select the active channel and persona
- * override, restore the sender's prior conversation from the session store,
- * then (outside HU_IS_TEST) load the per-contact profile, run BTH style
+ * override, restore the sender's last HU_DAEMON_RESTORE_RECENT messages from the
+ * session store, then (outside HU_IS_TEST) load the per-contact profile, run BTH style
  * learning, load channel history, consume a pending comfort record and gather
  * cross-channel context. Fills the output fields of `rt`; every output starts
- * NULL/0. Pure move of the former daemon.c body — no behavior change. */
+ * NULL/0. Moved from daemon.c; the restore window was added 2026-10-02. */
 void hu_daemon_reactive_context_load(hu_allocator_t *alloc, struct hu_agent *agent,
                                      const struct hu_config *config, hu_service_channel_t *channels,
                                      size_t channel_count, hu_reactive_turn_ctx_t *rt);
@@ -91,5 +100,17 @@ void hu_daemon_reactive_context_load(hu_allocator_t *alloc, struct hu_agent *age
  * Compiled out under HU_IS_TEST exactly as the daemon.c body was. */
 void hu_daemon_reactive_prompt_build(hu_allocator_t *alloc, struct hu_agent *agent,
                                      const struct hu_config *config, hu_reactive_turn_ctx_t *rt);
+
+/* End of a reactive turn: clear every per-turn field the daemon set on the
+ * agent (contexts, history view, model/temperature/thinking overrides, lean
+ * prompt, reply budget, memo/self-test flags, memory session scope). Does not
+ * free anything — the contexts belong to the caller. Shared by hu_service_run
+ * and the replay harness. */
+void hu_daemon_reactive_turn_end(struct hu_agent *agent);
+
+/* Drop the agent's memory session scope (agent + memory backend), so the next
+ * turn does not inherit a stale contact. Part of hu_daemon_reactive_turn_end;
+ * the proactive path calls it alone. */
+void hu_daemon_agent_clear_session_scope(struct hu_agent *agent);
 
 #endif /* HU_DAEMON_REACTIVE_TURN_H */

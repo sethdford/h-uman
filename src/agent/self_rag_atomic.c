@@ -27,6 +27,8 @@
 
 #include "human/agent/response_verifier.h" /* sprint-2c Story A — hu_negatives_scan_claim */
 #include "human/core/log.h"
+#include "human/core/log_redact.h"
+#include "human/core/string.h"
 #include "human/memory/corrective_rag.h"
 /* Relation row payloads from v1 `HU_MEM_RELATION` facade reads (`hu_memory_relation_row_t`). */
 #include "human/memory/memory.h"
@@ -41,9 +43,8 @@
  * cosmetics; the splitter is left-to-right. The trailing/leading spaces are
  * intentional — we split on whole-word matches only. */
 static const char *const k_preps[] = {
-    " at ", " in ", " on ", " since ", " from ", " to ",
-    " for ", " with ", " by ", " of ", " about ", " near ",
-    NULL,
+    " at ",   " in ", " on ", " since ", " from ", " to ", " for ",
+    " with ", " by ", " of ", " about ", " near ", NULL,
 };
 
 typedef struct atomic_ctx {
@@ -54,9 +55,15 @@ typedef struct atomic_ctx {
 /* Trim leading/trailing ASCII whitespace and write into dst. dst_cap must be
  * large enough for the trimmed result + nul. */
 static void trim_into(const char *src, size_t len, char *dst, size_t dst_cap) {
-    if (dst_cap == 0) return;
-    while (len > 0 && isspace((unsigned char)src[0])) { src++; len--; }
-    while (len > 0 && isspace((unsigned char)src[len - 1])) { len--; }
+    if (dst_cap == 0)
+        return;
+    while (len > 0 && isspace((unsigned char)src[0])) {
+        src++;
+        len--;
+    }
+    while (len > 0 && isspace((unsigned char)src[len - 1])) {
+        len--;
+    }
     size_t copy = len < dst_cap - 1 ? len : dst_cap - 1;
     if (copy > 0)
         memcpy(dst, src, copy);
@@ -65,41 +72,17 @@ static void trim_into(const char *src, size_t len, char *dst, size_t dst_cap) {
 
 /* Find the next sentence break starting at `from`. Returns the offset of the
  * terminator and sets *is_question. End-of-buffer counts as a terminator. */
-static size_t next_sentence_end(const char *s, size_t len, size_t from,
-                                 bool *is_question) {
+static size_t next_sentence_end(const char *s, size_t len, size_t from, bool *is_question) {
     *is_question = false;
     for (size_t i = from; i < len; i++) {
-        if (s[i] == '.' || s[i] == '!') return i;
-        if (s[i] == '?') { *is_question = true; return i; }
+        if (s[i] == '.' || s[i] == '!')
+            return i;
+        if (s[i] == '?') {
+            *is_question = true;
+            return i;
+        }
     }
     return len;
-}
-
-/* Case-insensitive prefix match against a fixed needle. Skips leading
- * ASCII whitespace in the haystack so "   I think" matches "I think".
- *
- * The boundary check (next char after prefix is non-alpha) only fires
- * when the prefix's LAST char is alpha — otherwise the prefix already
- * encodes its own boundary (trailing space, etc.). Example: prefix
- * "Maybe " matching "Maybe Berlin..." — the trailing space IS the
- * boundary; the next char ('B') belongs to the next word. */
-static bool sentence_starts_with_ci(const char *s, size_t len, const char *prefix) {
-    size_t i = 0;
-    while (i < len && isspace((unsigned char)s[i])) i++;
-    size_t pl = strlen(prefix);
-    if (pl == 0 || len - i < pl) return false;
-    for (size_t j = 0; j < pl; j++) {
-        if (tolower((unsigned char)s[i + j]) != tolower((unsigned char)prefix[j]))
-            return false;
-    }
-    char last = prefix[pl - 1];
-    bool last_is_alpha = isalpha((unsigned char)last) != 0;
-    if (last_is_alpha && i + pl < len) {
-        char c = s[i + pl];
-        if (isalpha((unsigned char)c) || c == '_' || c == '\'')
-            return false;
-    }
-    return true;
 }
 
 /* W11 — propositional-claim filter. Returns false when the sentence is
@@ -134,23 +117,63 @@ static bool sentence_starts_with_ci(const char *s, size_t len, const char *prefi
 static bool sentence_is_propositional_claim(const char *s, size_t len) {
     static const char *const k_skip[] = {
         /* Opinion / mental verbs. */
-        "I think",   "I believe", "I feel",   "I guess",     "I suppose",
-        "I assume",  "I hope",    "I imagine","I doubt",     "I wonder",
-        "I reckon",  "I bet",     "I'd guess","I would guess",
+        "I think",
+        "I believe",
+        "I feel",
+        "I guess",
+        "I suppose",
+        "I assume",
+        "I hope",
+        "I imagine",
+        "I doubt",
+        "I wonder",
+        "I reckon",
+        "I bet",
+        "I'd guess",
+        "I would guess",
         /* Hedges. */
-        "Maybe ",    "Perhaps ",  "Probably ","Possibly ",
-        "In my opinion","It seems","It feels","Apparently ","Supposedly ",
+        "Maybe ",
+        "Perhaps ",
+        "Probably ",
+        "Possibly ",
+        "In my opinion",
+        "It seems",
+        "It feels",
+        "Apparently ",
+        "Supposedly ",
         /* Imperatives / requests. The leading verb is the tell. */
-        "Tell me",   "Show me",   "Give me",  "Help me",     "Let me",
-        "Please",    "Could you", "Can you",  "Would you",   "Will you",
-        "Shall we",  "Should I",  "Shall I",  "Do you",      "Are you",
-        "Make me",   "Create ",   "Write ",   "Generate ",   "Send ",
-        "Draft ",    "Brainstorm","Suggest ", "Recommend ",  "Explain ",
-        "Summarize", "Translate ","Rewrite ",
+        "Tell me",
+        "Show me",
+        "Give me",
+        "Help me",
+        "Let me",
+        "Please",
+        "Could you",
+        "Can you",
+        "Would you",
+        "Will you",
+        "Shall we",
+        "Should I",
+        "Shall I",
+        "Do you",
+        "Are you",
+        "Make me",
+        "Create ",
+        "Write ",
+        "Generate ",
+        "Send ",
+        "Draft ",
+        "Brainstorm",
+        "Suggest ",
+        "Recommend ",
+        "Explain ",
+        "Summarize",
+        "Translate ",
+        "Rewrite ",
         NULL,
     };
     for (size_t k = 0; k_skip[k]; k++) {
-        if (sentence_starts_with_ci(s, len, k_skip[k]))
+        if (hu_str_sentence_starts_with_ci(s, len, k_skip[k]))
             return false;
     }
     return true;
@@ -162,8 +185,11 @@ static size_t alpha_word_count(const char *s, size_t len) {
     bool in_word = false;
     for (size_t i = 0; i < len; i++) {
         bool a = isalpha((unsigned char)s[i]) != 0;
-        if (a && !in_word) { n++; in_word = true; }
-        else if (!a) in_word = false;
+        if (a && !in_word) {
+            n++;
+            in_word = true;
+        } else if (!a)
+            in_word = false;
     }
     return n;
 }
@@ -171,8 +197,8 @@ static size_t alpha_word_count(const char *s, size_t len) {
 /* Find the next preposition match in [s, s+len) starting at `from`. Returns
  * the byte offset of the leading space, the matching preposition string in
  * *out_prep, and its length in *out_prep_len. Returns SIZE_MAX if none. */
-static size_t find_next_prep(const char *s, size_t len, size_t from,
-                              const char **out_prep, size_t *out_prep_len) {
+static size_t find_next_prep(const char *s, size_t len, size_t from, const char **out_prep,
+                             size_t *out_prep_len) {
     size_t best_off = (size_t)-1;
     const char *best_prep = NULL;
     size_t best_len = 0;
@@ -180,13 +206,17 @@ static size_t find_next_prep(const char *s, size_t len, size_t from,
         const char *p = k_preps[k];
         size_t pl = strlen(p);
         /* Manual case-insensitive substring search starting at `from`. */
-        if (len < pl || from > len - pl) continue;
+        if (len < pl || from > len - pl)
+            continue;
         for (size_t i = from; i + pl <= len; i++) {
             bool match = true;
             for (size_t j = 0; j < pl; j++) {
                 char a = (char)tolower((unsigned char)s[i + j]);
                 char b = (char)tolower((unsigned char)p[j]);
-                if (a != b) { match = false; break; }
+                if (a != b) {
+                    match = false;
+                    break;
+                }
             }
             if (match) {
                 if (i < best_off) {
@@ -198,8 +228,10 @@ static size_t find_next_prep(const char *s, size_t len, size_t from,
             }
         }
     }
-    if (out_prep) *out_prep = best_prep;
-    if (out_prep_len) *out_prep_len = best_len;
+    if (out_prep)
+        *out_prep = best_prep;
+    if (out_prep_len)
+        *out_prep_len = best_len;
     return best_off;
 }
 
@@ -207,12 +239,13 @@ static size_t find_next_prep(const char *s, size_t len, size_t from,
  * out[]. Returns number written. The stem is the substring before the first
  * preposition; each subsequent preposition+segment becomes "stem prep
  * segment". With zero prepositions the whole sentence is emitted. */
-static size_t decompose_sentence(const char *sentence, size_t len,
-                                 hu_atomic_claim_t *out, size_t cap,
-                                 size_t base_offset) {
-    if (cap == 0) return 0;
+static size_t decompose_sentence(const char *sentence, size_t len, hu_atomic_claim_t *out,
+                                 size_t cap, size_t base_offset) {
+    if (cap == 0)
+        return 0;
     /* Skip empty / whitespace-only / very short sentences. */
-    if (alpha_word_count(sentence, len) < 3) return 0;
+    if (alpha_word_count(sentence, len) < 3)
+        return 0;
 
     /* Find prepositions across the sentence. */
     size_t prep_offsets[16];
@@ -224,7 +257,8 @@ static size_t decompose_sentence(const char *sentence, size_t len,
         const char *p = NULL;
         size_t pl = 0;
         size_t off = find_next_prep(sentence, len, scan, &p, &pl);
-        if (off == (size_t)-1) break;
+        if (off == (size_t)-1)
+            break;
         prep_offsets[n_preps] = off;
         prep_strs[n_preps] = p;
         prep_lens[n_preps] = pl;
@@ -269,22 +303,22 @@ static size_t decompose_sentence(const char *sentence, size_t len,
         char prep_trim[16] = {0};
         size_t pi = 0;
         for (size_t j = 0; j < pl && pi < sizeof(prep_trim) - 1; j++) {
-            if (!isspace((unsigned char)prep[j])) prep_trim[pi++] = prep[j];
+            if (!isspace((unsigned char)prep[j]))
+                prep_trim[pi++] = prep[j];
         }
         prep_trim[pi] = '\0';
 
         char segment[160];
-        trim_into(sentence + seg_start, seg_end - seg_start, segment,
-                  sizeof(segment));
-        if (segment[0] == '\0') continue;
+        trim_into(sentence + seg_start, seg_end - seg_start, segment, sizeof(segment));
+        if (segment[0] == '\0')
+            continue;
 
         hu_atomic_claim_t *c = &out[out_n];
         memset(c, 0, sizeof(*c));
         /* Intentional truncation: stem/prep_trim/segment can sum past 160.
          * Width-bounded per-arg so GCC -Wformat-truncation=2 doesn't trip
          * under -Werror. Trades clipped tail for a clean build. */
-        snprintf(c->text, sizeof(c->text), "%.50s %.50s %.55s",
-                 stem, prep_trim, segment);
+        snprintf(c->text, sizeof(c->text), "%.50s %.50s %.55s", stem, prep_trim, segment);
         c->span_start = (int64_t)base_offset;
         c->span_end = (int64_t)(base_offset + len);
         out_n++;
@@ -303,8 +337,8 @@ static size_t decompose_sentence(const char *sentence, size_t len,
 }
 
 /* Decompose a full draft into atomic claims, walking sentence by sentence. */
-static size_t decompose_draft(const char *draft, size_t draft_len,
-                              hu_atomic_claim_t *out, size_t cap) {
+static size_t decompose_draft(const char *draft, size_t draft_len, hu_atomic_claim_t *out,
+                              size_t cap) {
     size_t out_n = 0;
     size_t i = 0;
     while (i < draft_len && out_n < cap) {
@@ -314,8 +348,7 @@ static size_t decompose_draft(const char *draft, size_t draft_len,
         /* W11 — skip questions, requests, opinions, and hedges. Only
          * propositional sentences should be decomposed and verified. */
         if (!is_q && len > 0 && sentence_is_propositional_claim(draft + i, len)) {
-            out_n += decompose_sentence(draft + i, len, out + out_n,
-                                         cap - out_n, i);
+            out_n += decompose_sentence(draft + i, len, out + out_n, cap - out_n, i);
         }
         i = end + 1; /* skip terminator */
     }
@@ -338,13 +371,10 @@ static size_t decompose_draft(const char *draft, size_t draft_len,
  * buffer, NUL-terminated) and returns true. On no-match, returns false
  * and leaves the buffer untouched. Relations are loaded via
  * `hu_memory_facade_read` (HU_MEM_RELATION list) and freed before return. */
-static bool retrieve_correction_via_facade(hu_allocator_t *alloc,
-                                           hu_memory_facade_t *m,
-                                           const char *contact_id,
-                                           size_t contact_id_len,
+static bool retrieve_correction_via_facade(hu_allocator_t *alloc, hu_memory_facade_t *m,
+                                           const char *contact_id, size_t contact_id_len,
                                            const char *claim, size_t claim_len,
-                                           char *out_correction,
-                                           size_t out_cap) {
+                                           char *out_correction, size_t out_cap) {
     if (!alloc || !m || !claim || claim_len == 0 || !out_correction || out_cap == 0)
         return false;
     if (!contact_id || contact_id_len == 0)
@@ -371,8 +401,7 @@ static bool retrieve_correction_via_facade(hu_allocator_t *alloc,
     int best_idx = -1;
     double best_score = 0.0;
     for (size_t i = 0; i < n; i++) {
-        const hu_memory_relation_row_t *rels =
-            (const hu_memory_relation_row_t *)recs[i].payload;
+        const hu_memory_relation_row_t *rels = (const hu_memory_relation_row_t *)recs[i].payload;
         if (!rels)
             continue;
         const char *doc = rels->context;
@@ -380,8 +409,7 @@ static bool retrieve_correction_via_facade(hu_allocator_t *alloc,
         if (!doc || doc_len == 0)
             continue;
         hu_rag_graded_doc_t grade = {0};
-        if (hu_crag_grade_document(alloc, claim, claim_len, doc, doc_len,
-                                   &grade) != HU_OK)
+        if (hu_crag_grade_document(alloc, claim, claim_len, doc, doc_len, &grade) != HU_OK)
             continue;
         if (grade.relevance == HU_RAG_RELEVANT && grade.score > best_score) {
             best_score = grade.score;
@@ -394,7 +422,8 @@ static bool retrieve_correction_via_facade(hu_allocator_t *alloc,
         const hu_memory_relation_row_t *best =
             (const hu_memory_relation_row_t *)recs[best_idx].payload;
         size_t copy = best->context_len;
-        if (copy >= out_cap) copy = out_cap - 1;
+        if (copy >= out_cap)
+            copy = out_cap - 1;
         memcpy(out_correction, best->context, copy);
         out_correction[copy] = '\0';
         ok = true;
@@ -406,11 +435,9 @@ static bool retrieve_correction_via_facade(hu_allocator_t *alloc,
 /* Score a single atomic claim against the graph by reusing v1's verifier on
  * a single-sentence "draft". Returns the supporting receipt + score in
  * *out_supported / *out_score / *out_receipt. Failures map to score = 0. */
-static void score_atomic_claim(hu_allocator_t *alloc, hu_memory_facade_t *m,
-                                const char *contact_id, size_t cid_len,
-                                const hu_atomic_claim_t *claim,
-                                float *out_score,
-                                hu_provenance_receipt_t *out_receipt) {
+static void score_atomic_claim(hu_allocator_t *alloc, hu_memory_facade_t *m, const char *contact_id,
+                               size_t cid_len, const hu_atomic_claim_t *claim, float *out_score,
+                               hu_provenance_receipt_t *out_receipt) {
     *out_score = 0.0f;
     memset(out_receipt, 0, sizeof(*out_receipt));
     /* Wrap the claim text into a sentence so v1 extracts it as 1 claim. */
@@ -418,8 +445,7 @@ static void score_atomic_claim(hu_allocator_t *alloc, hu_memory_facade_t *m,
     /* claim->text is 160 bytes max, sentence is 200, plus the trailing dot.
      * Precision-bounded so GCC -Wformat-truncation=2 stays quiet under
      * -Werror. */
-    snprintf(sentence, sizeof(sentence), "%.*s.",
-             (int)(sizeof(sentence) - 2), claim->text);
+    snprintf(sentence, sizeof(sentence), "%.*s.", (int)(sizeof(sentence) - 2), claim->text);
 
     hu_verifier_config_t cfg = hu_verifier_default_config();
     cfg.mode = HU_VERIFY_SOFT;
@@ -428,10 +454,10 @@ static void score_atomic_claim(hu_allocator_t *alloc, hu_memory_facade_t *m,
 
     hu_verifier_report_t report;
     memset(&report, 0, sizeof(report));
-    hu_error_t err = hu_response_verify(alloc, m, contact_id, cid_len,
-                                         sentence, strlen(sentence), &cfg,
-                                         &report);
-    if (err != HU_OK || report.claims_extracted == 0) return;
+    hu_error_t err = hu_response_verify(alloc, m, contact_id, cid_len, sentence, strlen(sentence),
+                                        &cfg, &report);
+    if (err != HU_OK || report.claims_extracted == 0)
+        return;
     *out_score = report.claims[0].score;
     *out_receipt = report.claims[0].receipt;
 }
@@ -445,13 +471,9 @@ static void score_atomic_claim(hu_allocator_t *alloc, hu_memory_facade_t *m,
 #if !(defined(HU_IS_TEST) && HU_IS_TEST)
 #include <time.h>
 
-static bool verify_claim_via_provider(hu_allocator_t *alloc,
-                                       hu_provider_t *provider,
-                                       const char *claim_text,
-                                       const char *evidence,
-                                       size_t evidence_len,
-                                       bool *out_supported,
-                                       float *out_score) {
+static bool verify_claim_via_provider(hu_allocator_t *alloc, hu_provider_t *provider,
+                                      const char *claim_text, const char *evidence,
+                                      size_t evidence_len, bool *out_supported, float *out_score) {
     if (!alloc || !provider || !claim_text || !evidence || evidence_len == 0)
         return false;
     if (!provider->vtable || !provider->vtable->chat_with_system)
@@ -466,16 +488,15 @@ static bool verify_claim_via_provider(hu_allocator_t *alloc,
     int n = snprintf(user_msg, sizeof(user_msg),
                      "Evidence: %.*s\n\nClaim: %s\n\n"
                      "Is this claim supported by the evidence?",
-                     (int)(evidence_len > 600 ? 600 : evidence_len),
-                     evidence, claim_text);
+                     (int)(evidence_len > 600 ? 600 : evidence_len), evidence, claim_text);
     if (n <= 0 || (size_t)n >= sizeof(user_msg))
         return false;
 
     char *response = NULL;
     size_t response_len = 0;
-    hu_error_t err = provider->vtable->chat_with_system(
-        provider->ctx, alloc, sys_prompt, sizeof(sys_prompt) - 1,
-        user_msg, (size_t)n, NULL, 0, 0.0, &response, &response_len);
+    hu_error_t err = provider->vtable->chat_with_system(provider->ctx, alloc, sys_prompt,
+                                                        sizeof(sys_prompt) - 1, user_msg, (size_t)n,
+                                                        NULL, 0, 0.0, &response, &response_len);
     if (err != HU_OK || !response || response_len == 0) {
         if (response)
             alloc->free(alloc->ctx, response, response_len + 1);
@@ -485,18 +506,15 @@ static bool verify_claim_via_provider(hu_allocator_t *alloc,
     *out_supported = false;
     *out_score = 0.0f;
     for (size_t i = 0; i < response_len; i++) {
-        if (response_len - i >= 11 &&
-            strncasecmp(response + i, "UNSUPPORTED", 11) == 0) {
+        if (response_len - i >= 11 && strncasecmp(response + i, "UNSUPPORTED", 11) == 0) {
             *out_score = 0.1f;
             break;
         }
-        if (response_len - i >= 7 &&
-            strncasecmp(response + i, "PARTIAL", 7) == 0) {
+        if (response_len - i >= 7 && strncasecmp(response + i, "PARTIAL", 7) == 0) {
             *out_score = 0.5f;
             break;
         }
-        if (response_len - i >= 9 &&
-            strncasecmp(response + i, "SUPPORTED", 9) == 0) {
+        if (response_len - i >= 9 && strncasecmp(response + i, "SUPPORTED", 9) == 0) {
             *out_supported = true;
             *out_score = 0.9f;
             break;
@@ -511,12 +529,9 @@ static bool verify_claim_via_provider(hu_allocator_t *alloc,
  * concatenated into a single buffer for the provider verification prompt.
  * Returns true and writes into out_evidence (NUL-terminated) if any
  * evidence was found; false otherwise. */
-static bool retrieve_evidence_for_contact(hu_allocator_t *alloc,
-                                           hu_memory_facade_t *m,
-                                           const char *contact_id,
-                                           size_t contact_id_len,
-                                           char *out_evidence,
-                                           size_t out_cap) {
+static bool retrieve_evidence_for_contact(hu_allocator_t *alloc, hu_memory_facade_t *m,
+                                          const char *contact_id, size_t contact_id_len,
+                                          char *out_evidence, size_t out_cap) {
     if (!alloc || !m || !out_evidence || out_cap == 0)
         return false;
 
@@ -540,14 +555,14 @@ static bool retrieve_evidence_for_contact(hu_allocator_t *alloc,
     size_t off = 0;
     out_evidence[0] = '\0';
     for (size_t i = 0; i < n && off < out_cap - 2; i++) {
-        const hu_memory_relation_row_t *rel =
-            (const hu_memory_relation_row_t *)recs[i].payload;
+        const hu_memory_relation_row_t *rel = (const hu_memory_relation_row_t *)recs[i].payload;
         if (!rel || !rel->context || rel->context_len == 0)
             continue;
         size_t copy = rel->context_len;
         if (off + copy + 3 > out_cap - 1)
             copy = out_cap - 1 - off - 3;
-        if (copy == 0) break;
+        if (copy == 0)
+            break;
         if (off > 0) {
             out_evidence[off++] = '\n';
         }
@@ -568,9 +583,8 @@ static int64_t now_ms_monotonic(void) {
 
 #endif /* !HU_IS_TEST */
 
-static hu_error_t atomic_verify(void *vctx, hu_allocator_t *alloc,
-                                 const hu_self_rag_request_t *req,
-                                 hu_self_rag_response_t *resp) {
+static hu_error_t atomic_verify(void *vctx, hu_allocator_t *alloc, const hu_self_rag_request_t *req,
+                                hu_self_rag_response_t *resp) {
     atomic_ctx_t *ctx = (atomic_ctx_t *)vctx;
     if (!ctx || !alloc || !req || !resp)
         return HU_ERR_INVALID_ARGUMENT;
@@ -585,7 +599,7 @@ static hu_error_t atomic_verify(void *vctx, hu_allocator_t *alloc,
 
     /* 1. Decompose. */
     size_t n = decompose_draft(req->draft, req->draft_len, resp->claims,
-                                sizeof(resp->claims) / sizeof(resp->claims[0]));
+                               sizeof(resp->claims) / sizeof(resp->claims[0]));
     resp->claims_count = n;
     if (n == 0) {
         resp->outcome = HU_SELF_RAG_SUPPORTED;
@@ -607,8 +621,8 @@ static hu_error_t atomic_verify(void *vctx, hu_allocator_t *alloc,
             char this_hedge[160] = {0};
             bool this_policy = false;
             hu_verifier_outcome_t o = hu_negatives_scan_claim(
-                req->wm, resp->claims[i].text, this_refusal, sizeof(this_refusal),
-                this_hedge, sizeof(this_hedge), &this_policy);
+                req->wm, resp->claims[i].text, this_refusal, sizeof(this_refusal), this_hedge,
+                sizeof(this_hedge), &this_policy);
             if (o == HU_VERIFY_RESULT_ABSTAIN) {
                 snprintf(neg_refusal, sizeof(neg_refusal), "%s", this_refusal);
                 policy_hit = this_policy;
@@ -629,9 +643,8 @@ static hu_error_t atomic_verify(void *vctx, hu_allocator_t *alloc,
         snprintf(resp->refusal_text, sizeof(resp->refusal_text), "%s", neg_refusal);
         if (policy_hit)
             hu_log_warn("self_rag_atomic", NULL,
-                        "negative-memory [policy] hit forced ABSTAIN for contact=%.*s",
-                        (int)(req->contact_id_len > 64 ? 64 : req->contact_id_len),
-                        req->contact_id ? req->contact_id : "");
+                        "negative-memory [policy] hit forced ABSTAIN for contact=%s",
+                        HU_LOG_WHO(req->contact_id, req->contact_id_len));
         return HU_OK;
     }
 
@@ -640,8 +653,7 @@ static hu_error_t atomic_verify(void *vctx, hu_allocator_t *alloc,
     size_t flagged = 0;
     /* Default abstain threshold matches the spec (0.5 of claims unsupported
      * = abstain). The request can override per-call. */
-    float abstain = req->abstain_threshold > 0.0f ? req->abstain_threshold
-                                                   : 0.5f;
+    float abstain = req->abstain_threshold > 0.0f ? req->abstain_threshold : 0.5f;
     /* The per-claim support floor: claim is "fabricated" when score is
      * below this. Mirrors v1's confidence_threshold default. */
     const float per_claim_floor = 0.6f;
@@ -650,19 +662,17 @@ static hu_error_t atomic_verify(void *vctx, hu_allocator_t *alloc,
      * provider is wired. Under HU_IS_TEST, always use the heuristic
      * path for determinism. Budget: 500ms total across all claims. */
 #if !(defined(HU_IS_TEST) && HU_IS_TEST)
-    bool use_provider = ctx->provider &&
-                        ctx->provider->vtable &&
-                        ctx->provider->vtable->chat_with_system &&
-                        req->mode == HU_VERIFY_STRICT;
+    bool use_provider = ctx->provider && ctx->provider->vtable &&
+                        ctx->provider->vtable->chat_with_system && req->mode == HU_VERIFY_STRICT;
     int64_t provider_deadline = 0;
     if (use_provider)
         provider_deadline = now_ms_monotonic() + 500;
     char evidence_buf[2048];
     bool evidence_loaded = false;
     if (use_provider && ctx->m) {
-        evidence_loaded = retrieve_evidence_for_contact(
-            alloc, ctx->m, req->contact_id, req->contact_id_len,
-            evidence_buf, sizeof(evidence_buf));
+        evidence_loaded =
+            retrieve_evidence_for_contact(alloc, ctx->m, req->contact_id, req->contact_id_len,
+                                          evidence_buf, sizeof(evidence_buf));
         if (!evidence_loaded)
             evidence_buf[0] = '\0';
     }
@@ -674,22 +684,19 @@ static hu_error_t atomic_verify(void *vctx, hu_allocator_t *alloc,
         hu_provenance_receipt_t rcpt;
         memset(&rcpt, 0, sizeof(rcpt));
         if (ctx->m) {
-            score_atomic_claim(alloc, ctx->m, req->contact_id, req->contact_id_len,
-                                c, &score, &rcpt);
+            score_atomic_claim(alloc, ctx->m, req->contact_id, req->contact_id_len, c, &score,
+                               &rcpt);
         }
 
 #if !(defined(HU_IS_TEST) && HU_IS_TEST)
         /* Provider verification: only for STRICT mode, when evidence
          * exists and the latency budget hasn't been exceeded. Falls
          * back silently to the heuristic score on any failure. */
-        if (use_provider && evidence_loaded &&
-            now_ms_monotonic() < provider_deadline) {
+        if (use_provider && evidence_loaded && now_ms_monotonic() < provider_deadline) {
             bool supported = false;
             float provider_score = 0.0f;
-            if (verify_claim_via_provider(alloc, ctx->provider,
-                                           c->text, evidence_buf,
-                                           strlen(evidence_buf),
-                                           &supported, &provider_score)) {
+            if (verify_claim_via_provider(alloc, ctx->provider, c->text, evidence_buf,
+                                          strlen(evidence_buf), &supported, &provider_score)) {
                 score = provider_score;
                 snprintf(rcpt.source, sizeof(rcpt.source), "provider-verified");
                 rcpt.confidence = provider_score;
@@ -705,16 +712,16 @@ static hu_error_t atomic_verify(void *vctx, hu_allocator_t *alloc,
             c->prov.weight = rcpt.confidence;
         }
         c->fabricated = score < per_claim_floor;
-        if (c->fabricated) flagged++;
+        if (c->fabricated)
+            flagged++;
     }
 
     /* 3. Decide outcome. */
     float ratio = (float)flagged / (float)n;
     if (ratio >= abstain) {
         resp->outcome = HU_SELF_RAG_ABSTAINED;
-        hu_self_rag_render_refusal(HU_REFUSAL_UNKNOWN_FACT,
-                                    resp->refusal_text,
-                                    sizeof(resp->refusal_text));
+        hu_self_rag_render_refusal(HU_REFUSAL_UNKNOWN_FACT, resp->refusal_text,
+                                   sizeof(resp->refusal_text));
         return HU_OK;
     }
 
@@ -735,10 +742,11 @@ static hu_error_t atomic_verify(void *vctx, hu_allocator_t *alloc,
          * facade score. The facade may say "supported" but the negative
          * is an explicit "don't say this without confirming". */
         if (neg_hedge_per_claim[i]) {
-            w = snprintf(rebuilt + off, sizeof(rebuilt) - off, "%s%s %s.",
-                         off == 0 ? "" : " ", neg_hedge, c->text);
+            w = snprintf(rebuilt + off, sizeof(rebuilt) - off, "%s%s %s.", off == 0 ? "" : " ",
+                         neg_hedge, c->text);
             any_modified = true;
-            if (w > 0) off += (size_t)w;
+            if (w > 0)
+                off += (size_t)w;
             continue;
         }
         if (c->fabricated) {
@@ -750,13 +758,12 @@ static hu_error_t atomic_verify(void *vctx, hu_allocator_t *alloc,
                 if (ctx->m) {
                     char correction[1024];
                     if (retrieve_correction_via_facade(
-                            alloc, ctx->m, req->contact_id, req->contact_id_len,
-                            c->text, strlen(c->text),
-                            correction, sizeof(correction))) {
-                        w = snprintf(rebuilt + off, sizeof(rebuilt) - off,
-                                     "%s%s.",
+                            alloc, ctx->m, req->contact_id, req->contact_id_len, c->text,
+                            strlen(c->text), correction, sizeof(correction))) {
+                        w = snprintf(rebuilt + off, sizeof(rebuilt) - off, "%s%s.",
                                      off == 0 ? "" : " ", correction);
-                        if (w > 0) off += (size_t)w;
+                        if (w > 0)
+                            off += (size_t)w;
                         any_modified = true;
                         continue;
                     }
@@ -764,23 +771,21 @@ static hu_error_t atomic_verify(void *vctx, hu_allocator_t *alloc,
                 any_modified = true;
                 continue;
             }
-            w = snprintf(rebuilt + off, sizeof(rebuilt) - off,
-                         "%sI'm not 100%% sure but %s.",
+            w = snprintf(rebuilt + off, sizeof(rebuilt) - off, "%sI'm not 100%% sure but %s.",
                          off == 0 ? "" : " ", c->text);
             any_modified = true;
         } else {
-            w = snprintf(rebuilt + off, sizeof(rebuilt) - off, "%s%s.",
-                         off == 0 ? "" : " ", c->text);
+            w = snprintf(rebuilt + off, sizeof(rebuilt) - off, "%s%s.", off == 0 ? "" : " ",
+                         c->text);
         }
-        if (w > 0) off += (size_t)w;
+        if (w > 0)
+            off += (size_t)w;
     }
     if (any_modified) {
-        snprintf(resp->modified_draft, sizeof(resp->modified_draft), "%s",
-                 rebuilt);
+        snprintf(resp->modified_draft, sizeof(resp->modified_draft), "%s", rebuilt);
         resp->draft_modified = true;
-        resp->outcome = (req->mode == HU_VERIFY_STRICT)
-                            ? HU_SELF_RAG_REWRITTEN
-                            : HU_SELF_RAG_HEDGED;
+        resp->outcome =
+            (req->mode == HU_VERIFY_STRICT) ? HU_SELF_RAG_REWRITTEN : HU_SELF_RAG_HEDGED;
     } else {
         resp->outcome = HU_SELF_RAG_SUPPORTED;
     }
@@ -789,7 +794,8 @@ static hu_error_t atomic_verify(void *vctx, hu_allocator_t *alloc,
 
 static void atomic_deinit(void *vctx) {
     atomic_ctx_t *ctx = (atomic_ctx_t *)vctx;
-    if (!ctx) return;
+    if (!ctx)
+        return;
     free(ctx);
 }
 
@@ -799,8 +805,7 @@ static hu_self_rag_vtable_t atomic_vt = {
     .deinit = atomic_deinit,
 };
 
-hu_error_t hu_self_rag_atomic(hu_memory_facade_t *m, hu_provider_t *embedder,
-                               hu_self_rag_t *out) {
+hu_error_t hu_self_rag_atomic(hu_memory_facade_t *m, hu_provider_t *embedder, hu_self_rag_t *out) {
     if (!out)
         return HU_ERR_INVALID_ARGUMENT;
     atomic_ctx_t *ctx = (atomic_ctx_t *)calloc(1, sizeof(*ctx));

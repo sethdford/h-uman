@@ -3,6 +3,7 @@
 
 #include "human/core/http.h"
 #include "human/core/json.h"
+#include "human/core/llm_purpose.h"
 #include "human/core/log.h"
 
 #include <stdio.h>
@@ -143,8 +144,10 @@ static hu_error_t embed_batch_typed(void *vctx, hu_allocator_t *alloc, const cha
 
     hu_http_response_t resp;
     memset(&resp, 0, sizeof(resp));
-    err = hu_http_post_json_ex(alloc, ctx->url, NULL, "X-HU-Priority: batch\r\n", body, body_len,
-                               &resp);
+    /* Embeddings are background work: X-HU-Purpose: embed + X-HU-Priority: batch. */
+    char hdr[96];
+    (void)hu_llm_purpose_headers(HU_LLM_PURPOSE_EMBED, hdr, sizeof(hdr));
+    err = hu_http_post_json_ex(alloc, ctx->url, NULL, hdr, body, body_len, &resp);
     alloc->free(alloc->ctx, body, body_len + 1);
     if (err != HU_OK) {
         hu_log_warn("embedder.http", NULL, "embeddings POST failed: %s", hu_error_string(err));

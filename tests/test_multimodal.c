@@ -184,6 +184,22 @@ static void test_detect_mime_gif(void) {
     HU_ASSERT_STR_EQ(hu_multimodal_detect_mime(gif, 4), "image/gif");
 }
 
+/* iPhone photos are HEIC. Unrecognized, they went to vision as
+ * application/octet-stream and Gemini answered 400: 21 of 21 HEIC photos
+ * failed 09-19..09-30, so the twin never saw a family photo. Header bytes
+ * are from a real Messages attachment (IMG_2897.HEIC). */
+static void test_detect_mime_heic_from_an_iphone_photo(void) {
+    unsigned char heic[] = {0, 0, 0, 0x24, 'f', 't', 'y', 'p', 'h', 'e', 'i', 'c', 0, 0, 0, 0};
+    HU_ASSERT_STR_EQ(hu_multimodal_detect_mime(heic, sizeof(heic)), "image/heic");
+    unsigned char heif[] = {0, 0, 0, 0x18, 'f', 't', 'y', 'p', 'm', 'i', 'f', '1', 0, 0, 0, 0};
+    HU_ASSERT_STR_EQ(hu_multimodal_detect_mime(heif, sizeof(heif)), "image/heif");
+}
+
+static void test_detect_mime_ftyp_audio_is_not_an_image(void) {
+    unsigned char m4a[] = {0, 0, 0, 0x20, 'f', 't', 'y', 'p', 'M', '4', 'A', ' ', 0, 0, 0, 0};
+    HU_ASSERT_STR_EQ(hu_multimodal_detect_mime(m4a, sizeof(m4a)), "application/octet-stream");
+}
+
 static void test_detect_mime_bmp(void) {
     unsigned char bmp[] = {'B', 'M'};
     HU_ASSERT_STR_EQ(hu_multimodal_detect_mime(bmp, 2), "image/bmp");
@@ -373,6 +389,8 @@ void run_multimodal_tests(void) {
     HU_RUN_TEST(test_detect_mime_webp);
     HU_RUN_TEST(test_detect_mime_gif);
     HU_RUN_TEST(test_detect_mime_bmp);
+    HU_RUN_TEST(test_detect_mime_heic_from_an_iphone_photo);
+    HU_RUN_TEST(test_detect_mime_ftyp_audio_is_not_an_image);
     HU_RUN_TEST(test_parse_markers_multiple);
     HU_RUN_TEST(test_parse_markers_case_insensitive);
     HU_RUN_TEST(test_parse_markers_img_alias);

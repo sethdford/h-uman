@@ -19,7 +19,7 @@ Use this to find the right files for a given task without searching the full cod
 | **Config parsing**            | `src/config/config_parse.c`, `config_parse_agent.c`, `config_parse_channels.c`, `config_parse_providers.c`, `config_parse_behavior.c` | `test_config_parse.c`, `test_config_extended.c` |
 | **Config validation**         | `src/config/config_validate.c`, `src/config/config_schema.c`                                                                                 | `test_config_validation.c`                      |
 | **Config merge / migrate**    | `src/config/config_merge.c`, `src/config/config_migrate.c`                                                                                   | `test_config_migrate.c`                         |
-| **Config getters**            | `src/config/config_getters.c`, `src/config/config_serialize.c`                                                                               | `test_config_getters.c`                         |
+| **Config getters**            | `src/config/config_getters.c`, `src/config/config_mutator.c`                                                                                 | `test_config_getters.c`                         |
 | **Config schema generation**  | `src/config/config_schema.c`, `include/human/config_schema.h`                                         | `test_config_schema.c`, `test_config_validation.c` |
 
 ## Agent
@@ -215,6 +215,7 @@ Use this to find the right files for a given task without searching the full cod
 | ------------------------------- | ------------------------------------------------------------ | ---------------------------------------- |
 | **Turing score (S2S, 18-dim)**  | `src/eval/turing_score.c`, `include/human/eval/turing_score.h` | `test_turing_score.c`, `test_sota_research.c` |
 | **W16 continuous evaluation (vtable)** | `src/evaluation/evaluation.c`, `evaluation_locomo.c`, `evaluation_longmemeval.c`, `evaluation_dmr.c`, `evaluation_minja.c`, `evaluation_memoryagentbench.c`, `evaluation_frontier_compare.c`, `evaluation_legacy_bridge.c`, `evaluation_facade_recall.c`, `include/human/evaluation/evaluation.h`, `src/eval/cli_evaluation.c` | `test_w16_evaluation.c`, `test_w16_eval_cli.c` |
+| **Memory benchmarks on the reply path (LoCoMo, MSC, SOC-2508)** | `scripts/datasets/` (`fetch_*.sh`, `*_to_replay.py`, `memory_probe_score.py`), guide `docs/guides/memory-benchmarks.md` | `tests/test_memory_benchmarks_converters.py`, `tests/test_memory_probe_score.py`, `tests/test_memory_benchmarks_fetch.py` |
 
 ## Other Subsystems
 
@@ -285,7 +286,7 @@ Use this to find the right files for a given task without searching the full cod
 | **Task store**              | `src/agent/task_store.c`, `src/gateway/cp_tasks.c`, `include/human/agent/task_store.h`                   | `test_task_store.c`      |
 | **Vertex auth (ADC)**       | `src/core/vertex_auth.c`, `include/human/core/vertex_auth.h`                                             | `test_media_gen.c`       |
 | **Vision OCR tool**         | `src/tools/vision_ocr.c`, `vision_ocr_apple.m`, `include/human/tools/vision_ocr.h`                      | `test_vision_ocr.c`      |
-| **Media generation**        | `src/tools/media_image.c`, `media_video.c`, `media_gif.c`                                                | `test_media_gen.c`       |
+| **Media generation**        | `src/tools/media_image.c`, `media_video.c`, `media_gif.c`, `media_vertex_common.c`                       | `test_media_gen.c`       |
 | **Music (iTunes + Spotify + taste + persistence)** | `src/multimodal/music.c`, `include/human/music.h`                                                            | `test_music.c`           |
 | **Image gen (proactive + download)** | `src/tools/image_gen.c`, `include/human/tools/image_gen.h`                                            | `test_image_gen.c`       |
 | **Send voice message**      | `src/tools/send_voice_message.c`, `include/human/tools/send_voice_message.h`                             | `test_send_voice_message.c` |

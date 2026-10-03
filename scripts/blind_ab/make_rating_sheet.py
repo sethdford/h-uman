@@ -40,7 +40,14 @@ import argparse, csv, json, os, random, re, sys
 
 FIELDNAMES = ["id", "context", "option_A", "option_B", "choice", "confidence",
               "axis_opinion", "axis_memory", "axis_reasoning",
-              "axis_lexical", "axis_tone", "axis_syntax"]
+              "axis_lexical", "axis_tone", "axis_syntax",
+              # Optional: filled in by rating_drip.py's second ("better than
+              # human") pass, re-randomized independently of `choice` above.
+              # Blank on every freshly-built sheet; absent entirely from
+              # sheets built before this column existed (rating_drip.py's
+              # write_better_choice() appends it on first write, so an
+              # older sheet is never disturbed until that pass is enabled).
+              "better_choice"]
 
 # Phone-shaped substrings, four alternatives in increasing grouping generality:
 #   1. \+\d{7,15}                          international, digits only, no separators

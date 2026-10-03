@@ -27,6 +27,7 @@
  */
 
 #include "human/core/error.h"
+#include <stddef.h>
 #include <stdio.h>
 
 #ifdef __cplusplus
@@ -67,8 +68,42 @@ typedef enum {
  *         unrecognized mode, or traversal in path; HU_ERR_IO for any
  *         filesystem error (errno preserved for the caller).
  */
-hu_error_t hu_io_secure_open(const char *path, hu_io_perm_t perm,
-                              const char *mode, FILE **out);
+hu_error_t hu_io_secure_open(const char *path, hu_io_perm_t perm, const char *mode, FILE **out);
+
+/**
+ * Replace `path` with `data` atomically: the file on disk is always either
+ * the complete old content or the complete new content, never a truncated
+ * mix. Writes a uniquely named temp file in the same directory with the
+ * requested mode, checks every write, fsyncs it, then rename()s it over
+ * `path`. On ANY failure the temp file is removed, `path` is left untouched,
+ * and an error is returned — it never falls back to writing in place.
+ *
+ * Use this for files whose loss or truncation breaks the program on its
+ * next start (config.json above all). Same path-traversal guard as
+ * hu_io_secure_open. `len` may be 0 (creates an empty file).
+ *
+ * @return HU_OK, HU_ERR_INVALID_ARGUMENT (NULL/traversal path, NULL data
+ *         with len > 0, path too long), or HU_ERR_IO.
+ */
+hu_error_t hu_io_secure_write_atomic(const char *path, hu_io_perm_t perm, const void *data,
+                                     size_t len);
+
+/**
+ * Open `path` for reading ("rb") behind the same traversal guard as
+ * hu_io_secure_open. Distinguishes a missing file from an unreadable one so
+ * a caller that rewrites the file never mistakes "cannot read" for "empty".
+ *
+ * @return HU_OK; HU_ERR_INVALID_ARGUMENT (NULL or traversal path);
+ *         HU_ERR_NOT_FOUND (no such file); HU_ERR_IO (any other failure).
+ */
+hu_error_t hu_io_secure_open_read(const char *path, FILE **out);
+
+/**
+ * Best-effort fsync of the directory containing `path`, so a rename into it
+ * survives a crash (POSIX requires this for rename durability). Silently a
+ * no-op on failure, on Windows, and for paths without a directory part.
+ */
+void hu_io_secure_sync_parent_dir(const char *path);
 
 #ifdef __cplusplus
 }

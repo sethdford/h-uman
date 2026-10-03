@@ -9,6 +9,7 @@
 #include "human/config.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/core/llm_purpose.h"
 #include "human/core/log.h"
 #include "human/core/paths.h"
 #include "human/core/rand.h"
@@ -20,6 +21,7 @@
 #include "human/daemon/persona_facade.h"
 #include "human/daemon/platform_facade.h"
 #include "human/daemon/reactive_turn.h"
+#include "human/daemon/spontaneity.h"
 #include "human/daemon_cron.h"
 #include "human/daemon_learning_tick.h"
 #include "human/daemon_maintenance.h"
@@ -38,6 +40,11 @@
 #include <unistd.h>
 
 void hu_daemon_housekeeping_tick(hu_daemon_housekeeping_ctx_t *ctx) {
+    /* Everything this tick does (cron turns, proactive check-ins, maintenance,
+     * reflection, autodream) is background work: every local LLM / embedding
+     * request it makes goes out as X-HU-Priority: batch, so a reply arriving
+     * meanwhile is admitted ahead of it. */
+    hu_llm_background_enter();
 #ifdef HU_HAS_CRON
     hu_allocator_t *alloc = ctx->alloc;
     hu_agent_t *agent = ctx->agent;
@@ -48,6 +55,18 @@ void hu_daemon_housekeeping_tick(hu_daemon_housekeeping_ctx_t *ctx) {
     time_t t = ctx->t;
     time_t current_minute = ctx->current_minute;
     char *community_insights = ctx->community_insights;
+    /* Read only by feature-gated blocks below; not every build has them. */
+    (void)config;
+    (void)graph;
+    (void)community_insights;
+
+    /* HU_SPONTANEITY LIVE: deliver queued extras and expire their outcomes
+     * every pass — the extras never sleep on the reply path (DEF-15). */
+    for (size_t sp = 0; sp < channel_count; sp++) {
+        hu_channel_t *sp_ch = channels[sp].channel;
+        if (sp_ch && sp_ch->vtable && sp_ch->vtable->name)
+            hu_daemon_spontaneity_tick(sp_ch, sp_ch->vtable->name(sp_ch->ctx), (int64_t)t * 1000);
+    }
 
     if (current_minute > (*ctx->last_cron_minute)) {
         hu_daemon_cron_tick(alloc);
@@ -1149,4 +1168,5 @@ void hu_daemon_housekeeping_tick(hu_daemon_housekeeping_ctx_t *ctx) {
      * the cron scheduler's); the block was inside that gate in daemon.c too. */
     (void)ctx;
 #endif /* HU_HAS_CRON */
+    hu_llm_background_exit();
 }

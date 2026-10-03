@@ -105,6 +105,11 @@ hu_life_event_state_t hu_life_event_effective_state(const hu_life_event_t *ev, i
  * resolution. This is the predicate the directive text hangs off. */
 bool hu_life_event_must_not_assert_completion(const hu_life_event_t *ev, int64_t now_ts);
 
+/* An open-ended, unresolved event nobody has re-confirmed for this long is no
+ * longer known to be current (effective state UNKNOWN). */
+#define HU_LIFE_EVENT_STALE_DAYS 30
+bool hu_life_event_is_stale(const hu_life_event_t *ev, int64_t now_ts);
+
 /* Runtime gate. off (default) | shadow | live, via HU_LIFE_EVENTS.
  *
  * Per .claude/rules/feature-gate-requires-measurement.md this ships default

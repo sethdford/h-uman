@@ -112,6 +112,12 @@ def _base_args(fake_server, contexts_file, out_path, extra=None):
         "--embed-url", fake_server,
         "--memory-db", "/dev/null",  # copy_memory_db is monkeypatched in most tests
         "--out", out_path,
+        # This whole suite was written against the Vertex/HU_GATE_FAKE=1 judge
+        # path (default flipped to --judge-backend local since). Pin vertex
+        # here so every existing call keeps exercising that path unchanged;
+        # `extra` can still override it (argparse: the LAST --judge-backend
+        # wins), which is how the local-judge suite drives it back to local.
+        "--judge-backend", "vertex",
     ]
     return args + (extra or [])
 
@@ -947,3 +953,116 @@ def test_run_arm_default_pair_is_unchanged(monkeypatch):
     assert calls == [] and all(r["recall_bytes"] == 0 for r in shadow.values())
     live, _ = G.run_arm("live", ["x", "y"], "SYS", Args(), "/dev/null", log=lambda *a, **k: None)
     assert len(calls) == 2 and all(r["recall_bytes"] > 0 for r in live.values())
+
+
+# ---------------------------------------------------------------------------
+# HU_HYBRID_FUSION promotion pair (--fusion rrf|score, --alpha)
+# ---------------------------------------------------------------------------
+def test_fusion_env_for_arm_baseline_is_rrf_and_live_is_the_mode():
+    s = G.fusion_env_for_arm("shadow", "score", 0.4)
+    l = G.fusion_env_for_arm("live", "score", 0.4)  # noqa: E741
+    assert s == {"HU_SEMANTIC_RECALL": "live", "HU_HYBRID_FUSION": "rrf"}
+    assert l == {"HU_SEMANTIC_RECALL": "live", "HU_HYBRID_FUSION": "score",
+                 "HU_HYBRID_FUSION_ALPHA": "0.40"}
+    # --fusion rrf is an A/A pair: the arms are identical by construction
+    assert G.fusion_env_for_arm("shadow", "rrf", None) == G.fusion_env_for_arm("live", "rrf", None)
+
+
+def test_validate_fusion_args():
+    assert G.validate_fusion_args(None, None, "off") is None
+    assert G.validate_fusion_args("score", 0.5, "off") is None
+    assert G.validate_fusion_args("rrf", None, "off") is None
+    assert G.validate_fusion_args("score", None, "off")
+    assert G.validate_fusion_args("score", 1.5, "off")
+    assert G.validate_fusion_args("rrf", 0.5, "off")
+    assert G.validate_fusion_args(None, 0.5, "off")
+    assert G.validate_fusion_args("score", 0.5, "live")
+
+
+def test_recall_mode_for_arm_fusion_pair_injects_in_both_arms():
+    assert G.recall_mode_for_arm("shadow", "off", "score") == "all"
+    assert G.recall_mode_for_arm("live", "off", "score") == "all"
+
+
+def test_hybrid_search_runs_the_plain_hybrid_cli_with_the_arm_env(monkeypatch, tmp_path):
+    human = tmp_path / "human"
+    human.write_text("")
+    seen = {}
+
+    class P:
+        returncode = 0
+        stdout = "  [1] k1 (0.500): a memory\n"
+        stderr = ""
+
+    def fake_run(argv, **kw):
+        seen["argv"], seen["env"] = argv, kw["env"]
+        return P()
+    monkeypatch.setattr(G.subprocess, "run", fake_run)
+    out, semantic_unavailable = G.hybrid_search(str(human), "/tmp/m.db", "http://e", "q?", 5,
+                                                G.fusion_env_for_arm("live", "score", 0.3))
+    assert out == ["a memory"]
+    assert semantic_unavailable is False
+    assert seen["argv"][1:] == ["memory", "search", "--hybrid", "--plain", "q?"]
+    assert seen["env"]["HU_HYBRID_FUSION"] == "score"
+    assert seen["env"]["HU_HYBRID_FUSION_ALPHA"] == "0.30"
+    assert seen["env"]["HU_MEMORY_SQLITE_PATH"] == "/tmp/m.db"
+
+
+def test_hybrid_search_detects_semantic_unavailable_marker_in_stderr(monkeypatch, tmp_path):
+    """The CLI's keyword-only fallback returns 0 with well-formed results —
+    hybrid_search() must still surface it via stderr, not returncode."""
+    human = tmp_path / "human"
+    human.write_text("")
+
+    class P:
+        returncode = 0
+        stdout = "  [1] k1 (0.500): a keyword-only memory\n"
+        stderr = "search --hybrid: semantic index unavailable, using keyword only\n"
+
+    monkeypatch.setattr(G.subprocess, "run", lambda *a, **k: P())
+    out, semantic_unavailable = G.hybrid_search(str(human), "/tmp/m.db", "http://e", "q?", 5,
+                                                G.fusion_env_for_arm("live", "score", 0.3))
+    assert out == ["a keyword-only memory"]  # the CLI still "succeeds"
+    assert semantic_unavailable is True      # but the call must be treated as invalid
+
+
+def test_main_fusion_pair_routes_both_arms_through_hybrid_search(monkeypatch, fake_server,
+                                                               contexts_file, tmp_path):
+    _patch_common(monkeypatch, recall_hit_ratio=1.0)
+
+    def no_semantic(*a, **k):
+        raise AssertionError("a fusion pair must not use --semantic recall")
+    monkeypatch.setattr(G, "semantic_search", no_semantic)
+    modes = []
+
+    def fake_hybrid(human_bin, memory_db, embed_url, query, k, fusion_env, timeout=90):
+        modes.append(fusion_env["HU_HYBRID_FUSION"])
+        # Distinct-per-arm content so contexts_differing_fraction sees a real
+        # difference (an identical-across-arms fake would trip the new
+        # --min-diff-frac floor and force INCONCLUSIVE regardless of what
+        # this test is actually asserting).
+        return ["a memory about " + query[:10] + " via " + fusion_env["HU_HYBRID_FUSION"]], False
+    monkeypatch.setattr(G, "hybrid_search", fake_hybrid)
+    out = str(tmp_path / "gate.json")
+    rc = G.main(_base_args(fake_server, contexts_file, out, extra=["--fusion", "score",
+                                                                   "--alpha", "0.4"]))
+    assert rc in (0, 1)
+    doc = json.loads(Path(out).read_text())
+    assert doc["arms"] == {"shadow": "all", "live": "all"}
+    assert doc["fusion"]["shadow"]["HU_HYBRID_FUSION"] == "rrf"
+    assert doc["fusion"]["live"] == {"HU_SEMANTIC_RECALL": "live", "HU_HYBRID_FUSION": "score",
+                                     "HU_HYBRID_FUSION_ALPHA": "0.40"}
+    assert modes.count("rrf") == 32 and modes.count("score") == 32
+    assert doc["recall_coverage"] == 1.0
+    assert doc["gate"].startswith("HU_HYBRID_FUSION rrf->score")
+    assert doc["contexts_differing"] == doc["contexts_total"] == 32
+    assert doc["limitations"] == [G.GRAPH_BOOST_LIMITATION]
+
+
+def test_main_fusion_score_without_alpha_refuses_and_writes_nothing(monkeypatch, fake_server,
+                                                                   contexts_file, tmp_path):
+    _patch_common(monkeypatch)
+    out = tmp_path / "gate.json"
+    rc = G.main(_base_args(fake_server, contexts_file, str(out), extra=["--fusion", "score"]))
+    assert rc == 2
+    assert not out.exists()

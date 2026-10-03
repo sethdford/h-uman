@@ -99,6 +99,9 @@ typedef struct hu_contact_profile {
      * this contact, measured by scripts/measure_contact_reply_lengths.py.
      * Floors the 1:1 reply cap. 0 = not measured (cap heuristics unchanged). */
     uint16_t reply_chars_p90;
+    /* Median of the same distribution (optional; 0 = not measured, and
+     * HU_LENGTH_POLICY derives it from p90). */
+    uint16_t reply_chars_p50;
 } hu_contact_profile_t;
 
 /* Motivation — the character's core drive (anti-drift anchor) */
@@ -358,19 +361,6 @@ typedef struct hu_inner_world {
     size_t secret_self_count;
 } hu_inner_world_t;
 
-/* Cross-channel ACL: controls which relationship types can access facts from which origins */
-typedef struct hu_xchan_acl_rule {
-    char relationship_type[32]; /* "coworker", "family", etc */
-    char **allow_list;          /* allowed relationship_types */
-    size_t allow_count;
-} hu_xchan_acl_rule_t;
-
-typedef struct hu_xchan_acl {
-    char default_policy[32]; /* "deny_unknown" | "allow_unknown" */
-    hu_xchan_acl_rule_t *rules;
-    size_t rule_count;
-} hu_xchan_acl_t;
-
 typedef struct hu_persona {
     char *name;
     size_t name_len;
@@ -504,11 +494,6 @@ typedef struct hu_persona {
      * docs/research/2026-05-16-proactive-audit/findings.md (P1-1). */
     bool proactive_master_enabled;
 
-    /* Cross-channel ACL for privacy gating. Controls which relationship types
-     * can access facts/patterns sourced from which origins. Safe defaults
-     * ship in code; user can override per-persona via JSON.
-     * AC-1: family facts MUST NEVER reach coworker turns. */
-    hu_xchan_acl_t cross_channel_acl;
 } hu_persona_t;
 
 /* Returns persona base directory path in buf (either HU_PERSONA_DIR or ~/.human/personas).
@@ -539,9 +524,6 @@ void hu_persona_deinit(hu_allocator_t *alloc, hu_persona_t *persona);
 
 /* Convenience alias for hu_persona_deinit (for test code symmetry) */
 void hu_persona_free(hu_persona_t *persona);
-
-/* Load a persona stub with safe-default ACL only (for tests) */
-void hu_persona_load_defaults(hu_persona_t *out);
 
 /* Returns true iff proactive messaging is GLOBALLY enabled for this persona.
  * Safe to call with persona == NULL (returns false).  Wraps the
@@ -604,6 +586,36 @@ hu_error_t hu_persona_build_prompt_compact_immersive(hu_allocator_t *alloc,
                                                      const hu_persona_t *persona,
                                                      const char *channel, size_t channel_len,
                                                      char **out, size_t *out_len);
+
+/* Learned-style head options (HU_LEARNED_STYLE=live; see
+ * include/human/persona/learned_style.h). When suppress_length_rules is set,
+ * the head drops the hand-written persona sentences that impose a fixed length
+ * sentence by sentence (hu_learned_style_strip_sentences) — style_rules,
+ * communication_rules, the channel overlay's avg_length and style_notes —
+ * and renders
+ * learned_line after the channel style block instead. `suppressed` is an
+ * OUTPUT: the number of sentences removed. A NULL options pointer is exactly
+ * the plain builder. */
+typedef struct hu_persona_style_opts {
+    const char *learned_line;
+    size_t learned_line_len;
+    bool suppress_length_rules;
+    size_t suppressed;
+} hu_persona_style_opts_t;
+
+/* The text a head renders for `entry` under these options: `entry` itself
+ * when nothing is stripped, `buf` holding the entry minus its fixed-length
+ * sentences, or NULL when every sentence was one (omit the entry). Removed
+ * sentences are counted in opts->suppressed. NULL opts -> entry. Shared by
+ * every head builder so they cannot drift. */
+const char *hu_persona_style_opts_filter(hu_persona_style_opts_t *opts, const char *entry,
+                                         char *buf, size_t cap);
+
+hu_error_t hu_persona_build_prompt_compact_immersive_ex(hu_allocator_t *alloc,
+                                                        const hu_persona_t *persona,
+                                                        const char *channel, size_t channel_len,
+                                                        hu_persona_style_opts_t *opts, char **out,
+                                                        size_t *out_len);
 
 /* P6-5: shared absolute-rules block. Writes the highest-weight
  * formatting/identity instructions ("You are HUMAN", lowercase, no

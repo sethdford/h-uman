@@ -2,7 +2,12 @@
  * Voice maturity — persona voice evolution based on conversation depth and relationship stage.
  */
 #include "human/persona/voice_maturity.h"
+#include "human/core/gate_mode.h"
+#include "human/core/log.h"
 #include "human/core/string.h"
+#include "human/persona.h"
+#include <ctype.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,6 +22,7 @@ void hu_voice_profile_init(hu_voice_profile_t *profile) {
     profile->warmth_score = 0.2f;
     profile->humor_allowance = 0.1f;
     profile->vulnerability_level = 0.0f;
+    profile->floor_stage = HU_VOICE_FORMAL;
 }
 
 hu_voice_stage_t hu_voice_compute_stage(uint32_t interactions, uint32_t emotional_exchanges,
@@ -97,6 +103,85 @@ void hu_voice_profile_update(hu_voice_profile_t *profile, bool had_emotional_con
 
     profile->stage = hu_voice_compute_stage(profile->interaction_count,
                                             profile->emotional_exchanges, profile->warmth_score);
+    if (profile->stage < profile->floor_stage)
+        profile->stage = profile->floor_stage;
+}
+
+hu_voice_stage_t hu_voice_stage_floor_for_relationship(const char *rel, size_t rel_len) {
+    if (!rel || rel_len == 0 || rel_len >= 48)
+        return HU_VOICE_FORMAL;
+    char norm[48];
+    for (size_t i = 0; i < rel_len; i++) {
+        char c = (char)tolower((unsigned char)rel[i]);
+        norm[i] = (c == '_' || c == '-') ? ' ' : c;
+    }
+    norm[rel_len] = '\0';
+    static const char *const intimate[] = {
+        "mother",       "father",      "mom",       "dad",
+        "sister",       "brother",     "son",       "daughter",
+        "spouse",       "wife",        "husband",   "partner",
+        "family",       "girlfriend",  "boyfriend", "romantic interest",
+        "close friend", "best friend",
+    };
+    static const char *const warm[] = {"casual", "professional friend", "coworker", "colleague",
+                                       "acquaintance"};
+    for (size_t i = 0; i < sizeof(intimate) / sizeof(intimate[0]); i++)
+        if (strcmp(norm, intimate[i]) == 0)
+            return HU_VOICE_INTIMATE;
+    if (strcmp(norm, "friend") == 0)
+        return HU_VOICE_CANDID;
+    for (size_t i = 0; i < sizeof(warm) / sizeof(warm[0]); i++)
+        if (strcmp(norm, warm[i]) == 0)
+            return HU_VOICE_WARM;
+    return HU_VOICE_FORMAL;
+}
+
+void hu_voice_profile_apply_floor(hu_voice_profile_t *profile, hu_voice_stage_t floor) {
+    if (!profile || floor <= HU_VOICE_FORMAL)
+        return;
+    /* Scores at the stage's entry level, so the rendered percentages agree
+     * with the stage (hu_voice_compute_stage thresholds). */
+    static const float min_warmth[] = {0.2f, 0.3f, 0.5f, 0.8f};
+    static const float min_humor[] = {0.1f, 0.2f, 0.4f, 0.6f};
+    static const float min_vuln[] = {0.0f, 0.0f, 0.2f, 0.4f};
+    if (profile->floor_stage < floor)
+        profile->floor_stage = floor;
+    if (profile->stage < floor)
+        profile->stage = floor;
+    if (profile->warmth_score < min_warmth[floor])
+        profile->warmth_score = min_warmth[floor];
+    if (profile->humor_allowance < min_humor[floor])
+        profile->humor_allowance = min_humor[floor];
+    if (profile->vulnerability_level < min_vuln[floor])
+        profile->vulnerability_level = min_vuln[floor];
+}
+
+void hu_voice_profile_apply_relationship(hu_voice_profile_t *profile, const hu_persona_t *persona,
+                                         const char *contact_id, size_t contact_id_len) {
+    if (!profile || !persona || !contact_id || contact_id_len == 0)
+        return;
+    hu_gate_mode_t mode = hu_gate_mode_from_env("HU_VOICE_RELATIONSHIP_FLOOR", HU_GATE_OFF);
+    if (mode == HU_GATE_OFF)
+        return;
+    const hu_contact_profile_t *cp = hu_persona_find_contact(persona, contact_id, contact_id_len);
+    if (!cp)
+        return;
+    hu_voice_stage_t floor = HU_VOICE_FORMAL;
+    if (cp->relationship)
+        floor = hu_voice_stage_floor_for_relationship(cp->relationship, strlen(cp->relationship));
+    if (floor == HU_VOICE_FORMAL && cp->relationship_type)
+        floor = hu_voice_stage_floor_for_relationship(cp->relationship_type,
+                                                      strlen(cp->relationship_type));
+    if (mode == HU_GATE_SHADOW) {
+        static atomic_bool s_voice_floor_shadow = false;
+        if (floor > profile->stage)
+            hu_log_info_once(&s_voice_floor_shadow, "voice_maturity", NULL,
+                             "HU_VOICE_RELATIONSHIP_FLOOR shadow: would raise a known contact "
+                             "from stage %d to %d",
+                             (int)profile->stage, (int)floor);
+        return;
+    }
+    hu_voice_profile_apply_floor(profile, floor);
 }
 
 size_t hu_voice_maturity_build_directive(hu_voice_stage_t stage, char *out_buf, size_t buf_len) {

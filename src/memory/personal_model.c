@@ -2,6 +2,7 @@
 #include "human/core/gate_mode.h"
 #include "human/core/log.h"
 #include "human/core/paths.h"
+#include "human/core/post_send_defer.h"
 #include "human/memory/anticipatory.h"
 #include "human/memory/causal_attribution.h"
 #include "human/memory/emotional_context.h"
@@ -76,6 +77,21 @@ static int llm_fact_extract_gate(void) {
  * them — skip to keep the fallback cheap and the daemon poll loop responsive. */
 #define HU_LLM_FACT_EXTRACT_MIN_LEN 16u
 
+/* Case-insensitive: does message[0..len) contain `needle` (NUL-terminated)? */
+static bool msg_contains_ci(const char *msg, size_t len, const char *needle) {
+    size_t n = strlen(needle);
+    if (n == 0 || n > len)
+        return false;
+    for (size_t i = 0; i + n <= len; i++) {
+        size_t k = 0;
+        while (k < n && tolower((unsigned char)msg[i + k]) == tolower((unsigned char)needle[k]))
+            k++;
+        if (k == n)
+            return true;
+    }
+    return false;
+}
+
 /* Fallback entry point, called from hu_personal_model_ingest ONLY when the
  * regex fast-path produced zero facts. On LIVE it overwrites *extracted with
  * the LLM result (so the caller's existing stamp/promote/merge flow handles
@@ -143,6 +159,14 @@ static void maybe_llm_fact_fallback(const char *message, size_t message_len, int
      * (critic finding, 2026-07-12). */
     hu_log_info("llm_fact_extract", NULL, "live: merging %zu fact(s) from a regex-missed message",
                 llm.fact_count);
+    /* HU_POST_SEND_DEFER measurement: how many of these facts the inbound
+     * already states verbatim (so the prompt carries them anyway). */
+    size_t literal = 0;
+    for (size_t i = 0; i < llm.fact_count; i++) {
+        if (msg_contains_ci(message, message_len, llm.facts[i].object))
+            literal++;
+    }
+    hu_post_send_defer_note_extract(llm.fact_count, literal);
     *extracted = llm;
 }
 
@@ -551,9 +575,18 @@ size_t hu_personal_model_build_prompt_with_overlay(const hu_personal_model_t *mo
     }
 
     if (model->style.sample_count > 0U) {
-        append_fmt(buf, cap, &n, "Communication style: %s, %s, avg %u chars\n",
-                   formality_desc(model->style.formality), verbosity_desc(model->style.verbosity),
-                   (unsigned)model->style.avg_message_length);
+        /* HU_PROMPT_CACHE_ORDER=live drops the raw average: it moves with every
+         * message (a mid-prompt cache miss each turn) and the bucketed
+         * "keep replies ~N chars" directive below already carries length. */
+        if (hu_gate_mode_from_env("HU_PROMPT_CACHE_ORDER", HU_GATE_OFF) == HU_GATE_LIVE)
+            append_fmt(buf, cap, &n, "Communication style: %s, %s\n",
+                       formality_desc(model->style.formality),
+                       verbosity_desc(model->style.verbosity));
+        else
+            append_fmt(buf, cap, &n, "Communication style: %s, %s, avg %u chars\n",
+                       formality_desc(model->style.formality),
+                       verbosity_desc(model->style.verbosity),
+                       (unsigned)model->style.avg_message_length);
         detail = true;
     }
 
@@ -1368,14 +1401,19 @@ static void update_style_from_message(hu_communication_style_t *style, const cha
     if (timestamp > 0)
         style->last_observed_at = timestamp;
 
-    uint32_t len = (uint32_t)message_len;
-    if (prev_n == 0U) {
-        style->avg_message_length = len;
-    } else {
-        style->avg_message_length =
-            (uint32_t)(((uint64_t)style->avg_message_length * (uint64_t)prev_n + len) /
-                       (uint64_t)style->sample_count);
-    }
+    /* Exact (rounded) mean for the first HU_PM_LEN_WINDOW samples, then a
+     * rounded EWMA over the same window. The old cumulative integer mean
+     * truncated: past a few dozen samples a shorter message dropped it by 1
+     * and nothing could raise it, so production read "avg 2 chars"
+     * (2026-10-02) and recovery was impossible at sample_count ~5000. */
+    enum { HU_PM_LEN_WINDOW = 20 };
+    uint64_t len = (uint64_t)message_len;
+    uint64_t avg = style->avg_message_length;
+    uint64_t n = style->sample_count < HU_PM_LEN_WINDOW ? style->sample_count : HU_PM_LEN_WINDOW;
+    if (prev_n == 0U)
+        style->avg_message_length = (uint32_t)len;
+    else
+        style->avg_message_length = (uint32_t)((avg * (n - 1) + len + n / 2) / n);
 
     /* Verbosity: map length to 0..1 (500+ chars treated as fully verbose). */
     float verb = fminf(1.0f, (float)len / 500.0f);
@@ -1429,6 +1467,94 @@ static void bump_temporal(hu_personal_model_t *model, int64_t timestamp) {
         model->active_hours[h]++;
     if (d >= 0 && d < 7 && model->active_days[d] < 255)
         model->active_days[d]++;
+}
+
+/* Stamp provenance, promote matching pending facts, merge — the tail every
+ * extracted batch takes, inline or deferred. */
+static hu_error_t pm_merge_extracted(hu_personal_model_t *model,
+                                     hu_fact_extract_result_t *extracted,
+                                     const hu_provenance_t *prov, int64_t timestamp) {
+    /* Stamp provenance on every extracted fact before merge — the
+     * checked merge consults `fact->provenance.tier` for the overwrite
+     * decision. */
+    for (size_t i = 0; i < extracted->fact_count; i++)
+        extracted->facts[i].provenance = *prov;
+
+    /* USER_DIRECT facts may promote matching pending entries. */
+    if (prov->tier >= HU_TRUST_USER_DIRECT) {
+        (void)hu_personal_model_promote_pending_facts(model, extracted, timestamp);
+    }
+
+    return hu_personal_model_merge_facts_checked(model, extracted, prov);
+}
+
+/* HU_POST_SEND_DEFER (core/post_send_defer.h): the LLM fallback as a job that
+ * runs after the reply is sent. Same extraction, same merge; only later. */
+typedef struct pm_extract_job {
+    hu_personal_model_t *model;
+    char *message;
+    size_t message_len;
+    int64_t timestamp;
+    hu_provenance_t prov;
+} pm_extract_job_t;
+
+static void pm_extract_job_run(void *arg) {
+    pm_extract_job_t *job = (pm_extract_job_t *)arg;
+    hu_fact_extract_result_t extracted;
+    memset(&extracted, 0, sizeof(extracted));
+    maybe_llm_fact_fallback(job->message, job->message_len, job->timestamp, &extracted);
+    if (extracted.fact_count == 0)
+        return;
+    /* The merge stamps facts with model->updated_at; use the message's own time
+     * as the inline path did, then restore the newer value. */
+    int64_t saved_updated_at = job->model->updated_at;
+    if (job->timestamp > 0)
+        job->model->updated_at = job->timestamp;
+    (void)pm_merge_extracted(job->model, &extracted, &job->prov, job->timestamp);
+    job->model->updated_at = saved_updated_at;
+}
+
+static void pm_extract_job_free(void *arg) {
+    pm_extract_job_t *job = (pm_extract_job_t *)arg;
+    if (!job || !s_llm_extract_alloc)
+        return;
+    s_llm_extract_alloc->free(s_llm_extract_alloc->ctx, job->message, job->message_len + 1);
+    s_llm_extract_alloc->free(s_llm_extract_alloc->ctx, job, sizeof(*job));
+}
+
+/* True when the fallback was handed to the post-send queue (the caller must not
+ * run it). False whenever it would not run at all, or must run inline now. */
+static bool pm_defer_llm_fallback(hu_personal_model_t *model, const char *message,
+                                  size_t message_len, int64_t timestamp,
+                                  const hu_provenance_t *prov) {
+    hu_gate_mode_t mode = hu_post_send_defer_window_mode();
+    if (mode == HU_GATE_OFF || llm_fact_extract_gate() == 0 || !s_llm_extract_provider ||
+        !s_llm_extract_alloc || message_len < HU_LLM_FACT_EXTRACT_MIN_LEN)
+        return false;
+    if (mode != HU_GATE_LIVE) { /* SHADOW: count it, copy nothing; the caller runs it inline */
+        (void)hu_post_send_defer_offer(HU_POST_SEND_JOB_EXTRACT, pm_extract_job_run, NULL, NULL);
+        return false;
+    }
+    hu_allocator_t *a = s_llm_extract_alloc;
+    pm_extract_job_t *job = (pm_extract_job_t *)a->alloc(a->ctx, sizeof(*job));
+    char *copy = job ? (char *)a->alloc(a->ctx, message_len + 1) : NULL;
+    if (!copy) {
+        if (job)
+            a->free(a->ctx, job, sizeof(*job));
+        return false;
+    }
+    memcpy(copy, message, message_len);
+    copy[message_len] = '\0';
+    *job = (pm_extract_job_t){.model = model,
+                              .message = copy,
+                              .message_len = message_len,
+                              .timestamp = timestamp,
+                              .prov = *prov};
+    if (hu_post_send_defer_offer(HU_POST_SEND_JOB_EXTRACT, pm_extract_job_run, pm_extract_job_free,
+                                 job))
+        return true;
+    pm_extract_job_free(job);
+    return false;
 }
 
 hu_error_t hu_personal_model_ingest(hu_personal_model_t *model, const char *message,
@@ -1494,22 +1620,13 @@ hu_error_t hu_personal_model_ingest(hu_personal_model_t *model, const char *mess
      * an LLM extractor has been injected, fall back to it. Gated OFF -> SHADOW
      * -> LIVE by HU_LLM_FACT_EXTRACT (default OFF, zero cost). On LIVE this
      * overwrites `extracted`, so the stamp/promote/merge flow below treats the
-     * LLM facts exactly like regex facts. */
-    if (extracted.fact_count == 0)
+     * LLM facts exactly like regex facts. HU_POST_SEND_DEFER=live instead
+     * queues the same extraction to run after the reply is sent. */
+    if (extracted.fact_count == 0 &&
+        !pm_defer_llm_fallback(model, message, message_len, timestamp, &effective_prov))
         maybe_llm_fact_fallback(message, message_len, timestamp, &extracted);
 
-    /* Stamp provenance on every extracted fact before merge — the
-     * checked merge consults `fact->provenance.tier` for the overwrite
-     * decision. */
-    for (size_t i = 0; i < extracted.fact_count; i++)
-        extracted.facts[i].provenance = effective_prov;
-
-    /* USER_DIRECT facts may promote matching pending entries. */
-    if (effective_prov.tier >= HU_TRUST_USER_DIRECT) {
-        (void)hu_personal_model_promote_pending_facts(model, &extracted, timestamp);
-    }
-
-    return hu_personal_model_merge_facts_checked(model, &extracted, &effective_prov);
+    return pm_merge_extracted(model, &extracted, &effective_prov, timestamp);
 }
 
 hu_error_t hu_personal_model_merge_facts(hu_personal_model_t *model,
@@ -1859,7 +1976,9 @@ size_t hu_personal_model_describe_recently_completed(const hu_personal_model_t *
             continue;
         if (!hu_personal_goal_is_recently_completed(&model->goals[i], now))
             continue;
-        const char *sep = any ? ", " : "";
+        /* Always point at ", " and copy 0 or 2 bytes: a pointer that may be the
+         * 1-byte "" made GCC's -Warray-bounds see a 2-byte read past it. */
+        const char *sep = ", ";
         size_t sep_len = any ? 2 : 0;
         size_t desc_len = strlen(model->goals[i].description);
         /* Need: written + sep_len + desc_len + 1 (NUL) <= cap.

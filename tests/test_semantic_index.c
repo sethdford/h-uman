@@ -72,6 +72,31 @@ static void test_store_indexes_row_when_index_attached(void) {
     mem.vtable->deinit(mem.ctx);
 }
 
+/* A forgotten row took its text with it but left its vector, and search reads
+ * content from the vector side's own copy: on 2026-10-01 250 of 1435 indexed
+ * rows in production were orphans still recallable after the decay pass. */
+static void test_forget_removes_the_row_from_the_semantic_index(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    hu_embedder_t emb = {.ctx = NULL, .vtable = &stub_vt};
+    hu_vector_store_t vs =
+        hu_vector_store_sqlite_vec_create(&alloc, hu_sqlite_memory_get_db(&mem), 3);
+    hu_sqlite_memory_set_semantic_index(&mem, &emb, &vs);
+    HU_ASSERT_EQ(mem.vtable->store(mem.ctx, "k1", 2, "apple pie", 9, NULL, "", 0), HU_OK);
+    HU_ASSERT_EQ(mem.vtable->store(mem.ctx, "k2", 2, "banana split", 12, NULL, "", 0), HU_OK);
+    HU_ASSERT_EQ((long)vs.vtable->count(vs.ctx), 2L);
+    bool deleted = false;
+    HU_ASSERT_EQ(mem.vtable->forget(mem.ctx, "k1", 2, &deleted), HU_OK);
+    HU_ASSERT_TRUE(deleted);
+    HU_ASSERT_EQ((long)vs.vtable->count(vs.ctx), 1L);
+    /* forgetting a key that was never stored leaves the index alone */
+    HU_ASSERT_EQ(mem.vtable->forget(mem.ctx, "nope", 4, &deleted), HU_OK);
+    HU_ASSERT_FALSE(deleted);
+    HU_ASSERT_EQ((long)vs.vtable->count(vs.ctx), 1L);
+    vs.vtable->deinit(vs.ctx, &alloc);
+    mem.vtable->deinit(mem.ctx);
+}
+
 static void test_reindex_backfills_rows_stored_before_attach(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
@@ -205,6 +230,7 @@ static void test_semantic_index_set_get_are_no_ops_on_a_non_sqlite_engine(void) 
 void run_semantic_index_tests(void) {
     HU_TEST_SUITE("semantic_index");
     HU_RUN_TEST(test_store_indexes_row_when_index_attached);
+    HU_RUN_TEST(test_forget_removes_the_row_from_the_semantic_index);
     HU_RUN_TEST(test_reindex_backfills_rows_stored_before_attach);
     HU_RUN_TEST(test_store_skips_experience_rows_at_write_time);
     HU_RUN_TEST(test_reindex_skips_and_purges_experience_rows);

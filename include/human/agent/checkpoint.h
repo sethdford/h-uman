@@ -55,6 +55,11 @@ hu_error_t hu_checkpoint_load(const hu_checkpoint_store_t *store, const char *ta
 
 hu_error_t hu_checkpoint_load_latest(const hu_checkpoint_store_t *store, hu_checkpoint_t *out);
 
+/* Frees every slot's state_json (the copies hu_checkpoint_save allocated with
+ * `alloc`) and empties the store; auto_checkpoint and interval_steps are kept.
+ * metadata_json is never allocated by the store and is left alone. NULL-safe. */
+void hu_checkpoint_store_deinit(hu_checkpoint_store_t *store, hu_allocator_t *alloc);
+
 bool hu_checkpoint_should_save(const hu_checkpoint_store_t *store, uint32_t current_step);
 
 const char *hu_checkpoint_status_name(hu_checkpoint_status_t status);

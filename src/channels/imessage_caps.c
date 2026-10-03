@@ -1,9 +1,12 @@
 #include "human/channels/imessage_caps.h"
+#include "human/channels/imessage_voice_record.h"
+#include "human/core/gate_mode.h"
 #include "human/core/log.h"
 #include "human/core/process_util.h"
 #include "human/core/string.h"
 
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -234,16 +237,177 @@ bool hu_imsg_run_ok(hu_allocator_t *alloc, const char *const *argv, int timeout_
     return ok;
 }
 
+bool hu_imessage_caps_should_reprobe(int64_t now, int64_t probed_at, bool advanced,
+                                     bool verb_failed) {
+    if (probed_at < 0)
+        return true;
+    int64_t age = now - probed_at;
+    if (verb_failed)
+        return age >= 20;
+    return age >= (advanced ? 600 : 120);
+}
+
+bool hu_imessage_bridge_repair_due(bool advanced, bool sip_enabled, double idle_sec,
+                                   int64_t since_last_repair) {
+    return !advanced && !sip_enabled && idle_sec >= 300.0 &&
+           (since_last_repair < 0 || since_last_repair >= 1800);
+}
+
+static atomic_bool s_bridge_verb_failed = false;
+
+void hu_imessage_caps_note_bridge_failure(void) {
+    atomic_store(&s_bridge_verb_failed, true);
+}
+
+/* Bridge down, SIP off, Seth away: re-inject with `imsg launch` (it restarts
+ * Messages.app). HU_IMSG_SELF_HEAL=off|shadow|live, default off; LIVE is gated
+ * on the bridge staying up across a week of daemon restarts without Seth
+ * noticing a relaunch. */
+static void caps_try_repair(hu_allocator_t *alloc, hu_imessage_caps_t *caps, int64_t now,
+                            int64_t *last_repair) {
+    hu_gate_mode_t mode = hu_gate_mode_from_env("HU_IMSG_SELF_HEAL", HU_GATE_OFF);
+    if (mode == HU_GATE_OFF || !caps->probed)
+        return;
+    int64_t since = *last_repair < 0 ? -1 : now - *last_repair;
+    double idle = hu_voice_record_idle_seconds();
+    if (!hu_imessage_bridge_repair_due(caps->advanced, caps->sip_enabled, idle, since))
+        return;
+    *last_repair = now;
+    if (mode != HU_GATE_LIVE) {
+        hu_log_info("imessage", NULL, "self-heal shadow: would relaunch Messages (idle %.0fs)",
+                    idle);
+        return;
+    }
+#if defined(__APPLE__) && defined(__MACH__) && !HU_IS_TEST
+    const char *argv[] = {"imsg", "launch", NULL};
+    bool ok = hu_imsg_run_ok(alloc, argv, 60);
+    (void)hu_imessage_caps_probe(alloc, caps);
+    hu_log_info("imessage", NULL, "self-heal: imsg launch %s; bridge now %s", ok ? "ok" : "failed",
+                caps->advanced ? "up" : "down");
+#else
+    (void)alloc;
+#endif
+}
+
+/* Accessibility is lost on every reinstall and nothing said so: typing,
+ * native voice memos and reply fallbacks quietly degraded for days. Say it
+ * once per process, in the log and as a macOS notification to Seth. */
+static void caps_check_accessibility(hu_allocator_t *alloc) {
+    static bool warned = false;
+    if (warned || hu_voice_record_ax_trusted())
+        return;
+    warned = true;
+    hu_log_warn("imessage", NULL,
+                "Accessibility NOT granted to this binary (lost on reinstall): typing, native "
+                "voice memos and reply fallbacks degrade. System Settings > Privacy & Security > "
+                "Accessibility > human-daemon");
+#if defined(__APPLE__) && defined(__MACH__) && !HU_IS_TEST
+    const char *argv[] = {"osascript", "-e",
+                          "display notification \"Grant Accessibility to human-daemon: System "
+                          "Settings > Privacy & Security > Accessibility\" with title \"h-uman "
+                          "lost Accessibility\"",
+                          NULL};
+    (void)hu_imsg_run_ok(alloc, argv, 10);
+#else
+    (void)alloc;
+#endif
+}
+
+bool hu_imsg_is_bare_url(const char *text, size_t len) {
+    if (!text)
+        return false;
+    size_t a = 0, b = len;
+    while (a < b && (text[a] == ' ' || text[a] == '\n' || text[a] == '\t' || text[a] == '\r'))
+        a++;
+    while (b > a && (text[b - 1] == ' ' || text[b - 1] == '\n' || text[b - 1] == '\t' ||
+                     text[b - 1] == '\r'))
+        b--;
+    size_t scheme = (b - a > 8 && strncmp(text + a, "https://", 8) == 0)  ? 8
+                    : (b - a > 7 && strncmp(text + a, "http://", 7) == 0) ? 7
+                                                                          : 0;
+    if (scheme == 0)
+        return false;
+    for (size_t i = a + scheme; i < b; i++)
+        if (text[i] == ' ' || text[i] == '\n' || text[i] == '\t' || text[i] == '\r')
+            return false; /* a second word: this is a sentence, not a link */
+    return b - a > scheme;
+}
+
+size_t hu_imsg_chat_guid(char *out, size_t cap, const char *handle, size_t handle_len) {
+    if (!out || cap == 0)
+        return 0;
+    out[0] = '\0';
+    if (!handle || handle_len == 0)
+        return 0;
+    for (size_t i = 0; i < handle_len; i++)
+        if (handle[i] == ';' || handle[i] == ' ' || handle[i] == '/')
+            return 0; /* a chat id or anything else: not a plain 1:1 handle */
+    int n = snprintf(out, cap, "iMessage;-;%.*s", (int)handle_len, handle);
+    if (n > 0 && (size_t)n < cap)
+        return (size_t)n;
+    out[0] = '\0'; /* never hand back a truncated chat id */
+    return 0;
+}
+
+static struct {
+    char target[128];
+    size_t target_len;
+    char effect[16];
+    int64_t at;
+} s_effect;
+static pthread_mutex_t s_effect_mu = PTHREAD_MUTEX_INITIALIZER;
+
+void hu_imsg_effect_set(const char *target, size_t target_len, const char *effect, int64_t now) {
+    if (!target || target_len == 0 || target_len >= sizeof(s_effect.target) || !effect ||
+        strlen(effect) >= sizeof(s_effect.effect))
+        return;
+    pthread_mutex_lock(&s_effect_mu);
+    memcpy(s_effect.target, target, target_len);
+    s_effect.target_len = target_len;
+    memcpy(s_effect.effect, effect, strlen(effect) + 1);
+    s_effect.at = now;
+    pthread_mutex_unlock(&s_effect_mu);
+}
+
+bool hu_imsg_effect_take(const char *target, size_t target_len, int64_t now, char *effect_out,
+                         size_t cap) {
+    bool hit = false;
+    pthread_mutex_lock(&s_effect_mu);
+    if (s_effect.effect[0] && target && s_effect.target_len == target_len &&
+        memcmp(s_effect.target, target, target_len) == 0 && now - s_effect.at <= 120 &&
+        effect_out && strlen(s_effect.effect) < cap) {
+        memcpy(effect_out, s_effect.effect, strlen(s_effect.effect) + 1);
+        hit = true;
+    }
+    if (hit || now - s_effect.at > 120)
+        s_effect.effect[0] = '\0'; /* one-shot; a stale mark never lingers */
+    pthread_mutex_unlock(&s_effect_mu);
+    return hit;
+}
+
 const hu_imessage_caps_t *hu_imessage_caps_cached(hu_allocator_t *alloc) {
     static hu_imessage_caps_t caps;
-    static bool probed = false;
-    if (!probed && alloc) {
-        probed = true;
-        (void)hu_imessage_caps_probe(alloc, &caps);
-        char desc[224];
-        hu_imessage_caps_describe(&caps, desc, sizeof(desc));
-        hu_log_info("imessage", NULL, "%s", desc);
+    static int64_t probed_at = -1, last_repair = -1;
+    static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER;
+    pthread_mutex_lock(&mu);
+    int64_t now = (int64_t)time(NULL);
+    if (alloc && hu_imessage_caps_should_reprobe(now, probed_at, caps.advanced,
+                                                 atomic_load(&s_bridge_verb_failed))) {
+        atomic_store(&s_bridge_verb_failed, false);
+        bool first = probed_at < 0, was_up = caps.advanced;
+        hu_imessage_caps_t fresh;
+        (void)hu_imessage_caps_probe(alloc, &fresh);
+        caps_try_repair(alloc, &fresh, now, &last_repair);
+        caps_check_accessibility(alloc);
+        caps = fresh;
+        probed_at = now;
+        if (first || was_up != caps.advanced) { /* log the start and every change */
+            char desc[224];
+            hu_imessage_caps_describe(&caps, desc, sizeof(desc));
+            hu_log_info("imessage", NULL, "%s", desc);
+        }
     }
+    pthread_mutex_unlock(&mu);
     return &caps;
 }
 
@@ -456,4 +620,25 @@ hu_error_t hu_imessage_caps_probe(hu_allocator_t *alloc, hu_imessage_caps_t *cap
     (void)alloc; /* non-macOS / test builds: no bridge, fail closed */
 #endif
     return HU_OK;
+}
+
+uint32_t hu_imsg_typing_phase_ms(uint32_t *seed, bool typing) {
+    uint32_t x = (seed && *seed) ? *seed : 0x9e3779b9u;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    if (seed)
+        *seed = x;
+    return typing ? 4000u + x % 8001u : 1500u + x % 2501u;
+}
+
+uint32_t hu_imsg_typing_catchup_ms(uint32_t typing_ms, uint64_t shown_ms) {
+    if (shown_ms >= typing_ms)
+        return 0;
+    uint64_t left = typing_ms - shown_ms;
+    return left > HU_IMSG_TYPING_CATCHUP_MAX_MS ? HU_IMSG_TYPING_CATCHUP_MAX_MS : (uint32_t)left;
+}
+
+bool hu_imessage_send_landed(int64_t prior_rowid, int64_t now_rowid) {
+    return prior_rowid >= 0 && now_rowid > prior_rowid;
 }

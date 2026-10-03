@@ -14,6 +14,10 @@ typedef struct hu_reliable_provider_entry {
     const char *name;
     size_t name_len;
     hu_provider_t provider;
+    /* Prompts sent here stay on this machine (local_only.h endpoint rule).
+     * from_config sets it from base_url + providers[].local; zero-initialised
+     * entries are NOT local, so private spans are stripped (fail closed). */
+    bool local;
 } hu_reliable_provider_entry_t;
 
 /* Model + fallback models for per-model failover */
@@ -100,6 +104,27 @@ void hu_reliable_set_clock(hu_provider_t *reliable, time_t (*now_fn)(void *), vo
  * ON by default: the empty reply is treated as HU_ERR_PROVIDER_RESPONSE for
  * that provider (no retry on it, no circuit-breaker credit) and the chain
  * moves to the mapped fallback model / next provider. */
+/* The primary (inner) provider of a reliable wrapper, for a caller whose
+ * prompt must NOT fail over — content that may only reach a local model. The
+ * returned provider is borrowed from the wrapper. HU_ERR_INVALID_ARGUMENT when
+ * `reliable` is not a reliable wrapper; HU_ERR_PROVIDER_UNAVAILABLE while the
+ * circuit is open (calls are being routed to the fallbacks). */
+hu_error_t hu_reliable_primary(const hu_provider_t *reliable, hu_provider_t *out);
+
+/* Which provider answered this wrapper's most recent chat call: 0 = the
+ * primary, n = fallback extras[n-1], -1 = none answered (or `reliable` is not
+ * a reliable wrapper). Read-only; for telemetry about where a prompt went. */
+int hu_reliable_last_served(const hu_provider_t *reliable);
+
 void hu_reliable_set_empty_failover(hu_provider_t *reliable, bool on);
+
+/* Is the primary on-device? Local-only prompt spans (providers/local_only.h)
+ * are stripped from every attempt on a provider that is not local. Defaults to
+ * the primary's get_name at create; from_config sets it from the configured
+ * primary name (an mlx_local instance reports "compatible"). */
+void hu_reliable_set_primary_local(hu_provider_t *reliable, bool local);
+
+/* False for NULL or a non-reliable provider. */
+bool hu_reliable_primary_is_local(const hu_provider_t *reliable);
 
 #endif /* HU_RELIABLE_H */

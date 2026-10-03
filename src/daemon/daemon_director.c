@@ -1,16 +1,22 @@
 #include "human/agent.h"
 #include "human/channel.h"
 #include "human/cognition/emotional.h"
+#include "human/config.h"
 #include "human/context/conversation.h"
 #include "human/core/error.h"
+#include "human/core/gate_mode.h"
+#include "human/core/local_only_guard.h"
 #include "human/core/log.h"
 #include "human/core/string.h"
 #include "human/daemon/common.h"
 #include "human/daemon/director.h"
+#include "human/daemon/director_v2.h"
 #include "human/daemon_comfort_summary.h"
 #include "human/memory.h"
 #include "human/memory/deep_extract.h"
 #include "human/provider.h"
+#include "human/providers/factory.h"
+#include "human/providers/local_only_config.h"
 
 /* Private agent header: the G6 wiring below sets agent-internal director
  * state (borrowed scene pointer + history ring). Same cross-module
@@ -35,6 +41,44 @@ bool g_classify_provider_ok = false;
 const char *g_classify_model = "gemini-3.1-flash-lite";
 size_t g_classify_model_len = 21;
 
+void hu_daemon_classify_provider_init(hu_allocator_t *alloc, const struct hu_config *config,
+                                      hu_agent_t *agent, bool any_llm_decides) {
+    if (!any_llm_decides || g_classify_provider_ok)
+        return;
+    if (hu_local_only_enforced()) {
+        /* local_only: the director reads the last messages of the thread, so
+         * it runs on the agent's own provider and model — never a cloud one.
+         * Borrowed, not owned: nothing deinits g_classify_provider. */
+        if (agent && agent->provider.vtable && agent->model_name && agent->model_name_len > 0 &&
+            hu_config_primary_is_local(config)) {
+            g_classify_provider = agent->provider;
+            g_classify_model = agent->model_name;
+            g_classify_model_len = agent->model_name_len;
+            g_classify_provider_ok = true;
+            hu_log_info("human", NULL, "classify provider: local_only — primary model %.*s",
+                        (int)agent->model_name_len, agent->model_name);
+        } else {
+            hu_log_warn("human", NULL,
+                        "classify provider: local_only and no local primary — director and LLM "
+                        "emotion detection skipped");
+        }
+        return;
+    }
+    const char *gemini_url = config ? hu_config_get_provider_base_url(config, "gemini") : NULL;
+    size_t gemini_url_len = gemini_url ? strlen(gemini_url) : 0;
+    hu_error_t cp_err = hu_provider_create(alloc, "gemini", 6, NULL, 0, gemini_url, gemini_url_len,
+                                           &g_classify_provider);
+    if (cp_err == HU_OK) {
+        g_classify_provider_ok = true;
+        hu_log_info("human", NULL, "hybrid routing: classify provider ready (gemini flash-lite)");
+    } else {
+        hu_log_error("human", NULL,
+                     "hybrid routing: classify provider failed (%s), "
+                     "classifications will be skipped",
+                     hu_error_string(cp_err));
+    }
+}
+
 /* W9: real-time emotion detection stays here (per-message, from live
  * history) while the world model caches a snapshot. The two compose:
  * this function feeds live state, the world model feeds trend. */
@@ -51,9 +95,13 @@ hu_emotional_state_t hu_daemon_detect_emotion(hu_allocator_t *alloc, hu_agent_t 
 #else
     /* Hybrid routing: prefer fast cloud classify provider when available */
     if (g_classify_provider_ok && g_classify_provider.vtable &&
-        g_classify_provider.vtable->chat_with_system)
-        return hu_conversation_detect_emotion_llm(alloc, &g_classify_provider, g_classify_model,
-                                                  g_classify_model_len, entries, count);
+        g_classify_provider.vtable->chat_with_system) {
+        const char *lo_prev = hu_local_only_set_caller("director");
+        hu_emotional_state_t st = hu_conversation_detect_emotion_llm(
+            alloc, &g_classify_provider, g_classify_model, g_classify_model_len, entries, count);
+        (void)hu_local_only_set_caller(lo_prev);
+        return st;
+    }
     if (agent && agent->provider.vtable && agent->provider.vtable->chat_with_system)
         return hu_conversation_detect_emotion_llm(alloc, &agent->provider, agent->model_name,
                                                   agent->model_name_len, entries, count);
@@ -64,6 +112,183 @@ hu_emotional_state_t hu_daemon_detect_emotion(hu_allocator_t *alloc, hu_agent_t 
 #if defined(__GNUC__) || defined(__clang__)
 __attribute__((unused))
 #endif
+const char *hu_director_form_name(hu_director_form_t form) {
+    static const char *const names[] = {"text", "voice", "tapback", "gif", "silence", "share"};
+    return (unsigned)form < sizeof(names) / sizeof(names[0]) ? names[form] : "text";
+}
+
+/* The new fields are read only from the head of the line: `direction:` is
+ * free text and always last, so a tone cue mentioning "effect:" is not one. */
+static const char *head_find(const char *raw, size_t head_len, const char *key) {
+    const char *p = strstr(raw, key);
+    return (p && (size_t)(p - raw) < head_len) ? p : NULL;
+}
+
+/* Copy a field value up to '|' or end of head into out. */
+static void head_value(const char *v, const char *head_end, char *out, size_t cap) {
+    size_t n = 0;
+    while (v + n < head_end && v[n] != '|' && v[n] != '\n' && n + 1 < cap)
+        n++;
+    while (n > 0 && (v[n - 1] == ' ' || v[n - 1] == '\r'))
+        n--;
+    memcpy(out, v, n);
+    out[n] = '\0';
+}
+
+static void parse_expressive_fields(const char *raw, size_t len, hu_director_result_t *out) {
+    const char *dir = strstr(raw, "direction:");
+    size_t head_len = dir ? (size_t)(dir - raw) : len;
+    const char *head_end = raw + head_len;
+    static const char *const effects[] = {"impact",       "loud",     "gentle",
+                                          "invisibleink", "confetti", "lasers"};
+    const char *ep = head_find(raw, head_len, "effect:");
+    if (ep) {
+        char e[16];
+        head_value(ep + 7, head_end, e, sizeof(e));
+        for (size_t i = 0; i < sizeof(effects) / sizeof(effects[0]); i++)
+            if (strcmp(e, effects[i]) == 0)
+                memcpy(out->effect, e, strlen(e) + 1);
+    }
+    out->reply_to = head_find(raw, head_len, "reply_to:true") != NULL;
+    const char *gp = head_find(raw, head_len, "gif:");
+    if (gp)
+        head_value(gp + 4, head_end, out->gif_query, sizeof(out->gif_query));
+    const char *sp = head_find(raw, head_len, "share:");
+    if (sp) {
+        static const char *const kinds[] = {"", "song", "video", "short", "saved"};
+        char k[8];
+        head_value(sp + 6, head_end, k, sizeof(k));
+        for (size_t i = 1; i < sizeof(kinds) / sizeof(kinds[0]); i++)
+            if (strcmp(k, kinds[i]) == 0)
+                out->share = (hu_share_kind_t)i;
+    }
+    const char *qp = head_find(raw, head_len, "q:");
+    if (qp)
+        head_value(qp + 2, head_end, out->share_query, sizeof(out->share_query));
+}
+
+static const char k_director_system[] =
+    "You are a dialogue director for a texting scene. The actor plays Seth, a 45yo "
+    "tech entrepreneur. Lives alone with his cat. Kids don't live with him. "
+    "Decide his BEHAVIOR — not just words.\n\n"
+    "Reply in this exact format (one line, pipe-separated):\n"
+    "action:<text|tapback|silence>[|delay_s:N][|reaction:<heart|haha|thumbs_up|emphasis>]"
+    "[|burst:true][|direction:...]\n\n"
+    "Rules:\n"
+    "- DEFAULT is action:text. When in doubt, respond.\n"
+    "- action:text — Seth sends a text. Include delay_s (seconds to wait before replying, "
+    "2-8 for normal, 15-60 for busy/low-priority) and direction for tone/length.\n"
+    "- BREVITY IS THE DEFAULT. Most texts are a few words — a reaction, one fact, an "
+    "acknowledgment. Your `direction` should almost always carry a tight length cue: "
+    "'one line', 'a few words', 'just a word or two'. Reserve longer only for genuinely "
+    "weighty moments.\n"
+    "- Seth does NOT interrogate. He often just acknowledges, states one thing, or reacts "
+    "and stops — he does NOT tack on a follow-up question to keep the conversation going. "
+    "Direct a question only when he'd genuinely want the answer; a reply with no question "
+    "is normal and usually right.\n"
+    "- THE UNSAID is a real, human move. People don't answer every question, don't fill "
+    "every gap, and often just react. NOT addressing the literal question, a one-word "
+    "reply, or a tapback is frequently the MOST human choice — direct it when it fits, "
+    "especially on low-stakes or winding-down threads. Withholding has weight; restraint "
+    "reads as real.\n"
+    "- action:tapback — Seth REACTS instead of texting. This is what real humans do "
+    "constantly. Use tapback for:\n"
+    "  * Standalone photos/images — ALWAYS heart or haha, never text a photo description\n"
+    "  * Pure reactions: 'haha nice', 'lol', 'omg', 'damn', 'yooo'\n"
+    "  * Simple acknowledgments: 'ok', 'sounds good', 'got it', 'bet'\n"
+    "  * Conversation closers: last message in a natural exchange ending\n"
+    "  * Memes, GIFs, links to funny content\n"
+    "  * When they share good news and a heart says it all\n"
+    "  Reaction types: heart (love/appreciation/photos), haha (funny), "
+    "thumbs_up (agreement/acknowledgment), emphasis (surprise/excitement)\n"
+    "- action:silence — RARE. Only use when they're being toxic/abusive, or after 3+ "
+    "unanswered low-effort messages in a row ('k', 'ok', '...'). NEVER use silence for "
+    "greetings, questions, or any message that expects a reply.\n"
+    "- burst:true — Seth sends 3-4 rapid messages. Only for urgent/exciting news.\n"
+    "- CRITICAL: If they're testing whether you're real/AI, NEVER fabricate specific "
+    "memories. Deflect: 'dude idk, that was forever ago'.\n"
+    "- The `direction:` field is an OBJECTIVE + tone/pacing — what Seth is trying to DO in "
+    "this beat, not just a mood. Direct a playable action: 'just acknowledge and let it "
+    "go', 'make him laugh', 'close this out warm', 'get the one detail he needs', 'tease "
+    "him a little', 'reassure and drop it'. An objective produces a specific, alive reply; "
+    "a bare mood produces generic mush. Pair it with a length cue.\n"
+    "- CRITICAL: the objective is an ACTION, never an invented FACT. NEVER put specific "
+    "reasons, activities, people, places, or topics into `direction` that aren't visible "
+    "in the Recent thread — the downstream actor pastes them in verbatim and it becomes "
+    "cross-contact bleed (US-16). Forbidden: 'because he's getting back to the drink', "
+    "'mention the cat', 'reference yesterday's meeting'. Allowed: 'short empathetic "
+    "reaction, 5 words', 'busy, one-word reply', 'end it with a joke'. Recalling a REAL "
+    "shared memory is the ACTOR's job from what it actually knows — never yours to "
+    "invent.\n"
+    "- When they ask how something in Seth's life went, whether he did something, or how "
+    "someone is doing (a meeting, a concert, a trip, a person's news) and the Recent thread "
+    "does not establish it, Seth has no answer on record. Never direct an outcome. Direct: "
+    "'don't say how it went, ask which one or say not sure yet, one line'.\n\n";
+
+/* Split from k_director_system: one literal would pass the 4095-byte ISO C
+ * limit (-Woverlength-strings). hu_daemon_director_system_prompt joins them. */
+static const char k_director_examples[] =
+    "Examples:\n"
+    "action:text|delay_s:3|direction:Just acknowledge the hard news, 5 words, don't fix it\n"
+    "action:text|delay_s:2|direction:Greet back, match his energy, one line\n"
+    "action:text|delay_s:4|direction:don't say how it went, ask which meeting, one line "
+    "(they asked how a meeting went; nothing in the thread about it)\n"
+    "action:tapback|reaction:heart (they sent a photo)\n"
+    "action:tapback|reaction:haha (they said something funny)\n"
+    "action:tapback|reaction:thumbs_up (simple acknowledgment)\n"
+    "action:text|delay_s:2|burst:true|direction:Match urgency, 3 rapid messages\n"
+    "action:text|delay_s:45|direction:He's busy, one-word reply when he gets back";
+
+/* Spec 2026-09-28-expressive-imessage, Phase 2: the rest of how Seth responds.
+ * Appended only when HU_DIRECTOR_FORMS is LIVE. The live decision comes from
+ * this same call, so appending it in SHADOW changed real choices (tapbacks fell
+ * from 30-45% of turns to 0-10%, 2026-09-28..10-01); off and shadow, the prompt
+ * is exactly today's. */
+static const char k_director_forms[] =
+    "\n\nMORE WAYS SETH RESPONDS (rare; most replies are still plain texts). Only use what the "
+    "'This turn:' line says is available.\n"
+    "- action:voice — a voice memo instead of a text: when they sent a voice memo, a heartfelt "
+    "moment, or a real question worth talking through. The direction then describes a spoken "
+    "memo (a few connected thoughts), not a text length.\n"
+    "- action:gif|gif:<2-3 search words> — a GIF instead of a text, only in playful "
+    "back-and-forth with a close friend or sibling. Never with parents or business contacts, "
+    "never about anything serious.\n"
+    "- effect:<impact|loud|gentle|invisibleink|confetti|lasers> — add to a text only for a "
+    "genuine big moment: confetti for a birthday or big news, invisibleink for a surprise or "
+    "spoiler, impact for a mic-drop line. Almost never. Never on sad news.\n"
+    "- reply_to:true — thread your text onto their message when you're answering something "
+    "older and newer messages came in between, or when it's a group chat.\n"
+    "- action:share|share:<song|video|short|saved>|q:<search words> — send something alongside "
+    "your text, the way people do: a song when they mention a band or need a lift, a video or a "
+    "short when something reminds you of one, or 'saved' when the 'This turn:' line says Seth "
+    "saved something for them. At most once a day per person; never on sad news.\n"
+    "Examples:\n"
+    "action:text|delay_s:4|effect:confetti|direction:Congratulate her big, one line\n"
+    "action:voice|delay_s:40|direction:She sent a voice memo; talk back warmly, a few thoughts\n"
+    "action:gif|gif:slow clap|direction:He nailed the joke, answer with a GIF\n"
+    "action:text|delay_s:6|reply_to:true|direction:Answer his earlier question, a few words\n"
+    "action:share|share:song|q:beach house space song|direction:She loves them, share it\n"
+    "action:share|share:short|q:cat knocks glass off table|direction:Make him laugh";
+
+size_t hu_daemon_director_system_prompt(char *buf, size_t cap) {
+    if (!buf || cap == 0)
+        return 0;
+    size_t rules = sizeof(k_director_system) - 1;
+    size_t base = rules + sizeof(k_director_examples) - 1;
+    bool forms = hu_gate_mode_from_env("HU_DIRECTOR_FORMS", HU_GATE_OFF) == HU_GATE_LIVE;
+    size_t extra = forms ? sizeof(k_director_forms) - 1 : 0;
+    if (base + extra + 1 > cap) {
+        buf[0] = '\0';
+        return 0;
+    }
+    memcpy(buf, k_director_system, rules);
+    memcpy(buf + rules, k_director_examples, sizeof(k_director_examples) - 1);
+    if (extra)
+        memcpy(buf + base, k_director_forms, extra);
+    buf[base + extra] = '\0';
+    return base + extra;
+}
+
 void hu_daemon_parse_director_result(const char *raw, size_t len, hu_director_result_t *out) {
     memset(out, 0, sizeof(*out));
     out->action = DIR_TEXT;
@@ -81,10 +306,20 @@ void hu_daemon_parse_director_result(const char *raw, size_t len, hu_director_re
     }
 
     const char *val = ap + 7; /* skip "action:" */
-    if (strncmp(val, "tapback", 7) == 0)
+    if (strncmp(val, "tapback", 7) == 0) {
         out->action = DIR_TAPBACK;
-    else if (strncmp(val, "silence", 7) == 0)
+        out->form = HU_DIR_FORM_TAPBACK;
+    } else if (strncmp(val, "silence", 7) == 0) {
         out->action = DIR_SILENCE;
+        out->form = HU_DIR_FORM_SILENCE;
+    } else if (strncmp(val, "voice", 5) == 0) {
+        out->form = HU_DIR_FORM_VOICE; /* runs as text until voice-first owns it */
+    } else if (strncmp(val, "share", 5) == 0) {
+        out->form = HU_DIR_FORM_SHARE; /* the reply is still a text; the share rides along */
+    } else if (strncmp(val, "gif", 3) == 0) {
+        out->form = HU_DIR_FORM_GIF; /* runs as text until the GIF executor is LIVE */
+    }
+    parse_expressive_fields(raw, len, out);
 
     /* Parse "|delay_s:N" */
     const char *dp = strstr(raw, "delay_s:");
@@ -139,11 +374,12 @@ __attribute__((unused))
 #endif
 bool hu_daemon_director_call(hu_allocator_t *alloc, const char *combined, size_t combined_len,
                              const hu_channel_history_entry_t *entries, size_t entry_count,
-                             hu_director_result_t *result) {
+                             const char *situation, hu_director_result_t *result) {
 #if defined(HU_IS_TEST) && HU_IS_TEST
     (void)alloc;
     (void)entries;
     (void)entry_count;
+    (void)situation;
     memset(result, 0, sizeof(*result));
     result->action = DIR_TEXT;
     result->delay_s = 3;
@@ -176,68 +412,6 @@ bool hu_daemon_director_call(hu_allocator_t *alloc, const char *combined, size_t
         !g_classify_provider.vtable->chat_with_system)
         return false;
 
-    static const char director_system[] =
-        "You are a dialogue director for a texting scene. The actor plays Seth, a 45yo "
-        "tech entrepreneur. Lives alone with his cat. Kids don't live with him. "
-        "Decide his BEHAVIOR — not just words.\n\n"
-        "Reply in this exact format (one line, pipe-separated):\n"
-        "action:<text|tapback|silence>[|delay_s:N][|reaction:<heart|haha|thumbs_up|emphasis>]"
-        "[|burst:true][|direction:...]\n\n"
-        "Rules:\n"
-        "- DEFAULT is action:text. When in doubt, respond.\n"
-        "- action:text — Seth sends a text. Include delay_s (seconds to wait before replying, "
-        "2-8 for normal, 15-60 for busy/low-priority) and direction for tone/length.\n"
-        "- BREVITY IS THE DEFAULT. Most texts are a few words — a reaction, one fact, an "
-        "acknowledgment. Your `direction` should almost always carry a tight length cue: "
-        "'one line', 'a few words', 'just a word or two'. Reserve longer only for genuinely "
-        "weighty moments.\n"
-        "- Seth does NOT interrogate. He often just acknowledges, states one thing, or reacts "
-        "and stops — he does NOT tack on a follow-up question to keep the conversation going. "
-        "Direct a question only when he'd genuinely want the answer; a reply with no question "
-        "is normal and usually right.\n"
-        "- THE UNSAID is a real, human move. People don't answer every question, don't fill "
-        "every gap, and often just react. NOT addressing the literal question, a one-word "
-        "reply, or a tapback is frequently the MOST human choice — direct it when it fits, "
-        "especially on low-stakes or winding-down threads. Withholding has weight; restraint "
-        "reads as real.\n"
-        "- action:tapback — Seth REACTS instead of texting. This is what real humans do "
-        "constantly. Use tapback for:\n"
-        "  * Standalone photos/images — ALWAYS heart or haha, never text a photo description\n"
-        "  * Pure reactions: 'haha nice', 'lol', 'omg', 'damn', 'yooo'\n"
-        "  * Simple acknowledgments: 'ok', 'sounds good', 'got it', 'bet'\n"
-        "  * Conversation closers: last message in a natural exchange ending\n"
-        "  * Memes, GIFs, links to funny content\n"
-        "  * When they share good news and a heart says it all\n"
-        "  Reaction types: heart (love/appreciation/photos), haha (funny), "
-        "thumbs_up (agreement/acknowledgment), emphasis (surprise/excitement)\n"
-        "- action:silence — RARE. Only use when they're being toxic/abusive, or after 3+ "
-        "unanswered low-effort messages in a row ('k', 'ok', '...'). NEVER use silence for "
-        "greetings, questions, or any message that expects a reply.\n"
-        "- burst:true — Seth sends 3-4 rapid messages. Only for urgent/exciting news.\n"
-        "- CRITICAL: If they're testing whether you're real/AI, NEVER fabricate specific "
-        "memories. Deflect: 'dude idk, that was forever ago'.\n"
-        "- The `direction:` field is an OBJECTIVE + tone/pacing — what Seth is trying to DO in "
-        "this beat, not just a mood. Direct a playable action: 'just acknowledge and let it "
-        "go', 'make him laugh', 'close this out warm', 'get the one detail he needs', 'tease "
-        "him a little', 'reassure and drop it'. An objective produces a specific, alive reply; "
-        "a bare mood produces generic mush. Pair it with a length cue.\n"
-        "- CRITICAL: the objective is an ACTION, never an invented FACT. NEVER put specific "
-        "reasons, activities, people, places, or topics into `direction` that aren't visible "
-        "in the Recent thread — the downstream actor pastes them in verbatim and it becomes "
-        "cross-contact bleed (US-16). Forbidden: 'because he's getting back to the drink', "
-        "'mention the cat', 'reference yesterday's meeting'. Allowed: 'short empathetic "
-        "reaction, 5 words', 'busy, one-word reply', 'end it with a joke'. Recalling a REAL "
-        "shared memory is the ACTOR's job from what it actually knows — never yours to "
-        "invent.\n\n"
-        "Examples:\n"
-        "action:text|delay_s:3|direction:Just acknowledge the hard news, 5 words, don't fix it\n"
-        "action:text|delay_s:2|direction:Greet back, match his energy, one line\n"
-        "action:tapback|reaction:heart (they sent a photo)\n"
-        "action:tapback|reaction:haha (they said something funny)\n"
-        "action:tapback|reaction:thumbs_up (simple acknowledgment)\n"
-        "action:text|delay_s:2|burst:true|direction:Match urgency, 3 rapid messages\n"
-        "action:text|delay_s:45|direction:He's busy, one-word reply when he gets back";
-
     char user_buf[2048];
     size_t pos = 0;
     static const char hdr[] = "Recent thread:\n";
@@ -257,12 +431,29 @@ bool hu_daemon_director_call(hu_allocator_t *alloc, const char *combined, size_t
         if (w > 0 && pos + (size_t)w < sizeof(user_buf))
             pos += (size_t)w;
     }
+    if (situation && situation[0]) { /* what is possible this turn (Phase 2) */
+        int w = snprintf(user_buf + pos, sizeof(user_buf) - pos, "\n\n%s", situation);
+        if (w > 0 && pos + (size_t)w < sizeof(user_buf))
+            pos += (size_t)w;
+    }
 
+    /* Heap, per call: the director can run for several contacts at once. */
+    size_t sys_cap =
+        sizeof(k_director_system) + sizeof(k_director_examples) + sizeof(k_director_forms);
+    char *sys_prompt = alloc->alloc(alloc->ctx, sys_cap);
+    if (!sys_prompt)
+        return false;
+    size_t sys_len = hu_daemon_director_system_prompt(sys_prompt, sys_cap);
     char *raw = NULL;
     size_t raw_len = 0;
-    hu_error_t err = g_classify_provider.vtable->chat_with_system(
-        g_classify_provider.ctx, alloc, director_system, sizeof(director_system) - 1, user_buf, pos,
-        g_classify_model, g_classify_model_len, 0.4, &raw, &raw_len);
+    const char *lo_prev = hu_local_only_set_caller("director");
+    hu_error_t err = sys_len == 0
+                         ? HU_ERR_INTERNAL
+                         : g_classify_provider.vtable->chat_with_system(
+                               g_classify_provider.ctx, alloc, sys_prompt, sys_len, user_buf, pos,
+                               g_classify_model, g_classify_model_len, 0.4, &raw, &raw_len);
+    (void)hu_local_only_set_caller(lo_prev);
+    alloc->free(alloc->ctx, sys_prompt, sys_cap);
 
     if (err != HU_OK || !raw || raw_len == 0 || raw_len > 500) {
         if (raw)
@@ -272,16 +463,43 @@ bool hu_daemon_director_call(hu_allocator_t *alloc, const char *combined, size_t
 
     hu_daemon_parse_director_result(raw, raw_len, result);
 
-    hu_log_info("director", NULL, "meta: action=%s delay=%us reaction=%d burst=%d dir=%s",
+    hu_log_info("director", NULL, "meta: action=%s form=%s delay=%us reaction=%d burst=%d dir=%s",
                 result->action == DIR_TAPBACK   ? "tapback"
                 : result->action == DIR_SILENCE ? "silence"
                                                 : "text",
-                result->delay_s, (int)result->reaction, result->burst,
-                result->direction[0] ? result->direction : "(none)");
+                hu_director_form_name(result->form), result->delay_s, (int)result->reaction,
+                result->burst, result->direction[0] ? result->direction : "(none)");
 
     alloc->free(alloc->ctx, raw, raw_len + 1);
     return true;
 #endif
+}
+
+bool hu_daemon_director_decide(hu_allocator_t *alloc, hu_agent_t *agent, hu_channel_t *ch,
+                               const char *key, size_t key_len, const char *combined,
+                               size_t combined_len, const hu_channel_history_entry_t *entries,
+                               size_t entry_count, const char *situation,
+                               hu_director_result_t *result) {
+    /* HU_DIRECTOR_V2 (#590): OFF is exactly hu_daemon_director_call; SHADOW
+     * returns v1 and runs v2 off the reply path; LIVE runs v2, v1 on failure. */
+    return hu_director_v2_decide(alloc, agent, ch, key, key_len, combined, combined_len, entries,
+                                 entry_count, situation, result);
+}
+
+bool hu_daemon_director_silence_overridden(const char *msg, size_t msg_len) {
+    if (!msg || msg_len == 0)
+        return false;
+    if (memchr(msg, '?', msg_len) != NULL)
+        return true;
+    if (msg_len >= 30)
+        return false;
+    static const char *const k_greetings[] = {"hey", "Hey", "hi",    "Hi",    "yo",
+                                              "Yo",  "sup", "hello", "Hello", "what"};
+    for (size_t i = 0; i < sizeof(k_greetings) / sizeof(k_greetings[0]); i++) {
+        if (strstr(msg, k_greetings[i]))
+            return true;
+    }
+    return false;
 }
 
 /* F27: Classify our response type for comfort pattern learning.

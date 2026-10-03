@@ -32,14 +32,17 @@
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/log.h"
+#include "human/core/log_redact.h"
 #include "human/core/string.h"
 #include "human/observer.h"
 
+#include <ctype.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+#include <strings.h>
 
 /* Calibrated thresholds — tuned against the production failure (200x `\" `,
  * 100x `a`) and against legitimate human-shaped text ("yessss!!", "lol",
@@ -495,44 +498,62 @@ unsigned hu_guard_length_anomaly_mult_for_channel(const char *channel, size_t ch
     return HU_GUARD_LENGTH_ANOMALY_MULT_DEFAULT;
 }
 
-static bool hu_guard_has_length_anomaly(const hu_guard_context_t *ctx, size_t response_len) {
-    if (!ctx)
-        return false;
-
-    /* Absolute floor: a context/CoT dump is intrinsically large. Below the
-     * floor, no reply can be such a dump, so don't penalize natural-length
-     * messages just because the recipient's rolling average is tiny. This
-     * breaks the forced-short → low-avg → reject → shorter death-spiral. */
-    if (response_len <= HU_GUARD_LENGTH_ANOMALY_FLOOR)
-        return false;
-
-    /* Task 10 (AC-9) — prefer learned per-contact baseline if available.
-     * When the personal model has tracked avg_message_length for this contact,
-     * use that as the baseline instead of the rolling average. This allows
-     * Seth-normal length (e.g. 500 chars habitually sent to a contact) to
-     * bypass the anomaly check. If the learned baseline says this length is
-     * normal for this contact, the guard passes. */
-    if (ctx->learned_avg_message_length > 0) {
-        /* If the response is within the learned baseline + a small tolerance
-         * (1.5x), it's not anomalous for this contact. The 1.5x allows for
-         * some natural variation while still catching huge dumps. */
-        size_t learned_baseline = ctx->learned_avg_message_length;
-        return response_len > learned_baseline * 3 / 2; /* 1.5x multiplier */
-    }
-
-    /* Fall back to rolling average if no learned baseline. */
-    if (ctx->recent_avg_len == 0)
-        return false;
-
+size_t hu_guard_length_cap(const hu_guard_context_t *ctx) {
+    if (!ctx || ctx->recent_avg_len == 0)
+        return SIZE_MAX;
     unsigned mult = ctx->length_anomaly_mult;
     if (mult == 0)
         mult = HU_GUARD_LENGTH_ANOMALY_MULT_DEFAULT;
-    return response_len > ctx->recent_avg_len * (size_t)mult;
+    size_t base = ctx->recent_avg_len;
+    /* 2026-10-01: an answer to a question is judged against how long the
+     * owner writes to this contact when he writes long (measured p90), not
+     * only against the last few replies — a "walk me through it" answer next
+     * to a recent average of 28 chars is an answer, not a dump.
+     * TODO(#586/#580): prefer the learned-style / length-policy p90 once one
+     * of them lands on main; this reads the measured persona field today. */
+    if (ctx->inbound_is_ask && ctx->contact_reply_p90 > base)
+        base = ctx->contact_reply_p90;
+    size_t cap = base * (size_t)mult;
+    /* Absolute floor: a context/CoT dump is intrinsically large. Below the
+     * floor no reply can be such a dump, so a tiny rolling average never
+     * penalizes a natural-length message (the forced-short -> low-avg ->
+     * reject -> shorter death-spiral). */
+    if (cap < HU_GUARD_LENGTH_ANOMALY_FLOOR)
+        cap = HU_GUARD_LENGTH_ANOMALY_FLOOR;
+    return cap;
+}
+
+static bool hu_guard_has_length_anomaly(const hu_guard_context_t *ctx, size_t response_len) {
+    return response_len > hu_guard_length_cap(ctx);
 }
 
 /* Helper — slide a 30-char window over `src[0..src_len)` and return
  * true if any window appears verbatim (case-insensitively) in
  * `s[0..len)`. Skips when src is NULL/short or response is short. */
+/* Where the payload after a content verb ("admit X", "tell her X") ends: the
+ * end of its clause. The reply is SUPPOSED to say X, so a window inside X is
+ * not an echo (2026-09-30: "admit he hasn't really thought about it yet" made
+ * "haven't really thought about it yet" a REJECT). `ask` is not a content verb:
+ * "ask one clarifying question" is instruction language. Known gap: X leaked
+ * in the director's own third-person voice ("he hasn't...") also passes. */
+static size_t hu_guard_director_payload_end(const char *src, size_t src_len, size_t i) {
+    static const char *const verbs[] = {
+        "admit ",        "say ",          "mention ",       "tell her ", "tell him ", "tell them ",
+        "let her know ", "let him know ", "let them know ", "confess ",  NULL};
+    if (i > 0 && isalpha((unsigned char)src[i - 1]))
+        return i;
+    for (size_t v = 0; verbs[v]; v++) {
+        size_t vl = strlen(verbs[v]);
+        if (i + vl > src_len || strncasecmp(src + i, verbs[v], vl) != 0)
+            continue;
+        size_t e = i + vl;
+        while (e < src_len && !strchr(",;.!?\n", src[e]))
+            e++;
+        return e;
+    }
+    return i;
+}
+
 static bool hu_guard_director_window_matches(const char *src, size_t src_len, const char *s,
                                              size_t len) {
     if (!src || src_len < (size_t)HU_GUARD_DIRECTOR_ECHO_MIN_MATCH)
@@ -540,7 +561,15 @@ static bool hu_guard_director_window_matches(const char *src, size_t src_len, co
     if (len < (size_t)HU_GUARD_DIRECTOR_ECHO_MIN_MATCH)
         return false;
     size_t window = (size_t)HU_GUARD_DIRECTOR_ECHO_MIN_MATCH;
+    size_t payload_from = 0, payload_to = 0; /* [from, to): skip windows touching it */
     for (size_t i = 0; i + window <= src_len; i++) {
+        size_t end = hu_guard_director_payload_end(src, src_len, i);
+        if (end > i) {
+            payload_from = i;
+            payload_to = end;
+        }
+        if (i + window > payload_from && i < payload_to)
+            continue;
         if (hu_str_contains_ci(s, len, src + i, window))
             return true;
     }
@@ -1056,24 +1085,22 @@ void hu_guard_log_selection_audit(const void *observer, const char *contact_key,
                                   int best_quality, size_t response_len, const char *response,
                                   size_t response_text_len) {
     hu_observer_t *obs = (hu_observer_t *)observer;
-    int preview_n = (int)(response_text_len < 48 ? response_text_len : 48);
     hu_log_info("response_guard", obs,
-                "selection_audit contact=%.*s candidates=%zu best=%zu quality=%d len=%zu",
-                (int)(contact_key_len < 32 ? contact_key_len : 32), contact_key ? contact_key : "",
-                candidate_count, best_idx, best_quality, response_len);
+                "selection_audit contact=%s candidates=%zu best=%zu quality=%d len=%zu",
+                HU_LOG_WHO(contact_key, contact_key_len), candidate_count, best_idx, best_quality,
+                response_len);
     if (response && response_text_len > 0) {
         if (hu_guard_has_numbered_analysis_dump(response, response_text_len))
             hu_log_warn("response_guard", obs,
                         "selection_audit: shipped response has G1 numbered-analysis pattern "
-                        "(contact=%.*s best=%zu preview=%.*s)",
-                        (int)(contact_key_len < 32 ? contact_key_len : 32),
-                        contact_key ? contact_key : "", best_idx, preview_n, response);
+                        "(contact=%s best=%zu preview=%s)",
+                        HU_LOG_WHO(contact_key, contact_key_len), best_idx,
+                        HU_LOG_TEXT(response, response_text_len, 48));
         if (hu_guard_has_self_talk_pattern(response, response_text_len))
             hu_log_warn("response_guard", obs,
                         "selection_audit: shipped response has G2 self-talk pattern "
-                        "(contact=%.*s best=%zu)",
-                        (int)(contact_key_len < 32 ? contact_key_len : 32),
-                        contact_key ? contact_key : "", best_idx);
+                        "(contact=%s best=%zu)",
+                        HU_LOG_WHO(contact_key, contact_key_len), best_idx);
     }
 }
 

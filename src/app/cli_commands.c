@@ -12,6 +12,7 @@
 #include "human/capabilities.h"
 #include "human/cli_eval_w16_internal.h"
 #include "human/config.h"
+#include "human/config_mutator.h"
 #include "human/core/error.h"
 #include "human/core/io_secure.h"
 #include "human/core/json.h"
@@ -204,12 +205,18 @@ static const char HU_INIT_DEFAULT_PERSONA_REMOVED[] =
 #endif /* HU_IS_TEST */
 
 /* ── init ────────────────────────────────────────────────────────────────── */
+hu_init_decision_t hu_init_overwrite_decision(bool config_exists, bool force, bool stdin_is_tty) {
+    if (!config_exists || force)
+        return HU_INIT_PROCEED;
+    return stdin_is_tty ? HU_INIT_PROMPT : HU_INIT_REFUSE;
+}
+
 hu_error_t cmd_init(hu_allocator_t *alloc, int argc, char **argv) {
     (void)alloc;
-    (void)argc;
-    (void)argv;
 
 #ifdef HU_IS_TEST
+    (void)argc;
+    (void)argv;
     /* In test mode: skip filesystem and stdin, succeed immediately. */
     return HU_OK;
 #else
@@ -218,8 +225,22 @@ hu_error_t cmd_init(hu_allocator_t *alloc, int argc, char **argv) {
     if (n <= 0 || (size_t)n >= sizeof(config_path))
         return HU_ERR_INVALID_ARGUMENT;
 
-    if (access(config_path, F_OK) == 0) {
-        printf("Config already exists. Overwrite? [y/N] ");
+    bool force = false;
+    for (int i = 2; i < argc; i++) {
+        if (argv[i] && strcmp(argv[i], "--force") == 0)
+            force = true;
+    }
+
+    switch (hu_init_overwrite_decision(access(config_path, F_OK) == 0, force,
+                                       isatty(STDIN_FILENO) != 0)) {
+    case HU_INIT_PROCEED:
+        break;
+    case HU_INIT_REFUSE:
+        fprintf(stderr, "Config already exists at %s. Re-run with --force to overwrite.\n",
+                config_path);
+        return HU_ERR_CANCELLED;
+    case HU_INIT_PROMPT: {
+        printf("Config already exists at %s. Overwrite? [y/N] ", config_path);
         fflush(stdout);
         int c = getchar();
         if (c != 'y' && c != 'Y') {
@@ -228,6 +249,8 @@ hu_error_t cmd_init(hu_allocator_t *alloc, int argc, char **argv) {
         }
         while (c != '\n' && c != EOF)
             c = getchar();
+        break;
+    }
     }
 
     char dir_path[HU_INIT_MAX_PATH];
@@ -432,7 +455,8 @@ static int memory_graph_path(char *buf, size_t cap) {
 }
 
 /* human memory import-facts <jsonl> [--exclude pred1,pred2] — thin wrapper over
- * hu_graph_import_facts_jsonl against $HU_GRAPH_DB / ~/.human/graph.db. */
+ * hu_graph_import_facts_jsonl against $HU_GRAPH_DB / ~/.human/graph.db.
+ * Entity lines ({"kind":"entity",...}) are typed via hu_graph_upsert_entity_typed. */
 static hu_error_t memory_import_facts(hu_allocator_t *alloc, int argc, char **argv) {
     if (argc < 4) {
         fprintf(stderr, "Usage: human memory import-facts <facts.jsonl> [--exclude p1,p2]\n");
@@ -453,12 +477,12 @@ static hu_error_t memory_import_facts(hu_allocator_t *alloc, int argc, char **ar
                 hu_error_string(err));
         return err == HU_OK ? HU_ERR_INTERNAL : err;
     }
-    size_t imported = 0, skipped = 0;
-    err = hu_graph_import_facts_jsonl(alloc, g, argv[3], exclude, &imported, &skipped);
+    size_t imported = 0, entities = 0, skipped = 0;
+    err = hu_graph_import_facts_jsonl(alloc, g, argv[3], exclude, &imported, &entities, &skipped);
     hu_graph_close(g, alloc);
-    printf("{\"imported\": %zu, \"skipped\": %zu, \"graph\": \"%s\"}\n", imported, skipped,
-           graph_path);
-    if (err == HU_ERR_NOT_FOUND && imported == 0)
+    printf("{\"imported\": %zu, \"entities\": %zu, \"skipped\": %zu, \"graph\": \"%s\"}\n",
+           imported, entities, skipped, graph_path);
+    if (err == HU_ERR_NOT_FOUND && imported == 0 && entities == 0)
         fprintf(stderr, "import-facts: nothing imported from %s\n", argv[3]);
     return err;
 }
@@ -505,12 +529,46 @@ static void memory_search_print_and_free(hu_allocator_t *alloc, hu_retrieval_res
     hu_retrieval_result_free(alloc, res);
 }
 
-/* human memory ground <contact> <message> — run the production grounding
- * composer against the graph and report matched entities + context bytes.
- * This is the proof probe for the backfill: matched > 0 on a message about a
- * known fact means the graph can reach it. */
+bool hu_cli_parse_ground_args(int argc, char **argv, const char **contact_out, const char **msg_out,
+                              bool *full_out) {
+    *contact_out = NULL;
+    *msg_out = NULL;
+    *full_out = false;
+    if (!argv || argc < 5)
+        return false;
+    int i = 3;
+    if (argv[3] && strcmp(argv[3], "--full") == 0) {
+        *full_out = true;
+        i = 4;
+    }
+    if (argc < i + 2 || !argv[i] || !argv[i + 1] || !argv[i][0])
+        return false;
+    *contact_out = argv[i];
+    *msg_out = argv[i + 1];
+    return true;
+}
+
+void hu_cli_memory_ground_emit(FILE *out, bool full, size_t matched,
+                               const hu_graph_ground_turn_stats_t *stats, const char *ctx,
+                               size_t ctx_len) {
+    if (!out)
+        return;
+    if (full && stats)
+        fprintf(out, "matched=%zu bytes=%zu fallback=%d self=%d names=%zu\n",
+                stats->matched_entities, ctx_len, stats->via_fallback ? 1 : 0,
+                stats->via_self ? 1 : 0, stats->typed_names);
+    else
+        fprintf(out, "matched=%zu bytes=%zu\n", matched, ctx_len);
+    if (ctx && ctx_len)
+        fprintf(out, "%.*s\n", (int)ctx_len, ctx);
+}
+
+/* human memory ground [--full] <contact> <message> — the proof probe.
+ * Plain: lexical compose only (the 2026-09-01 backfill probe). --full: the
+ * live turn's composition (hu_graph_ground_compose_turn) under the SAME env
+ * gates, so scripts/eval_name_grounding.py measures the real path. */
 static hu_error_t memory_ground_probe(hu_allocator_t *alloc, hu_memory_t *mem, const char *contact,
-                                      const char *msg) {
+                                      const char *msg, bool full) {
     char graph_path[1024];
     int np = memory_graph_path(graph_path, sizeof(graph_path));
     hu_graph_t *g = NULL;
@@ -532,11 +590,16 @@ static hu_error_t memory_ground_probe(hu_allocator_t *alloc, hu_memory_t *mem, c
         hu_memory_loader_set_facade(&loader, facade);
         char *ctx = NULL;
         size_t ctx_len = 0, matched = 0;
-        err = hu_graph_ground_compose(&loader, contact, strlen(contact), msg, strlen(msg), 0, &ctx,
-                                      &ctx_len, &matched);
-        printf("matched=%zu bytes=%zu\n", matched, ctx_len);
-        if (ctx && ctx_len)
-            printf("%.*s\n", (int)ctx_len, ctx);
+        hu_graph_ground_turn_stats_t st;
+        memset(&st, 0, sizeof(st));
+        if (full)
+            err = hu_graph_ground_compose_turn(&loader, contact, strlen(contact), msg, strlen(msg),
+                                               hu_graph_ground_turn_flags_from_env(), &ctx,
+                                               &ctx_len, &st);
+        else
+            err = hu_graph_ground_compose(&loader, contact, strlen(contact), msg, strlen(msg), 0,
+                                          &ctx, &ctx_len, &matched);
+        hu_cli_memory_ground_emit(stdout, full, matched, &st, ctx, ctx_len);
         if (ctx)
             alloc->free(alloc->ctx, ctx, ctx_len + 1);
     }
@@ -589,13 +652,27 @@ hu_error_t cmd_memory(hu_allocator_t *alloc, int argc, char **argv) {
         return HU_OK;
     }
     const char *sub = argv[2];
+    const char *ground_contact = NULL, *ground_msg = NULL;
+    bool ground_full = false;
     if (strcmp(sub, "import-facts") == 0)
         return memory_import_facts(alloc, argc, argv); /* needs graph.db only, no config */
     if (strcmp(sub, "agent-facts-dry") == 0)
         return memory_agent_facts_dry(argc, argv); /* pure extraction, no graph/memory/config */
-    if (strcmp(sub, "ground") == 0 && argc < 5) {
-        fprintf(stderr, "Usage: human memory ground <contact> <message>\n");
+    if (strcmp(sub, "ground") == 0 &&
+        !hu_cli_parse_ground_args(argc, argv, &ground_contact, &ground_msg, &ground_full)) {
+        fprintf(stderr, "Usage: human memory ground [--full] <contact> <message>\n");
         return HU_ERR_INVALID_ARGUMENT;
+    }
+    if (strcmp(sub, "ground") == 0) {
+        /* A probe of a missing graph must not create an empty one and report a
+         * well-formed zero (no-number-without-a-measurement): refuse first. */
+        char gp[1024];
+        struct stat gst;
+        int gn = memory_graph_path(gp, sizeof(gp));
+        if (gn <= 0 || (size_t)gn >= sizeof(gp) || stat(gp, &gst) != 0) {
+            fprintf(stderr, "ground: no graph at %s\n", gn > 0 ? gp : "(unresolved)");
+            return HU_ERR_NOT_FOUND;
+        }
     }
     if ((strcmp(sub, "search") == 0 || strcmp(sub, "get") == 0) && argc < 4) {
         fprintf(stderr, "Usage: human memory %s <query>\n", sub);
@@ -871,7 +948,7 @@ hu_error_t cmd_memory(hu_allocator_t *alloc, int argc, char **argv) {
             }
         }
     } else if (strcmp(sub, "ground") == 0) {
-        err = memory_ground_probe(alloc, &mem, argv[3], argv[4]);
+        err = memory_ground_probe(alloc, &mem, ground_contact, ground_msg, ground_full);
     } else if (strcmp(sub, "wiki") == 0) {
         /* Wave C thin LLM-wiki surface: personal-model facts/topics as markdown. */
         const char *contact = NULL;
@@ -1020,6 +1097,32 @@ done:
 }
 
 /* ── workspace ───────────────────────────────────────────────────────────── */
+/* Edits only the "workspace" key: re-serializing a loaded hu_config_t used to
+ * drop every top-level key the serializer did not model. */
+static hu_error_t workspace_set(hu_allocator_t *alloc, const char *cfg_path, const char *dir) {
+    hu_json_value_t *v = hu_json_string_new(alloc, dir, strlen(dir));
+    if (!v)
+        return HU_ERR_OUT_OF_MEMORY;
+    char *value_json = NULL;
+    size_t value_len = 0;
+    hu_error_t err = hu_json_stringify(alloc, v, &value_json, &value_len);
+    hu_json_free(alloc, v);
+    if (err != HU_OK)
+        return err;
+    hu_mutation_result_t res = {0};
+    hu_mutation_options_t opts = {.apply = true};
+    err = hu_config_mutator_mutate_at(alloc, cfg_path, HU_MUTATION_SET, "workspace", value_json,
+                                      opts, &res);
+    alloc->free(alloc->ctx, value_json, value_len + 1);
+    if (err != HU_OK) {
+        fprintf(stderr, "Could not set workspace: %s\n", hu_error_string(err));
+        return err;
+    }
+    printf("Workspace set to: %s\n", dir);
+    hu_config_mutator_free_result(alloc, &res);
+    return HU_OK;
+}
+
 hu_error_t cmd_workspace(hu_allocator_t *alloc, int argc, char **argv) {
     hu_config_t cfg;
     hu_error_t err = hu_config_load(alloc, &cfg);
@@ -1033,33 +1136,19 @@ hu_error_t cmd_workspace(hu_allocator_t *alloc, int argc, char **argv) {
     }
     if (strcmp(argv[2], "set") == 0) {
         if (argc < 4) {
-            fprintf(stderr, "Usage: human workspace set <path>\n");
             if (err == HU_OK)
                 hu_config_deinit(&cfg);
+            fprintf(stderr, "Usage: human workspace set <path>\n");
             return HU_ERR_INVALID_ARGUMENT;
         }
-        if (err == HU_OK) {
-            char json_buf[1024];
-            size_t jp = 0;
-            jp = hu_buf_appendf(json_buf, sizeof(json_buf), jp, "{\"workspace\":\"");
-            const char *s = argv[3];
-            for (; *s && jp + 4 < sizeof(json_buf); s++) {
-                if (*s == '"' || *s == '\\')
-                    json_buf[jp++] = '\\';
-                json_buf[jp++] = *s;
-            }
-            jp = hu_buf_appendf(json_buf, sizeof(json_buf), jp, "\"}");
-            hu_error_t pe = hu_config_parse_json(&cfg, json_buf, jp);
-            if (pe == HU_OK) {
-                hu_error_t se = hu_config_save(&cfg);
-                if (se == HU_OK)
-                    printf("Workspace set to: %s\n", argv[3]);
-                else
-                    hu_log_error("config", NULL, "Failed to save config: %s", hu_error_string(se));
-            }
-            hu_config_deinit(&cfg);
+        if (err != HU_OK) {
+            fprintf(stderr, "Could not load config: %s\n", hu_error_string(err));
+            return err;
         }
-        return HU_OK;
+        /* Write the file the config was loaded from, not a re-derived path. */
+        err = workspace_set(alloc, cfg.config_path, argv[3]);
+        hu_config_deinit(&cfg);
+        return err;
     }
     if (err == HU_OK)
         hu_config_deinit(&cfg);
@@ -1107,7 +1196,7 @@ static const hu_cli_config_schema_row_t hu_cli_config_schema_rows[] = {
     {"router", "object", "fast/standard/powerful provider routing"},
     {"ensemble", "object", "providers[], strategy"},
     {"diagnostics", "object", "logging, OpenTelemetry endpoints"},
-    {"session", "object", "dm_scope, idle_minutes, identity_links"},
+    {"session", "object", "dm_scope, idle_minutes"},
     {"peripherals", "object", "enabled, datasheet_dir"},
     {"hardware", "object", "serial, transport, probe_target"},
     {"browser", "object", "enabled"},

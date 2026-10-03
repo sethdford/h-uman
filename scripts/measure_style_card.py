@@ -36,6 +36,7 @@ import argparse
 import datetime
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -69,8 +70,34 @@ CARD_AXES = (
     "exclamation_rate",
     "emoji_rate",
     "dash_rate",
+    "laugh_rate",
     "length_chars",
 )
+
+
+def owner_handles(persona: str):
+    """The owner's own handles (persona contacts with relationship "test"):
+    texts to them are self-tests and notes, not how the owner texts people
+    (178 in 60 days, 57% lowercase starts against 10% to others, 2026-09-30)."""
+    path = os.path.expanduser(f"~/.human/personas/{persona}.json")
+    try:
+        contacts = json.load(open(path)).get("contacts") or {}
+    except (OSError, ValueError):
+        return set()
+    return {h for h, c in contacts.items() if isinstance(c, dict) and c.get("relationship") == "test"}
+
+
+def drop_daemon_sends(messages, records):
+    """[(datetime, text)] minus the daemon's own sends. chat.db marks those
+    is_from_me too; until 2026-09-30 the card measured them as Seth (~12% of
+    from-me rows), so the twin's habits leaked back into its own style rules."""
+    from extract_imessage_pairs import daemon_send_predicate
+    is_daemon = daemon_send_predicate(records)
+
+    def epoch(ts):  # fetch_outbound_messages yields NAIVE UTC (Apple epoch)
+        return (ts if ts.tzinfo else ts.replace(tzinfo=datetime.timezone.utc)).timestamp()
+
+    return [(ts, t) for ts, t in messages if not is_daemon(t, epoch(ts))]
 
 
 class InsufficientData(Exception):
@@ -124,6 +151,96 @@ def build_card(messages, persona: str, window_start: datetime.datetime,
     }
 
 
+# Entity-casing axis (2026-09-22). Feeds the style governor's action D. The
+# entity vocabulary is imported from specificity_score so the governor's
+# allowlist and the specificity GATE can never disagree on what an entity is
+# — same discipline as the axes above reusing eval_persona_evolution.
+ENTITY_MIN_MENTIONS = 3          # mirrors HU_STYLE_CARD_ENTITY_MIN_MENTIONS
+ENTITY_MAX_TOKENS = 64           # mirrors HU_STYLE_CARD_MAX_ENTITY_TOKENS
+ENTITY_TOKEN_MAX_LEN = 23        # mirrors HU_STYLE_CARD_ENTITY_TOKEN_CAP - 1
+
+
+def entity_casing_stats(texts, vocab):
+    """Share of MID-SENTENCE entity mentions the user writes capitalized.
+
+    Mid-sentence only, on purpose: a phone autocapitalizes sentence starts,
+    and action D never touches them, so counting them would teach the
+    governor a rate for a position it cannot act on. Returns the card block.
+    """
+    total = caps = 0
+    per_token = {}  # token -> [caps, total]
+    for text in texts:
+        s = (text or "").strip()
+        if not s:
+            continue
+        sentence_start = True
+        for raw in re.finditer(r"\S+", s):
+            word = raw.group(0)
+            core = word.strip("\"'(),;:.!?…-")
+            low = core.lower()
+            skip = (word.startswith(("http", "www.")) or "@" in word or "://" in word)
+            if core and not skip and not sentence_start and low in vocab:
+                is_cap = core[0].isupper() and not core.isupper()
+                total += 1
+                caps += 1 if is_cap else 0
+                slot = per_token.setdefault(low, [0, 0])
+                slot[0] += 1 if is_cap else 0
+                slot[1] += 1
+            if word.endswith((".", "!", "?")):
+                sentence_start = True
+            elif core:
+                sentence_start = False
+
+    tokens = []
+    for tok, (c, n) in per_token.items():
+        # Only tokens the user ACTUALLY capitalizes earn a table slot: the
+        # table is an allowlist, and a 0.0 rate would be inert anyway.
+        if n < ENTITY_MIN_MENTIONS or c == 0:
+            continue
+        if len(tok) > ENTITY_TOKEN_MAX_LEN or not re.fullmatch(r"[a-z']+", tok):
+            continue
+        tokens.append({"token": tok, "cap_rate": round(c / n, 4), "n": n})
+    # Highest-n first: the C side truncates at ENTITY_MAX_TOKENS, so the
+    # tokens carrying the most mentions must survive the cut.
+    tokens.sort(key=lambda t: (-t["n"], t["token"]))
+    return {
+        "rate": round(caps / total, 4) if total else 0.0,
+        "n_mentions": total,
+        "n_capitalized": caps,
+        "min_mentions": ENTITY_MIN_MENTIONS,
+        "max_tokens": ENTITY_MAX_TOKENS,
+        "position": "mid-sentence only (action D never touches sentence starts)",
+        "source": "scripts/specificity_score.py insider_vocab (persona contacts + graph entities)",
+        "tokens": tokens[:ENTITY_MAX_TOKENS],
+    }
+
+
+def attach_entity_casing(card: dict, texts) -> dict:
+    try:
+        from specificity_score import insider_vocab
+        vocab = {v for v in insider_vocab() if " " not in v}
+    except Exception as exc:  # pragma: no cover - vocab sources are optional
+        print(f"entity_casing: vocab unavailable ({exc}); axis omitted", file=sys.stderr)
+        return card
+    if not vocab:
+        print("entity_casing: empty vocab; axis omitted", file=sys.stderr)
+        return card
+    card["entity_casing"] = entity_casing_stats(texts, vocab)
+    return card
+
+
+def attach_second_beat(card: dict, runs) -> dict:
+    """axes.second_beat_rate: share of the user's replies (runs of bubbles to
+    one inbound run) that carry a second thought (reply_pairs.has_second_beat).
+    Rendered by the C card only when HU_STYLE_SECOND_BEAT=live."""
+    from reply_pairs import has_second_beat
+    runs = [r for r in runs if r]
+    if runs:
+        hits = sum(1 for r in runs if has_second_beat(r))
+        card["axes"]["second_beat_rate"] = {"value": hits / len(runs), "n": len(runs)}
+    return card
+
+
 def attach_substantive(card: dict, pairs, days: int) -> dict:
     stats = reply_stats(pairs)
     stats["days"] = days
@@ -154,12 +271,18 @@ def parse_args(argv=None):
     return p.parse_args(argv)
 
 
-def run(args, messages=None, substantive_pairs=None) -> int:
+def run(args, messages=None, substantive_pairs=None, reply_runs=None) -> int:
     end = (datetime.datetime.strptime(args.end, "%Y-%m-%d")
            if args.end else datetime.datetime.now())
     start = end - datetime.timedelta(days=args.days)
+    live = messages is None
     if messages is None:
-        messages = fetch_outbound_messages(args.db, start, end)
+        messages = fetch_outbound_messages(args.db, start, end,
+                                           exclude_handles=owner_handles(args.persona))
+        from extract_imessage_pairs import load_daemon_records
+        before = len(messages)
+        messages = drop_daemon_sends(messages, load_daemon_records())
+        sys.stderr.write(f"excluded {before - len(messages)} daemon sends of {before}\n")
     try:
         card = build_card(messages, args.persona, start, end, min_n=args.min_n,
                           n_resamples=args.n_resamples, seed=args.seed)
@@ -173,6 +296,18 @@ def run(args, messages=None, substantive_pairs=None) -> int:
         substantive_pairs = fetch_reply_pairs(args.db, sdays, is_substantive)
     if substantive_pairs is not None:
         attach_substantive(card, substantive_pairs, sdays or DEFAULT_SUBSTANTIVE_DAYS)
+    # Second-beat axis: reply runs, the twin's own excluded like the axes above.
+    if reply_runs is None and live:
+        from extract_imessage_pairs import daemon_send_predicate, load_daemon_records
+        from reply_pairs import fetch_reply_runs
+        is_daemon = daemon_send_predicate(load_daemon_records())
+        runs = fetch_reply_runs(args.db, args.days, skip_handles=owner_handles(args.persona))
+        reply_runs = [[t for _, t in r] for r in runs
+                      if not any(is_daemon(t, ts) for ts, t in r)]
+    if reply_runs is not None:
+        attach_second_beat(card, reply_runs)
+    # Entity-casing axis over the SAME window the axes above used.
+    attach_entity_casing(card, [t for ts, t in messages if start <= ts < end])
 
     print(json.dumps(card, indent=2))
     if args.dry_run:

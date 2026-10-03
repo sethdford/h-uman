@@ -5,6 +5,31 @@
 #
 # Set HU_FULL_PREPUSH=1 to also run UI typecheck/tests and website build.
 
+# A deletion-only push carries no content, so there is nothing to build, test
+# or gate. Before this check the hook never read its stdin, so
+# `git push origin --delete <branch>` paid the full build and suite and could
+# be refused outright: on 2026-09-26 the dead-strip ratchet blocked the
+# deletion of an already-merged branch. The workaround was
+# `gh api -X DELETE .../git/refs/heads/<branch>`.
+#
+# stdin can only be read once, so the ref list is kept in PUSH_REFS for any
+# later step that needs it. Nothing below reads stdin today. A tty stdin means
+# the hook was run by hand, not by git; reading it would block, so skip it.
+# A push that mixes deletions with real refs, or an empty ref list, falls
+# through and runs everything.
+PUSH_REFS=""
+if [ ! -t 0 ]; then
+    PUSH_REFS=$(cat)
+fi
+push_refs_lib="$(dirname "$0")/lib/push-refs.sh"
+if [ -f "$push_refs_lib" ]; then
+    . "$push_refs_lib"
+    if printf '%s\n' "$PUSH_REFS" | prepush_deletion_only; then
+        echo "pre-push: deletion-only push; skipping build and content gates"
+        exit 0
+    fi
+fi
+
 JOBS=$(nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 4)
 BUILD_DIR="build-check"
 
@@ -185,6 +210,7 @@ if [ -f "CMakeLists.txt" ]; then
                     echo "NOTE: could not rebuild build/ — skipping the dead-strip ratchet."
                     echo "  (build-check compiled and the suite passed, so this is build/'s"
                     echo "   own state, not this change. Log: $ds_log)"
+                    echo "  NOT ENFORCED on this push — the dead-strip-ratchet job in CI is."
                 fi
             fi
             if [ "$ds_ready" = "1" ]; then
@@ -199,6 +225,7 @@ if [ -f "CMakeLists.txt" ]; then
         else
             echo "No configured build/ — skipping the dead-strip ratchet."
             echo "  Configure one to enable it; see .claude/rules/dead-strip-ratchet.md."
+            echo "  NOT ENFORCED on this push — the dead-strip-ratchet job in CI is."
         fi
     fi
 
@@ -245,10 +272,10 @@ if [ -f "CMakeLists.txt" ]; then
     # 2026-09-03 the sync re-ran whichever build*/human_tests sorted first —
     # a two-day-old build/ dev binary of a different tree state — and stamped
     # 13,995 while this hook had just measured 14,125 (third recorded
-    # writer-vs-checker disagreement; see the top of this file). Likewise the
-    # binary size: this hook only builds Debug, so it cannot vouch for any
-    # release binary's age (a five-week-old build-release/ stamped ~2952 KB
-    # the same day); --keep-binary-size leaves the committed value alone.
+    # writer-vs-checker disagreement; see the top of this file). Binary size,
+    # RSS and startup are not synced here at all: scripts/footprint.py owns
+    # them, rendered from a measurement CI re-takes on every main push (this
+    # hook only builds Debug and could never vouch for a release binary).
     # Rule: .claude/rules/no-number-without-a-measurement.md.
     #
     # Run-to-run drift on an UNCHANGED tree (2026-09-20: 14,247 then 14,303
@@ -264,8 +291,8 @@ if [ -f "CMakeLists.txt" ]; then
             echo "  skipping stats sync rather than stamping a count from a stale binary."
         elif [ "$behind" = "0" ]; then
             echo "Syncing project stats (${TEST_COUNT} registered tests = passed + skipped, measured by this run)..."
-            if ! bash scripts/update-stats.sh --apply --test-count "$TEST_COUNT" --keep-binary-size 2>/dev/null; then
-                echo "Warning: stats sync failed. Run 'scripts/update-stats.sh --apply --test-count ${TEST_COUNT} --keep-binary-size' manually."
+            if ! bash scripts/update-stats.sh --apply --test-count "$TEST_COUNT" 2>/dev/null; then
+                echo "Warning: stats sync failed. Run 'scripts/update-stats.sh --apply --test-count ${TEST_COUNT}' manually."
             fi
         elif [ "$behind" = "unknown" ]; then
             echo "Skipping stats sync (cannot compare against origin/main)."

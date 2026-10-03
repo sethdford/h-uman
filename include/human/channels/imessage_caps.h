@@ -5,6 +5,7 @@
 #include "human/core/error.h"
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 /* iMessage capability probe (plan: docs/plans/2026-07-19-native-imessage).
  *
@@ -68,6 +69,54 @@ hu_error_t hu_imessage_caps_probe(hu_allocator_t *alloc, hu_imessage_caps_t *cap
  * native call site (send path, reply path, react path). Probes once on first
  * call and logs the result; never NULL. */
 const hu_imessage_caps_t *hu_imessage_caps_cached(hu_allocator_t *alloc);
+
+/* Self-healing (spec 2026-09-28-expressive-imessage). Pure policies:
+ * re-probe when never probed, every 10 min while the bridge is up, every
+ * 2 min while it is down, or >= 20 s after a bridge verb failed. */
+bool hu_imessage_caps_should_reprobe(int64_t now, int64_t probed_at, bool advanced,
+                                     bool verb_failed);
+
+/* `imsg launch` restarts Messages.app, so repair only when the bridge is down,
+ * SIP is off, the Mac has been idle >= 300 s, and the last attempt (-1 =
+ * never) was >= 1800 s ago. */
+bool hu_imessage_bridge_repair_due(bool advanced, bool sip_enabled, double idle_sec,
+                                   int64_t since_last_repair);
+
+/* A bridge verb (tapback, send-rich, typing) just failed: re-probe soon. */
+void hu_imessage_caps_note_bridge_failure(void);
+
+/* Phase 5: true when the text is exactly one http(s) URL (surrounding
+ * whitespace allowed) — the bubble iMessage turns into a rich-link card. */
+bool hu_imsg_is_bare_url(const char *text, size_t len);
+
+/* "iMessage;-;<handle>" for a 1:1 phone/email handle, for bridge verbs that
+ * take --chat. 0 when the handle is not a plain handle or does not fit. */
+size_t hu_imsg_chat_guid(char *out, size_t cap, const char *handle, size_t handle_len);
+
+/* Effect executor: the next text to `target` goes out with this expressive
+ * effect (imsg send-rich --effect) if sent within 120 s. One slot; take is
+ * one-shot and scoped to the target. */
+void hu_imsg_effect_set(const char *target, size_t target_len, const char *effect, int64_t now);
+bool hu_imsg_effect_take(const char *target, size_t target_len, int64_t now, char *effect_out,
+                         size_t cap);
+
+/* ── Typing rhythm (2026-09-29) ─────────────────────────────────────────
+ * The dots come and go like a person composing: typing 4-12 s, paused
+ * 1.5-4 s. `seed` is advanced (xorshift32; 0 is replaced). */
+uint32_t hu_imsg_typing_phase_ms(uint32_t *seed, bool typing);
+
+/* Before a send: how much longer to show typing so the total reaches
+ * `typing_ms` (the text's plausible typing time) when `shown_ms` already
+ * showed. 0 when enough; never above HU_IMSG_TYPING_CATCHUP_MAX_MS. */
+#define HU_IMSG_TYPING_CATCHUP_MAX_MS 6000u
+uint32_t hu_imsg_typing_catchup_ms(uint32_t typing_ms, uint64_t shown_ms);
+
+/* After `imsg send` reported failure: did the text land anyway? True when a
+ * newer is_from_me row exists for the handle than before the send (both from
+ * hu_imessage_get_latest_sent_rowid). A lookup error (-1) is "unknown" and
+ * false, so the caller falls back as before. The AppleScript fallback re-sent
+ * a message imsg had already delivered (Mindy got it twice, 2026-09-27). */
+bool hu_imessage_send_landed(int64_t prior_rowid, int64_t now_rowid);
 
 /* ── T0.1 blue guard ────────────────────────────────────────────────────
  * "Perfect and blue": the daemon must never emit a green bubble. Apple's own

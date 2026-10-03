@@ -41,4 +41,4 @@ set(HU_WASM_CRYPTO_SOURCES
 )
 
 # Main entrypoint for WASM
-set(HU_WASM_MAIN src/main_wasi.c)
+set(HU_WASM_MAIN src/app/main_wasi.c)

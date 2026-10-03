@@ -3,6 +3,7 @@
 #include "human/agent/approval_gate.h"
 #include "human/agent/awareness.h"
 #include "human/agent/commitment_store.h"
+#include "human/agent/history_budget.h"
 #include "human/agent/humanization_bandit.h"
 #include "human/agent/humanness.h"
 #include "human/agent/idempotency.h"
@@ -24,9 +25,11 @@
 #include "human/core/log.h"
 #include "human/core/paths.h"
 #include "human/core/tokens.h"
+#include "human/experience.h"
 #include "human/max_tokens.h"
 #include "human/memory/consolidation.h"
 #include "human/memory/promotion.h"
+#include "human/memory/semantic_recall.h"
 #include "human/memory/tiers.h"
 #include "human/webhook.h"
 #ifdef HU_ENABLE_SQLITE
@@ -63,6 +66,7 @@
 #ifdef HU_HAS_SKILLS
 #include "human/skillforge.h"
 #endif
+#include "human/agent/guard_repair.h"
 #include "human/context.h"
 #include "human/context_tokens.h"
 #include "human/core/json.h"
@@ -77,6 +81,7 @@
 #include "human/persona/genuine_boundaries.h"
 #include "human/persona/narrative_self.h"
 #include "human/provider.h"
+#include "human/providers/local_only_config.h"
 #include "human/security/arg_inspector.h"
 #include "human/voice.h"
 #ifdef HU_ENABLE_ML
@@ -135,6 +140,10 @@ bool hu_agent_internal_is_transport_error(hu_error_t err) {
      * round-trip completed, the response just wasn't usable; those still
      * deserve the normal retry path. */
     return err == HU_ERR_IO || err == HU_ERR_TIMEOUT || err == HU_ERR_PROVIDER_UNAVAILABLE;
+}
+
+bool hu_agent_error_is_transport(hu_error_t err) {
+    return hu_agent_internal_is_transport_error(err);
 }
 
 void hu_agent_internal_apply_turn_request_overrides(const hu_agent_t *agent,
@@ -712,7 +721,9 @@ void hu_agent_internal_reset_contact_boundary_state(hu_agent_t *agent) {
 }
 
 size_t hu_agent_internal_recent_assistant_avg_len(const hu_agent_t *agent, size_t max_n) {
-    if (!agent || !agent->history || agent->history_count == 0 || max_n == 0)
+    /* A voice memo has no texting baseline: G5 must not shrink it (review C2). */
+    if (!agent || agent->voice_memo_turn || !agent->history || agent->history_count == 0 ||
+        max_n == 0)
         return 0;
 
     /* Collect assistant lengths oldest → newest among the last `max_n`
@@ -750,6 +761,50 @@ size_t hu_agent_internal_recent_assistant_avg_len(const hu_agent_t *agent, size_
     if (ewma < 1.0)
         return 1;
     return (size_t)ewma;
+}
+
+void hu_agent_internal_guard_context(const hu_agent_t *agent, const char *msg, size_t msg_len,
+                                     hu_guard_context_t *out) {
+    memset(out, 0, sizeof(*out));
+    if (!agent)
+        return;
+    out->recent_avg_len = hu_agent_internal_recent_assistant_avg_len(agent, 5);
+    out->inbound_is_ask = hu_guard_inbound_is_ask(msg, msg_len);
+    out->length_anomaly_mult =
+        hu_guard_length_anomaly_mult_for_channel(agent->active_channel, agent->active_channel_len);
+    out->director_text = agent->scene_direction_text;
+    out->director_len = agent->scene_direction_text_len;
+    /* Sprint 37 — cross-turn director history. */
+    out->director_history = (const char *const *)agent->director_history;
+    out->director_history_lens = agent->director_history_lens;
+    out->director_history_count = agent->director_history_count;
+    /* Sprint 41 follow-up #4 — consult per-channel G9 disable list. */
+    out->naked_opener_disabled =
+        hu_response_guard_g9_disabled_for_channel(agent->active_channel, agent->active_channel_len);
+    if (!agent->persona)
+        return;
+    if (out->inbound_is_ask && agent->memory_session_id) {
+        const hu_contact_profile_t *cp = hu_persona_find_contact(
+            agent->persona, agent->memory_session_id, agent->memory_session_id_len);
+        if (cp)
+            out->contact_reply_p90 = cp->reply_chars_p90;
+    }
+    if (agent->persona->name && agent->persona->name_len > 1) {
+        out->persona_name = agent->persona->name;
+        out->persona_name_len = agent->persona->name_len;
+    }
+    /* Prefer `identity` (full biographical string); fall back to
+     * `core_anchor` (one-line bio). */
+    const char *id =
+        agent->persona->identity ? agent->persona->identity : agent->persona->core_anchor;
+    if (id) {
+        out->persona_identity = id;
+        out->persona_identity_len = strlen(id);
+    }
+    if (agent->persona->biography) {
+        out->persona_biography = agent->persona->biography;
+        out->persona_biography_len = strlen(agent->persona->biography);
+    }
 }
 
 #define HU_AGENT_HISTORY_INIT_CAP 16
@@ -2074,6 +2129,9 @@ void hu_agent_deinit(hu_agent_t *agent) {
      * inline array) and handles the never-set case gracefully via
      * entry_count==0. */
     hu_scratchpad_deinit(&agent->sota.scratchpad, agent->alloc);
+    /* hu_turn_tail checkpoints every interval_steps iterations; each save
+     * frees the previous copy for its task, so only this frees the last. */
+    hu_checkpoint_store_deinit(&agent->sota.checkpoint_store, agent->alloc);
     hu_pattern_radar_deinit(&agent->radar);
     if (agent->commitment_store) {
         hu_commitment_store_destroy(agent->commitment_store);
@@ -2228,13 +2286,19 @@ hu_error_t hu_agent_bind_sqlite_graph(hu_agent_t *agent, struct hu_graph *graph,
 }
 #endif
 
+hu_consolidation_config_t hu_agent_consolidation_config(const struct hu_config *config) {
+    hu_consolidation_config_t c = HU_CONSOLIDATION_DEFAULTS;
+    if (config) {
+        c.decay_days = config->behavior.decay_days;
+        c.dedup_threshold = config->behavior.dedup_threshold;
+    }
+    return c;
+}
+
 hu_error_t hu_agent_consolidate_memory(hu_agent_t *agent) {
     if (!agent || !agent->memory || !agent->memory->vtable)
         return HU_ERR_INVALID_ARGUMENT;
-    hu_consolidation_config_t config = HU_CONSOLIDATION_DEFAULTS;
-    config.provider = &agent->provider;
-    config.model = agent->model_name;
-    config.model_len = agent->model_name_len;
+    hu_consolidation_config_t config = hu_agent_consolidation_config(agent->config);
     hu_error_t err = hu_memory_consolidate(agent->alloc, agent->memory, &config);
 
     /* After consolidation, demote stale recall-tier entries to archival.
@@ -2842,6 +2906,9 @@ hu_error_t hu_agent_reload_config(hu_agent_t *agent, char **summary_out, size_t 
      * by tests/test_config_reload.c). */
 #if !HU_IS_TEST
     hu_privacy_set_enforced(fresh_cfg.voice.privacy_mode);
+    /* privacy.local_only: re-resolve (mode + voice allow-list) from the fresh
+     * config; never cleared by a reload that merely omits the block. */
+    (void)hu_config_apply_local_only(&fresh_cfg);
 #endif
 
     char *summary_buf = (char *)agent->alloc->alloc(agent->alloc->ctx, 512);
@@ -2981,4 +3048,46 @@ hu_error_t hu_agent_from_app_config(hu_agent_t *out, hu_allocator_t *alloc, hu_p
         app_cfg->auto_save, app_cfg->autonomy_level, NULL,
         0, /* custom_instructions not projected (used for CLI only) */
         app_cfg->persona, app_cfg->persona_len, &ctx_cfg);
+}
+
+/* Keep [0] (system) and msgs[drop_to .. count), sliding survivors forward. */
+static size_t fit_drop_front(hu_chat_message_t *msgs, size_t count, size_t drop_to) {
+    size_t kept_tail = count - drop_to;
+    for (size_t i = 0; i < kept_tail; i++)
+        msgs[1 + i] = msgs[drop_to + i];
+    return 1 + kept_tail;
+}
+
+size_t hu_agent_internal_fit_history(const hu_agent_t *agent, hu_chat_message_t *msgs,
+                                     size_t msgs_count) {
+    if (!msgs || msgs_count < 2)
+        return msgs_count;
+    /* Owner self-test: only the last few prior messages (plus the current). */
+    if (agent && agent->history_msg_cap > 0 && msgs_count - 2 > agent->history_msg_cap)
+        msgs_count = fit_drop_front(msgs, msgs_count, msgs_count - 1 - agent->history_msg_cap);
+
+    /* A1b byte budget (2026-05-19), now behind HU_HISTORY_BUDGET: OFF keeps
+     * system + history under 20 KB; LIVE budgets the history alone under a
+     * total cap. See include/human/agent/history_budget.h. */
+    return hu_history_budget_fit(msgs, msgs_count, hu_history_budget_mode(),
+                                 hu_history_budget_max_total(), NULL);
+}
+
+hu_provider_t *hu_agent_internal_recall_provider(hu_agent_t *agent, const char *msg,
+                                                 size_t msg_len) {
+    if (!agent || !agent->provider.vtable || !hu_semantic_recall_register_admits(msg, msg_len))
+        return NULL;
+    /* HU_RECALL_PLANNER_LLM (default live = today's routing): off/shadow send
+     * the planner down its local heuristic path. The LLM plan costs ~5.5 s per
+     * message over 12 words (2026-10-01 trace); the gate exists so an A/B can
+     * show whether that buys anything. */
+    if (hu_gate_mode_from_env("HU_RECALL_PLANNER_LLM", HU_GATE_LIVE) != HU_GATE_LIVE)
+        return NULL;
+    return &agent->provider;
+}
+
+hu_error_t hu_agent_internal_experience_init(hu_agent_t *agent, struct hu_experience_store *store) {
+    if (!agent || !agent->memory || !store || agent->self_test_turn)
+        return HU_ERR_NOT_SUPPORTED;
+    return hu_experience_store_init(agent->alloc, agent->memory, store);
 }

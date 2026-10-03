@@ -663,30 +663,13 @@ static hu_error_t self_rag_verify_impl(hu_w7_facade_t *facade, hu_allocator_t *a
             break;
         }
     }
-    if (resp.outcome == HU_SELF_RAG_ABSTAINED && contact_id && contact_id_len > 0) {
-        hu_negative_memory_t nm;
-        memset(&nm, 0, sizeof(nm));
-        size_t draft_cap = sizeof(nm.text) - 10;
-        if (draft_len > draft_cap)
-            draft_len = draft_cap;
-        snprintf(nm.text, sizeof(nm.text), "Refused: %.*s", (int)draft_len, draft);
-        snprintf(nm.scope, sizeof(nm.scope), "topic");
-        snprintf(nm.reason, sizeof(nm.reason), "self-rag abstention");
-        nm.belief = hu_belief_init(0.6f, "self-rag", now_ms);
-        nm.created_at = now_ms;
-        /* P3.2 — semantic origin tag. SELF_RAG_ABSTAIN tells the planner
-         * to treat this as a SOFT hedge ("I'm not sure about X"), not a
-         * hard refusal. The W11 abstention is a "we don't know enough"
-         * signal, not a "user said never". */
-        nm.source = HU_NEGATIVE_SOURCE_SELF_RAG_ABSTAIN;
-        int64_t nm_id = 0;
-        /* P3.1 — gate self-rag abstention writes through W1 write_trust.
-         * Source is the agent itself, so trust is high; the gate guards the
-         * shared code path against quarantine/drop edge cases (e.g., bursty
-         * abstentions get clamped instead of raw inserted). */
-        (void)hu_negative_memory_add_facade_gated(facade->m, contact_id, contact_id_len, &nm,
-                                                  HU_WRITE_SOURCE_AGENT, now_ms, &nm_id);
-    }
+    /* An abstention used to be written back as a negative memory,
+     * "Refused: <draft>". But an ABSTAINED draft is SENT unchanged (the
+     * pass-through contract above), so every row named a reply the contact
+     * actually received. graph.db held 566 of them across 12 contacts on
+     * 2026-10-02, each rendered into later prompts as "Avoid:" and "They
+     * expect I cannot:", steering the twin away from its own voice and
+     * changing the prompt every turn. The outcome stays in the counters. */
 
     if (out_claims_total)
         *out_claims_total = resp.claims_count;
@@ -1108,9 +1091,7 @@ hu_error_t hu_w14_scheduler_open(hu_w7_facade_t *facade, hu_allocator_t *alloc,
     (void)hu_scheduler_register_runner(w->s, HU_JOB_AUTODREAM_COMMUNITY, hu_autodream_runner, NULL);
     (void)hu_scheduler_register_runner(w->s, HU_JOB_AUTODREAM_DECAY, hu_autodream_runner, NULL);
     /* Belief reverification: pure DB-side, no caller context needed,
-     * defaults are sane (30 day age, 64 rows/tick). Daemon overrides
-     * via hu_w14_scheduler_register_belief_reverify if it wants to
-     * pin a contact filter or surface counters. */
+     * defaults are sane (30 day age, 64 rows/tick). */
     (void)hu_scheduler_register_runner(w->s, HU_JOB_BELIEF_REVERIFICATION,
                                        hu_belief_reverify_runner, NULL);
     /* KV cache + LoRA training: stay as no-ops until the daemon binds
@@ -1143,14 +1124,6 @@ hu_error_t hu_w14_scheduler_register_kv_prewarm_runner(hu_w14_scheduler_t *s,
     if (e1 != HU_OK)
         return e1;
     return hu_scheduler_register_runner(s->s, HU_JOB_KV_CACHE_WARMING, hu_kv_prewarm_runner, mgr);
-}
-
-hu_error_t hu_w14_scheduler_register_belief_reverify(hu_w14_scheduler_t *s,
-                                                     hu_belief_reverify_ctx_t *ctx) {
-    if (!s || !s->s)
-        return HU_ERR_INVALID_ARGUMENT;
-    return hu_scheduler_register_runner(s->s, HU_JOB_BELIEF_REVERIFICATION,
-                                        hu_belief_reverify_runner, ctx);
 }
 
 /* Allow the LoRA training runner to fire its KV-warm follow-up through

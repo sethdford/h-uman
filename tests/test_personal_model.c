@@ -82,6 +82,58 @@ static void personal_model_ingest_updates_style_metrics(void) {
     HU_ASSERT_EQ((unsigned)m.style.avg_message_length, (unsigned)len);
 }
 
+/* avg = (avg*n + len) / (n+1) in integers truncates: past a few dozen
+ * samples any message shorter than the average drops it by 1 and nothing
+ * can raise it. Production read "avg 2 chars" on 2026-10-02 and every
+ * reply prompt carried it. Messages alternating 30/50 chars average 40. */
+static void personal_model_avg_length_does_not_drift_down(void) {
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+    char short_msg[31], long_msg[51];
+    memset(short_msg, 'a', 30);
+    short_msg[30] = '\0';
+    memset(long_msg, 'b', 50);
+    long_msg[50] = '\0';
+    for (int i = 0; i < 400; i++) {
+        const char *t = (i % 2) ? long_msg : short_msg;
+        HU_ASSERT_EQ(hu_personal_model_ingest(&m, t, strlen(t), true, 0, NULL), HU_OK);
+    }
+    HU_ASSERT_TRUE(m.style.avg_message_length >= 35 && m.style.avg_message_length <= 45);
+}
+
+/* A stuck-low average must recover once real messages arrive. */
+static void personal_model_avg_length_recovers_from_a_bad_value(void) {
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+    m.style.sample_count = 5000;
+    m.style.avg_message_length = 2;
+    char msg[41];
+    memset(msg, 'c', 40);
+    msg[40] = '\0';
+    for (int i = 0; i < 100; i++)
+        HU_ASSERT_EQ(hu_personal_model_ingest(&m, msg, 40, true, 0, NULL), HU_OK);
+    HU_ASSERT_TRUE(m.style.avg_message_length >= 30);
+}
+
+/* HU_PROMPT_CACHE_ORDER=live drops the raw "avg N chars" number: it moved
+ * with every message, so it changed the prompt mid-way every turn, and the
+ * bucketed "keep replies ~N chars" directive already carries the length. */
+static void personal_model_cache_order_live_drops_raw_avg(void) {
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+    const char *t = "hey how is it going today";
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, t, strlen(t), true, 0, NULL), HU_OK);
+    char buf[4096];
+    unsetenv("HU_PROMPT_CACHE_ORDER");
+    hu_personal_model_build_prompt(&m, buf, sizeof(buf));
+    HU_ASSERT_NOT_NULL(strstr(buf, "avg 25 chars"));
+    setenv("HU_PROMPT_CACHE_ORDER", "live", 1);
+    hu_personal_model_build_prompt(&m, buf, sizeof(buf));
+    unsetenv("HU_PROMPT_CACHE_ORDER");
+    HU_ASSERT_NOT_NULL(strstr(buf, "Communication style: "));
+    HU_ASSERT_NULL(strstr(buf, "avg "));
+}
+
 static void personal_model_has_content_false_when_fresh(void) {
     hu_personal_model_t m;
     hu_personal_model_init(&m);
@@ -288,7 +340,9 @@ static void personal_model_save_creates_parent_directory(void) {
     /* Make sure the directory does NOT exist yet — fresh-state assertion. */
     char rm_cmd[512];
     snprintf(rm_cmd, sizeof(rm_cmd), "rm -rf /tmp/hu_pm_mkdir_%d 2>/dev/null", (int)getpid());
-    (void)system(rm_cmd);
+    if (system(rm_cmd) != 0) {
+        /* best-effort cleanup; a (void) cast does not silence glibc warn_unused_result */
+    }
 
     hu_personal_model_t a;
     hu_personal_model_init(&a);
@@ -299,7 +353,9 @@ static void personal_model_save_creates_parent_directory(void) {
     HU_ASSERT_EQ(hu_personal_model_load(&b, path), HU_OK);
     HU_ASSERT_TRUE(hu_personal_model_has_content(&b));
 
-    (void)system(rm_cmd);
+    if (system(rm_cmd) != 0) {
+        /* best-effort cleanup; a (void) cast does not silence glibc warn_unused_result */
+    }
 }
 
 /* Round-trip via the resolver: save then load using the same default path
@@ -3175,6 +3231,9 @@ void run_personal_model_tests(void) {
     HU_RUN_TEST(personal_model_build_prompt_non_empty);
     HU_RUN_TEST(personal_model_query_preference_finds_match);
     HU_RUN_TEST(personal_model_ingest_updates_style_metrics);
+    HU_RUN_TEST(personal_model_avg_length_does_not_drift_down);
+    HU_RUN_TEST(personal_model_avg_length_recovers_from_a_bad_value);
+    HU_RUN_TEST(personal_model_cache_order_live_drops_raw_avg);
     HU_RUN_TEST(personal_model_has_content_false_when_fresh);
     HU_RUN_TEST(personal_model_has_content_true_after_fact);
     HU_RUN_TEST(personal_model_has_content_true_after_style_observation);
