@@ -10,6 +10,7 @@
  * stays gone. */
 #include "../agent_internal.h"
 #include "human/agent/graph_grounding.h"
+#include "human/agent/spoken_turn.h"
 #include "human/agent/turn.h"
 #include "human/agent/world_model.h"
 #include "human/agent/world_model_bridge.h"
@@ -66,9 +67,15 @@ hu_error_t hu_turn_retrieve(hu_turn_ctx_t *turn_ctx) {
     size_t graph_ctx_len = 0;
     if (agent->memory && agent->memory->vtable && !srag_skip_retrieval) {
         hu_memory_loader_t loader;
-        hu_memory_loader_init(&loader, agent->alloc, agent->memory, agent->retrieval_engine,
-                              cognition_budget.max_memory_entries,
-                              cognition_budget.max_memory_chars);
+        size_t mem_entries = cognition_budget.max_memory_entries;
+        size_t mem_chars = cognition_budget.max_memory_chars;
+        if (agent->spoken_turn)
+            hu_spoken_turn_memory_caps(true, &mem_entries, &mem_chars);
+        hu_memory_loader_init(&loader, agent->alloc, agent->memory,
+                              hu_spoken_turn_wants_semantic_recall(agent->spoken_turn)
+                                  ? agent->retrieval_engine
+                                  : NULL,
+                              mem_entries, mem_chars);
         hu_memory_loader_set_facade(&loader, agent->w7_facade);
         hu_memory_loader_set_personal_model(&loader, &agent->personal_model);
         hu_memory_loader_set_offer_gap(&loader, true);
