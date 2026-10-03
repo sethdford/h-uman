@@ -28,6 +28,7 @@ static void job_hold_decide_truth_table(void) {
 #include "human/config.h"
 #include "human/daemon.h"
 #include "human/daemon/job_queue.h"
+#include "human/daemon/owner_notify.h"
 #include "human/memory.h"
 #include "human/memory/job_queue_repo.h"
 #include "human/ml/mlx_admin.h"
@@ -274,6 +275,235 @@ static void job_hold_off_does_nothing(void) {
     HU_ASSERT_EQ(jh_rows(f.db), 0);
     jh_teardown(&f);
 }
+
+/* ── Release side (daemon_job_release.c) ─────────────────────────────── */
+
+static size_t g_poll_n; /* messages the mock poll returns */
+
+static hu_error_t jh_poll(void *ctx, hu_allocator_t *alloc, hu_channel_loop_msg_t *msgs,
+                          size_t max_msgs, size_t *out_count) {
+    (void)ctx;
+    (void)alloc;
+    size_t n = g_poll_n < max_msgs ? g_poll_n : max_msgs;
+    for (size_t i = 0; i < n; i++)
+        jh_msg(&msgs[i], "+15550000009", "iMessage;-;+15550000009", 300 + (int64_t)i, "new one");
+    *out_count = n;
+    return HU_OK;
+}
+
+static int64_t g_replied_rowid; /* the stub says the owner answered this rowid */
+static bool jh_replied(void *ctx, const char *chat_id, const char *handle, int64_t rowid) {
+    (void)ctx;
+    (void)chat_id;
+    (void)handle;
+    return rowid == g_replied_rowid;
+}
+
+/* Hold msgs[0..1] (rowids 101, 102) at `t0` with the model down. */
+static void jh_hold_two(jh_fixture_t *f, int64_t t0) {
+    f->ch.poll_fn = jh_poll;
+    hu_daemon_job_hold_set_now_for_test(t0);
+    hu_mlx_admin_set_test_health(false);
+    hu_daemon_jobs_on_turn_error(NULL, &f->config, &f->ch, f->msgs, 0, 1, HU_ERR_IO);
+}
+
+static int64_t jh_state_count(sqlite3 *db, const char *state) {
+    sqlite3_stmt *st = NULL;
+    int64_t n = -1;
+    if (sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM jobs WHERE state=?1", -1, &st, NULL) !=
+        SQLITE_OK)
+        return -1;
+    sqlite3_bind_text(st, 1, state, -1, NULL);
+    if (sqlite3_step(st) == SQLITE_ROW)
+        n = sqlite3_column_int64(st, 0);
+    sqlite3_finalize(st);
+    return n;
+}
+
+static void job_hold_payload_round_trips(void) {
+    hu_channel_loop_msg_t m, back;
+    jh_msg(&m, "+15550000001", "iMessage;+;chat123", 4242, "line one\nline two");
+    m.is_group = true;
+    m.has_attachment = true;
+    m.was_edited = true;
+    snprintf(m.reply_to_guid, sizeof(m.reply_to_guid), "%s", "PARENT-GUID");
+    unsigned char buf[HU_JOB_PAYLOAD_MAX];
+    size_t len = 0;
+    HU_ASSERT_EQ(hu_job_hold_encode(&m, buf, sizeof(buf), &len), HU_OK);
+    HU_ASSERT_EQ(hu_job_hold_decode(buf, len, m.session_key, &back), HU_OK);
+    HU_ASSERT_EQ(memcmp(&m, &back, sizeof(m)), 0);
+    /* Truncated or foreign payloads are refused, never half-decoded. */
+    HU_ASSERT_EQ(hu_job_hold_decode(buf, len - 1, m.session_key, &back), HU_ERR_PARSE);
+    buf[0] = 9;
+    HU_ASSERT_EQ(hu_job_hold_decode(buf, len, m.session_key, &back), HU_ERR_PARSE);
+}
+
+static void job_hold_release_appends_held_messages_once(void) {
+    jh_fixture_t f;
+    jh_setup(&f, "live", "live", true);
+    jh_hold_two(&f, 1790000000);
+    HU_ASSERT_EQ(jh_pending(f.db), 2);
+
+    /* Model back 70 min later; the poll itself returns one new message. */
+    hu_mlx_admin_set_test_health(true);
+    hu_daemon_job_hold_set_now_for_test(1790004200);
+    g_poll_n = 1;
+    hu_channel_loop_msg_t batch[16];
+    memset(batch, 0, sizeof(batch));
+    size_t count = 0;
+    HU_ASSERT_EQ(hu_daemon_jobs_poll(&f.ch, &f.alloc, NULL, &f.config, batch, 16, &count), HU_OK);
+
+    HU_ASSERT_EQ(count, 3);
+    HU_ASSERT_EQ(batch[0].message_id, 101); /* held first, oldest first */
+    HU_ASSERT_EQ(batch[1].message_id, 102);
+    HU_ASSERT_EQ(batch[2].message_id, 300); /* then what the poll returned */
+    HU_ASSERT_EQ(memcmp(&batch[0], &f.msgs[0], sizeof(batch[0])), 0);
+    HU_ASSERT_EQ(memcmp(&batch[1], &f.msgs[1], sizeof(batch[1])), 0);
+    HU_ASSERT_EQ(jh_state_count(f.db, "done"), 2);
+    HU_ASSERT_EQ(jh_pending(f.db), 0);
+
+    /* Next tick: nothing left to hand out. */
+    hu_daemon_job_hold_set_now_for_test(1790004260);
+    g_poll_n = 0;
+    count = 0;
+    HU_ASSERT_EQ(hu_daemon_jobs_poll(&f.ch, &f.alloc, NULL, &f.config, batch, 16, &count), HU_OK);
+    HU_ASSERT_EQ(count, 0);
+    hu_daemon_job_hold_metrics_t m;
+    hu_daemon_job_hold_metrics(&m);
+    HU_ASSERT_EQ(m.released, 2);
+
+    /* The released turn fails again: the messages are not held a second time. */
+    hu_mlx_admin_set_test_health(false);
+    hu_daemon_jobs_on_turn_error(NULL, &f.config, &f.ch, f.msgs, 0, 1, HU_ERR_IO);
+    HU_ASSERT_EQ(jh_pending(f.db), 0);
+    jh_teardown(&f);
+}
+
+static void job_hold_release_waits_while_model_down(void) {
+    jh_fixture_t f;
+    jh_setup(&f, "live", "live", true);
+    jh_hold_two(&f, 1790000000);
+    hu_daemon_job_hold_set_now_for_test(1790000600); /* still down */
+    g_poll_n = 0;
+    hu_channel_loop_msg_t batch[16];
+    size_t count = 0;
+    HU_ASSERT_EQ(hu_daemon_jobs_poll(&f.ch, &f.alloc, NULL, &f.config, batch, 16, &count), HU_OK);
+    HU_ASSERT_EQ(count, 0);
+    HU_ASSERT_EQ(jh_pending(f.db), 2);
+    jh_teardown(&f);
+}
+
+static void job_hold_release_cancels_what_the_owner_answered(void) {
+    jh_fixture_t f;
+    jh_setup(&f, "live", "live", true);
+    jh_hold_two(&f, 1790000000);
+    g_replied_rowid = 101;
+    hu_daemon_job_hold_set_replied_fn_for_test(jh_replied);
+    hu_mlx_admin_set_test_health(true);
+    hu_daemon_job_hold_set_now_for_test(1790003000);
+    g_poll_n = 0;
+    hu_channel_loop_msg_t batch[16];
+    size_t count = 0;
+    HU_ASSERT_EQ(hu_daemon_jobs_poll(&f.ch, &f.alloc, NULL, &f.config, batch, 16, &count), HU_OK);
+
+    HU_ASSERT_EQ(count, 1);
+    HU_ASSERT_EQ(batch[0].message_id, 102);
+    HU_ASSERT_EQ(jh_state_count(f.db, "canceled"), 1);
+    HU_ASSERT_EQ(jh_state_count(f.db, "done"), 1);
+    hu_daemon_job_hold_metrics_t m;
+    hu_daemon_job_hold_metrics(&m);
+    HU_ASSERT_EQ(m.canceled, 1);
+    g_replied_rowid = 0;
+    jh_teardown(&f);
+}
+
+static void job_hold_expires_after_three_hours_and_notifies_once(void) {
+    jh_fixture_t f;
+    jh_setup(&f, "live", "live", true);
+    jh_hold_two(&f, 1790000000);
+    hu_owner_notify_test_reset();
+    /* Model back, but 3 h + 1 s later: expiry runs before any release. */
+    hu_mlx_admin_set_test_health(true);
+    hu_daemon_job_hold_set_now_for_test(1790000000 + HU_JOB_HOLD_MAX_AGE_S + 1);
+    g_poll_n = 0;
+    hu_channel_loop_msg_t batch[16];
+    size_t count = 0;
+    HU_ASSERT_EQ(hu_daemon_jobs_poll(&f.ch, &f.alloc, NULL, &f.config, batch, 16, &count), HU_OK);
+
+    HU_ASSERT_EQ(count, 0);
+    HU_ASSERT_EQ(jh_state_count(f.db, "expired"), 2);
+    HU_ASSERT_EQ(hu_owner_notify_test_count(), 1);
+    HU_ASSERT_NOT_NULL(strstr(hu_owner_notify_test_last_body(), "held 2 messages"));
+    /* The banner names no one and quotes nothing. */
+    HU_ASSERT_NULL(strstr(hu_owner_notify_test_last_body(), "+1555"));
+    HU_ASSERT_NULL(strstr(hu_owner_notify_test_last_body(), "call me"));
+
+    /* Nothing left to expire: no second banner. */
+    hu_daemon_job_hold_set_now_for_test(1790000000 + HU_JOB_HOLD_MAX_AGE_S + 120);
+    HU_ASSERT_EQ(hu_daemon_jobs_poll(&f.ch, &f.alloc, NULL, &f.config, batch, 16, &count), HU_OK);
+    HU_ASSERT_EQ(hu_owner_notify_test_count(), 1);
+    jh_teardown(&f);
+}
+
+static void job_hold_shadow_release_changes_nothing(void) {
+    jh_fixture_t f;
+    jh_setup(&f, "live", "shadow", true);
+    jh_hold_two(&f, 1790000000);
+    g_replied_rowid = 102;
+    hu_daemon_job_hold_set_replied_fn_for_test(jh_replied);
+    hu_mlx_admin_set_test_health(true);
+    hu_daemon_job_hold_set_now_for_test(1790004200);
+    g_poll_n = 1;
+    hu_channel_loop_msg_t batch[16];
+    size_t count = 0;
+    HU_ASSERT_EQ(hu_daemon_jobs_poll(&f.ch, &f.alloc, NULL, &f.config, batch, 16, &count), HU_OK);
+
+    HU_ASSERT_EQ(count, 1); /* only what the poll returned */
+    HU_ASSERT_EQ(batch[0].message_id, 300);
+    HU_ASSERT_EQ(jh_rows(f.db), 0);
+    hu_daemon_job_hold_metrics_t m;
+    hu_daemon_job_hold_metrics(&m);
+    HU_ASSERT_EQ(m.shadow_would_release, 1);
+    HU_ASSERT_EQ(m.shadow_would_cancel, 1);
+    HU_ASSERT_EQ(m.released, 0);
+    g_replied_rowid = 0;
+    jh_teardown(&f);
+}
+
+static void job_hold_off_poll_is_byte_identical(void) {
+    jh_fixture_t f;
+    jh_setup(&f, "live", NULL, true);
+    f.ch.poll_fn = jh_poll;
+    /* A due held row the OFF path must leave alone. */
+    unsigned char payload[HU_JOB_PAYLOAD_MAX];
+    size_t len = 0;
+    HU_ASSERT_EQ(hu_job_hold_encode(&f.msgs[0], payload, sizeof(payload), &len), HU_OK);
+    hu_job_spec_t spec = {.kind = HU_JOB_KIND_INBOUND_HOLD,
+                          .payload = payload,
+                          .payload_len = len,
+                          .contact = f.msgs[0].session_key,
+                          .channel = HU_JOB_HOLD_CHANNEL,
+                          .due_at = 1790000000,
+                          .idempotency_key = "hold:x:101"};
+    HU_ASSERT_EQ(hu_job_queue_repo_enqueue(f.db, &spec, 1790000000, NULL, NULL), HU_OK);
+    hu_mlx_admin_set_test_health(true);
+    hu_daemon_job_hold_set_now_for_test(1790004200);
+    g_poll_n = 2;
+
+    hu_channel_loop_msg_t direct[16], wrapped[16];
+    memset(direct, 0, sizeof(direct));
+    memset(wrapped, 0, sizeof(wrapped));
+    size_t n_direct = 0, n_wrapped = 0;
+    hu_error_t e_direct = jh_poll(f.ch.channel_ctx, &f.alloc, direct, 16, &n_direct);
+    hu_error_t e_wrapped =
+        hu_daemon_jobs_poll(&f.ch, &f.alloc, NULL, &f.config, wrapped, 16, &n_wrapped);
+
+    HU_ASSERT_EQ(e_wrapped, e_direct);
+    HU_ASSERT_EQ(n_wrapped, n_direct);
+    HU_ASSERT_EQ(memcmp(direct, wrapped, sizeof(direct)), 0);
+    HU_ASSERT_EQ(jh_pending(f.db), 1); /* not claimed, not released */
+    jh_teardown(&f);
+}
 #endif /* HU_ENABLE_SQLITE */
 
 void run_daemon_job_hold_tests(void) {
@@ -287,5 +517,12 @@ void run_daemon_job_hold_tests(void) {
     HU_RUN_TEST(job_hold_live_refuses_payload_over_cap);
     HU_RUN_TEST(job_hold_live_without_queue_runs_as_shadow);
     HU_RUN_TEST(job_hold_off_does_nothing);
+    HU_RUN_TEST(job_hold_payload_round_trips);
+    HU_RUN_TEST(job_hold_release_appends_held_messages_once);
+    HU_RUN_TEST(job_hold_release_waits_while_model_down);
+    HU_RUN_TEST(job_hold_release_cancels_what_the_owner_answered);
+    HU_RUN_TEST(job_hold_expires_after_three_hours_and_notifies_once);
+    HU_RUN_TEST(job_hold_shadow_release_changes_nothing);
+    HU_RUN_TEST(job_hold_off_poll_is_byte_identical);
 #endif
 }

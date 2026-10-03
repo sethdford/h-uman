@@ -1101,18 +1101,22 @@ static int imessage_open_chatdb(const char *db_path, sqlite3 **db_out) {
     return imessage_open_chatdb_budget(db_path, db_out, 3, 3000);
 }
 
+/* The live chat.db (HU_CHATDB honoured), opened read-only. */
+static bool imessage_open_live_chatdb(sqlite3 **db) {
+    char db_path[512];
+    int n = hu_paths_chatdb(db_path, sizeof(db_path));
+    if (n < 0 || (size_t)n >= sizeof(db_path))
+        return false;
+    return imessage_open_chatdb(db_path, db) == SQLITE_OK;
+}
+
 bool hu_imessage_user_responded_recently(void *channel_ctx, const char *handle, size_t handle_len,
                                          int within_seconds) {
     if (!handle || handle_len == 0 || within_seconds <= 0)
         return false;
 
-    char db_path[512];
-    int n = hu_paths_chatdb(db_path, sizeof(db_path));
-    if (n < 0 || (size_t)n >= sizeof(db_path))
-        return false;
-
     sqlite3 *db = NULL;
-    if (imessage_open_chatdb(db_path, &db) != SQLITE_OK)
+    if (!imessage_open_live_chatdb(&db))
         return false;
 
     /*
@@ -1157,6 +1161,17 @@ bool hu_imessage_user_responded_recently(void *channel_ctx, const char *handle, 
     sqlite3_finalize(stmt);
     sqlite3_close(db);
     return found;
+}
+
+bool hu_imessage_channel_replied_after(void *channel_ctx, const char *chat_guid, const char *handle,
+                                       int64_t rowid) {
+    sqlite3 *db = NULL;
+    if (!imessage_open_live_chatdb(&db))
+        return false;
+    bool replied = hu_imessage_user_replied_after(
+        db, chat_guid, handle, rowid, channel_ctx ? imessage_is_ours_cb : NULL, channel_ctx);
+    sqlite3_close(db);
+    return replied;
 }
 #endif
 #endif

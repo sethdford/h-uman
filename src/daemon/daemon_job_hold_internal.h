@@ -28,4 +28,18 @@ hu_job_probe_t hu_job_hold_probe(const struct hu_config *config);
 /* The channel's vtable name is HU_JOB_HOLD_CHANNEL. */
 bool hu_job_hold_is_imessage(const struct hu_service_channel *ch);
 
+/* The HU_JOB_HOLD_SHADOW_SLOTS-entry ring of SHADOW would-holds. */
+hu_job_hold_shadow_entry_t *hu_job_hold_shadow_ring(void);
+
+/* Mutable counters (single daemon thread). */
+hu_daemon_job_hold_metrics_t *hu_job_hold_metrics_mut(void);
+
+/* daemon_job_release.c: forget the release throttle and the test stub. */
+void hu_job_hold_release_reset(void);
+
+#ifdef HU_ENABLE_SQLITE
+/* The jobs handle when the effective mode is LIVE, else NULL. */
+sqlite3 *hu_job_hold_db(void);
+#endif
+
 #endif /* HU_DAEMON_JOB_HOLD_INTERNAL_H */

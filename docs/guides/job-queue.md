@@ -15,6 +15,9 @@ down, and scheduled contact sends. Design and plan:
   `src/memory/repos/job_queue_repo_sqlite.c`.
 - Daemon side (gate, start recovery, counters): `include/human/daemon/job_queue.h`,
   `src/daemon/daemon_job_queue.c`, called once from `hu_service_run` at startup.
+- Inbound hold (below): `include/human/daemon/job_hold.h`,
+  `src/daemon/daemon_job_hold.c` (decide + hold), `src/daemon/daemon_job_release.c`
+  (release, cancel, expiry).
 
 ## Delivery guarantee
 
@@ -63,8 +66,68 @@ contacts or keys:
 [jobq shadow] start: recovered unknown=0 requeued=0 | pending=0 claimed=0 sending=0 unknown=0 done=0 failed=0 expired=0 canceled=0 shadow=0
 ```
 
-Later PRs add the inbound hold path and move scheduled sends onto the queue.
-Each of those changes what is sent, and each has its own shadow logging.
+A later PR moves scheduled sends onto the queue, behind its own shadow logging.
+
+## Inbound hold: `HU_JOB_HOLD=off|shadow|live`
+
+The nightly retrain boots `mlx-server` out for about 70 minutes. With
+`privacy.local_only` there is no cloud fallback, and the iMessage poll has
+already saved its cursor past the message, so a reply turn that fails in that
+window is a message nobody ever answers. The hold path keeps those messages and
+hands them back to the normal reply turn when the model is back.
+
+**When a failed turn is held.** `hu_job_hold_decide` returns HOLD only when
+both hold:
+
+- the turn failed with a transport error (`hu_agent_error_is_transport`:
+  `HU_ERR_IO`, `HU_ERR_TIMEOUT`, `HU_ERR_PROVIDER_UNAVAILABLE`), and
+- `hu_mlx_admin_probe_health` against the `mlx_local` provider's base URL says
+  the server is down (the probe caches its answer for 60 s).
+
+A transport error while the probe is up, or with no `mlx_local` provider
+configured, is a one-off: today's behaviour (no reply), counted and logged as
+`[jobq] one-off err=<code> probe=up|unknown`. Any other error is ignored by the
+hold path. Only the iMessage channel is held.
+
+The hook is `hu_daemon_jobs_on_turn_error`, which replaced the failed-turn log
+in `hu_service_run` and still prints that line unchanged. Release is
+`hu_daemon_jobs_poll`, which replaced the channel poll call.
+
+| Mode | Failed turn, model down | Poll tick (iMessage, at most every 30 s) |
+|---|---|---|
+| `off` (default) | Logs the failure, as before. Nothing else. | Calls the channel's poll; output untouched |
+| `shadow` | `[jobq] shadow would hold n=<count> err=<code> probe=down`; remembers rowids in memory only | `[jobq] shadow would expire n=…`, `would release n=… age_max=…s`, `would cancel n=…`; batch untouched |
+| `live` | One `inbound_hold` job per message, key `hold:<chat_id>:<rowid>`; `[jobq live] held n= dup= skipped=` | Expires holds older than 3 h, then, if the probe is up, claims due holds, cancels any the owner already answered, and puts the rest at the front of the poll batch; `[jobq live] released n= age_max= canceled=` |
+
+`live` needs the jobs table, so it also needs `HU_JOB_QUEUE=shadow|live` and a
+clean start. Without that it runs as `shadow` and logs why at start. Log lines
+carry counts, error enums and ages only, never text, handles or keys.
+
+**Payload.** A compact binary record of what re-injecting the message needs
+(rowid, timestamp, guid, reply-to guid, chat id, flags, text); the sender handle
+is the job's `contact`. If it would exceed 4096 bytes the message is not held
+(`[jobq live] not held: … over the 4096-byte payload cap`) and gets today's
+behaviour.
+
+**At most once.** Release runs claim → `mark_sending` → copy into the batch →
+`finish done` inside one poll call, before the turn that answers the message
+runs. A crash before `mark_sending` leaves nothing sent and the lease expires,
+so the row is retried. A crash after it leaves the row `sending`, which start
+recovery turns into `unknown`, never re-claimed: the message may go unanswered,
+never answered twice. A released message whose turn fails again is not held
+again (its key already exists). The daemon's reply dedup still applies to the
+re-injected batch as a second guard.
+
+**Owner already answered.** Before release, `hu_imessage_channel_replied_after`
+asks chat.db whether a human-written outbound (not one of the daemon's own sends)
+landed in that conversation after the held rowid. If so the job is `canceled`.
+
+**Expiry.** A hold older than 3 hours (the retrain window is 02:00–05:00) is
+`expired` before any release is attempted, and the owner gets one Notification
+Center banner per expiry batch naming only the count.
+
+The contact never gets an "I'm down" message. They see at most a typing
+indicator, then a late normal reply.
 
 ## Promotion
 
@@ -74,10 +137,22 @@ table and runs a recovery that has nothing to recover.
 `shadow → live` for the features built on the queue is gated on the
 measurement in §9 of the design:
 
-- **Inbound hold:** at least 7 shadow nights where `would hold` covers 100% of
-  the turns that failed with a transport error between 03:07 and 04:20, with
-  0 would-holds while the model probe is healthy, and releases within 5 minutes
-  of mlx-server reporting healthy.
+- **Inbound hold (`HU_JOB_HOLD` shadow → live):** at least 7 shadow nights
+  where:
+  - `would hold` covers 100% of the turns that failed with a transport error
+    between 03:07 and 04:20. Count both sides from the service log:
+    `agent turn failed for … (I/O error|timeout|provider unavailable)` lines
+    against the `n=` sum of `[jobq] shadow would hold` lines in that window.
+  - there are 0 would-holds while the model probe is healthy. Every transport
+    failure outside the outage must log `[jobq] one-off … probe=up`, never
+    `would hold`.
+  - the first `[jobq] shadow would release` line comes within 5 minutes of
+    mlx-server reporting healthy (`age_max` minus the outage length).
+  - `would expire` stays at 0 on normal nights.
+
+  After live, held-reply delivery should be at least 95%. Measure it as the sum
+  of `released n=` over the sum of `held n=`, with `canceled` and `expired`
+  reported alongside.
 - **Scheduled sends:** 14 days of shadow with no disagreement between the
   legacy queue and the job queue beyond the known replayed and dropped
   classes, plus one manual `kill -9` drill between `sending` and `done` that
@@ -86,5 +161,8 @@ measurement in §9 of the design:
 ## Rollback
 
 Remove `HU_JOB_QUEUE` from the launchd plist environment, or set it to `off`,
-and restart the daemon. The `jobs` table can stay where it is: in `off` mode
+and restart the daemon. To turn off only the inbound hold, remove
+`HU_JOB_HOLD` (or set it to `off`) and restart. Rows already held stay in the
+table and are not released, so they go unanswered, just as they would have
+without the hold. `live → shadow` stops writes and releases on the next start. The `jobs` table can stay where it is: in `off` mode
 nothing reads or writes it.

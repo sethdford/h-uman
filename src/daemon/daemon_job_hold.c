@@ -79,6 +79,51 @@ hu_error_t hu_job_hold_encode(const hu_channel_loop_msg_t *m, unsigned char *buf
     return HU_OK;
 }
 
+static int64_t get_i64(const unsigned char *p) {
+    uint64_t u = 0;
+    for (int i = 7; i >= 0; i--)
+        u = (u << 8) | p[i];
+    return (int64_t)u;
+}
+
+/* Copies n bytes from *p into a NUL-terminated field of `cap` bytes. */
+static bool take(const unsigned char **p, const unsigned char *end, size_t n, char *dst,
+                 size_t cap) {
+    if (n >= cap || (size_t)(end - *p) < n)
+        return false;
+    memcpy(dst, *p, n);
+    dst[n] = '\0';
+    *p += n;
+    return true;
+}
+
+hu_error_t hu_job_hold_decode(const unsigned char *buf, size_t len, const char *session_key,
+                              hu_channel_loop_msg_t *out) {
+    if (!buf || !out || !session_key)
+        return HU_ERR_INVALID_ARGUMENT;
+    memset(out, 0, sizeof(*out));
+    if (len < HOLD_HEADER_LEN || buf[0] != HOLD_PAYLOAD_VERSION)
+        return HU_ERR_PARSE;
+    unsigned char flags = buf[1];
+    out->is_group = (flags & 1) != 0;
+    out->has_attachment = (flags & 2) != 0;
+    out->has_video = (flags & 4) != 0;
+    out->was_edited = (flags & 8) != 0;
+    out->was_unsent = (flags & 16) != 0;
+    out->message_id = get_i64(buf + 2);
+    out->timestamp_sec = get_i64(buf + 10);
+    size_t tl = (size_t)buf[21] | ((size_t)buf[22] << 8);
+    const unsigned char *p = buf + HOLD_HEADER_LEN, *end = buf + len;
+    if (!take(&p, end, buf[18], out->guid, sizeof(out->guid)) ||
+        !take(&p, end, buf[19], out->reply_to_guid, sizeof(out->reply_to_guid)) ||
+        !take(&p, end, buf[20], out->chat_id, sizeof(out->chat_id)) ||
+        !take(&p, end, tl, out->content, sizeof(out->content)) || p != end ||
+        strlen(session_key) >= sizeof(out->session_key))
+        return HU_ERR_PARSE;
+    memcpy(out->session_key, session_key, strlen(session_key) + 1);
+    return HU_OK;
+}
+
 hu_gate_mode_t hu_daemon_job_hold_mode(void) {
     return g_metrics.mode;
 }
@@ -93,6 +138,7 @@ void hu_daemon_job_hold_reset_for_test(void) {
     memset(g_shadow, 0, sizeof(g_shadow));
     g_shadow_next = 0;
     g_test_now = 0;
+    hu_job_hold_release_reset();
 #ifdef HU_ENABLE_SQLITE
     g_db = NULL;
 #endif
@@ -100,6 +146,14 @@ void hu_daemon_job_hold_reset_for_test(void) {
 
 void hu_daemon_job_hold_set_now_for_test(int64_t now) {
     g_test_now = now;
+}
+
+hu_job_hold_shadow_entry_t *hu_job_hold_shadow_ring(void) {
+    return g_shadow;
+}
+
+hu_daemon_job_hold_metrics_t *hu_job_hold_metrics_mut(void) {
+    return &g_metrics;
 }
 
 int64_t hu_job_hold_now(void) {
@@ -149,6 +203,10 @@ void hu_daemon_job_hold_configure(hu_gate_mode_t mode, sqlite3 *db) {
     g_db = mode == HU_GATE_LIVE ? db : NULL;
     if (mode == HU_GATE_LIVE && !db)
         g_metrics.mode = HU_GATE_SHADOW;
+}
+
+sqlite3 *hu_job_hold_db(void) {
+    return g_db;
 }
 
 /* LIVE: one inbound_hold job per message, key hold:<chat_id>:<rowid>. */

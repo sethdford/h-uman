@@ -1294,6 +1294,7 @@ set(HU_CORE_SOURCES
     src/daemon/daemon_send_provenance.c
     src/daemon/daemon_job_queue.c
     src/daemon/daemon_job_hold.c
+    src/daemon/daemon_job_release.c
     src/daemon/daemon_send_failure.c
     src/daemon/owner_notify.c
     src/daemon/daemon_reply_delay.c

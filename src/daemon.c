@@ -2387,7 +2387,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
             hu_channel_loop_msg_t msgs[16];
             memset(msgs, 0, sizeof(msgs));
             size_t count = 0;
-            hu_error_t poll_err = ch->poll_fn(ch->channel_ctx, alloc, msgs, 16, &count);
+            hu_error_t poll_err = hu_daemon_jobs_poll(ch, alloc, agent, config, msgs, 16, &count);
             ch->last_poll_ms = tick_now;
             time_t poll_receive_time = 0;
             if (count > 0) {
