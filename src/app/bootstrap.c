@@ -1193,6 +1193,11 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
             bi->voice_cfg.api_key || bi->voice_cfg.cartesia_api_key ||
             bi->voice_cfg.openai_api_key || (bi->cfg.voice.mode && bi->cfg.voice.mode[0])) {
             hu_agent_set_voice_config(&bi->agent, &bi->voice_cfg);
+            /* Keep the voice config (STT/TTS helpers use it) but never play replies
+             * on this machine's speakers: a daemon or gateway has no listener there,
+             * and afplay blocked each gateway turn ~5 s. Only the interactive CLI
+             * turns playback on (cli.c). */
+            bi->agent.tts_enabled = false;
         }
         bi->agent.chain_of_thought = bi->cfg.agent.chain_of_thought;
         bi->agent.agent_pool = bi->agent_pool;

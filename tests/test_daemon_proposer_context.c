@@ -11,6 +11,7 @@
  *   - LIVE feeds the enriched prompt to the local provider, and falls back to
  *     today's prompt — never the enriched one — when the local call fails;
  *   - the local-provider resolver refuses cloud providers and an open circuit. */
+#include "human/agent/init_proposer.h"
 #include "human/config.h"
 #include "human/core/allocator.h"
 #include "human/core/log_redact.h"
@@ -72,18 +73,21 @@ typedef struct fake_llm {
     const char *reply2; /* if set, the answer from the 2nd call on */
     char last_msg[16384];
     char first_msg[16384];
+    char last_sys[2048];
 } fake_llm_t;
 
 static hu_error_t fake_llm_chat(void *ctx, hu_allocator_t *alloc, const char *sys, size_t sys_len,
                                 const char *msg, size_t msg_len, const char *model,
                                 size_t model_len, double temperature, char **out, size_t *out_len) {
-    (void)sys;
-    (void)sys_len;
     (void)model;
     (void)model_len;
     (void)temperature;
     fake_llm_t *f = (fake_llm_t *)ctx;
     f->calls++;
+    size_t sn = sys && sys_len < sizeof(f->last_sys) - 1 ? sys_len : 0;
+    if (sys)
+        memcpy(f->last_sys, sys, sn);
+    f->last_sys[sn] = '\0';
     size_t n = msg_len < sizeof(f->last_msg) - 1 ? msg_len : sizeof(f->last_msg) - 1;
     memcpy(f->last_msg, msg, n);
     f->last_msg[n] = '\0';
@@ -177,7 +181,7 @@ static const char k_plain_golden[] = "Context as of unix=1790000000; last_inboun
                                      "\n--- channel ---\nimessage"
                                      "\n--- contact ---\n+15550001111"
                                      "\n--- situation ---\nIt has been 3 days since you talked."
-                                     "\n\nShould h-uman send Seth a message right now?";
+                                     "\n\nShould Seth text this contact right now?";
 
 /* Run one decide() for k_contact at `now`, with the thread captured. */
 static void run_decide(hu_proposer_context_t *pc, hu_gate_mode_t mode, hu_provider_t *local,
@@ -785,8 +789,34 @@ static void reliable_reports_which_provider_served(void) {
     rel.vtable->deinit(rel.ctx, &a);
 }
 
+/* The shadow comparison (local_final -> hu_init_proposer_decide_once) asks
+ * the same question as the send path: for a contact, whether SETH should text
+ * them, not whether h-uman should message Seth. */
+static void decide_once_uses_the_contact_system_prompt(void) {
+    hu_allocator_t a = hu_system_allocator();
+    fake_llm_t f;
+    memset(&f, 0, sizeof(f));
+    f.reply = "{\"should_propose\":false,\"confidence\":0.1,\"reason\":\"x\"}";
+    hu_provider_t p = {.ctx = &f, .vtable = &fake_llm_vtable};
+    hu_proactive_compose_inputs_t in;
+    plain_inputs(&in);
+    hu_init_decision_t d;
+    (void)hu_init_proposer_decide_once(&a, &p, "m", &in, T_NOW, 0, &d);
+    HU_ASSERT_EQ(f.calls, 1);
+    HU_ASSERT_NULL(strstr(f.last_sys, "send Seth a message"));
+    HU_ASSERT(strstr(f.last_sys, "from Seth") != NULL);
+
+    /* Control: no contact keeps the message-Seth prompt. */
+    memset(&in, 0, sizeof(in));
+    in.situation_context = "quiet";
+    in.situation_context_len = 5;
+    (void)hu_init_proposer_decide_once(&a, &p, "m", &in, T_NOW, 0, &d);
+    HU_ASSERT(strstr(f.last_sys, "send Seth a message") != NULL);
+}
+
 void run_daemon_proposer_context_tests(void) {
     HU_TEST_SUITE("daemon_proposer_context");
+    HU_RUN_TEST(decide_once_uses_the_contact_system_prompt);
     HU_RUN_TEST(render_thread_labels_speakers_times_and_days_since);
     HU_RUN_TEST(render_thread_keeps_newest_lines_within_cap);
     HU_RUN_TEST(render_thread_empty_writes_nothing_and_unknown_days);

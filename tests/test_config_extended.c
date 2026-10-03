@@ -59,6 +59,27 @@ static void test_config_load_from_custom_nonexistent_uses_defaults(void) {
     hu_config_deinit(&cfg);
 }
 
+/* --config used to default the workspace to ".", so bootstrap ran git init +
+ * add -A + commit in the launch directory. It must match the no-override
+ * default; an explicit "workspace" key still overrides both. */
+static void test_config_load_from_override_workspace_is_state_dir(void) {
+    const char *prev = getenv("HU_STATE_DIR");
+    char *old = prev ? strdup(prev) : NULL;
+    setenv("HU_STATE_DIR", "/nonexistent_hu_state_ws", 1);
+    hu_allocator_t backing = hu_system_allocator();
+    hu_config_t cfg = {0};
+    hu_error_t err = hu_config_load_from(&backing, "/nonexistent/custom/config.json", &cfg);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(cfg.workspace_dir);
+    HU_ASSERT_STR_EQ(cfg.workspace_dir, "/nonexistent_hu_state_ws/workspace");
+    hu_config_deinit(&cfg);
+    if (old) {
+        setenv("HU_STATE_DIR", old, 1);
+        free(old);
+    } else
+        unsetenv("HU_STATE_DIR");
+}
+
 static void test_config_load_nonexistent_uses_defaults(void) {
     const char *h = getenv("HOME");
     char *old_home = h ? strdup(h) : NULL;
@@ -1560,6 +1581,7 @@ void run_config_extended_tests(void) {
     HU_TEST_SUITE("Config Extended");
     HU_RUN_TEST(test_config_load_from_null_uses_default_path);
     HU_RUN_TEST(test_config_load_from_custom_nonexistent_uses_defaults);
+    HU_RUN_TEST(test_config_load_from_override_workspace_is_state_dir);
     HU_RUN_TEST(test_config_load_nonexistent_uses_defaults);
     HU_RUN_TEST(test_config_empty_json_uses_defaults);
     HU_RUN_TEST(test_config_partial_json_merges);
