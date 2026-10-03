@@ -2935,9 +2935,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         hu_persona_find_contact(agent->persona, batch_key, key_len);
                     if (!cp_gate) {
                         if (getenv("HU_DEBUG"))
-                            hu_log_error("human", agent ? agent->observer : NULL,
-                                         "ignoring message from unknown contact: %.*s",
-                                         (int)(key_len > 20 ? 20 : key_len), batch_key);
+                            hu_log_info("human", agent ? agent->observer : NULL,
+                                        "ignoring message from unknown contact: %.*s",
+                                        (int)(key_len > 20 ? 20 : key_len), batch_key);
                         continue;
                     }
                     /* Never respond to messages from the persona owner's own number */
