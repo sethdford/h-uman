@@ -18,10 +18,13 @@ public struct EnergyVAD: Sendable {
         public var minSpeechMs: Int
         public var preRollMs: Int
         public var maxUtteranceMs: Int
+        /// Speech must last this long before `.sustained` (the barge-in signal) fires.
+        public var sustainMs: Int
 
         public init(sampleRate: Int = PCMCodec.uplinkSampleRate, threshold: Float = 0.018,
                     bargeInThreshold: Float = 0.06, silenceToEndMs: Int = 1_400,
-                    minSpeechMs: Int = 700, preRollMs: Int = 300, maxUtteranceMs: Int = 30_000) {
+                    minSpeechMs: Int = 700, preRollMs: Int = 300, maxUtteranceMs: Int = 30_000,
+                    sustainMs: Int = 250) {
             self.sampleRate = sampleRate
             self.threshold = threshold
             self.bargeInThreshold = bargeInThreshold
@@ -29,12 +32,16 @@ public struct EnergyVAD: Sendable {
             self.minSpeechMs = minSpeechMs
             self.preRollMs = preRollMs
             self.maxUtteranceMs = maxUtteranceMs
+            self.sustainMs = sustainMs
         }
     }
 
     public enum Event: Sendable, Equatable {
-        /// Speech crossed the threshold (use it to barge in on playback).
+        /// Speech crossed the threshold.
         case speechStarted
+        /// The same speech has now lasted `sustainMs`: real talking, not a blip. Use it to
+        /// barge in on playback.
+        case sustained
         /// A complete utterance, pre-roll included.
         case utterance([Float])
         /// Speech ended too soon to be an utterance (a cough, a click); dropped.
@@ -49,7 +56,9 @@ public struct EnergyVAD: Sendable {
     private var buffer: [Float] = []
     private var preRoll: [Float] = []
     private var silenceSamples = 0
-    private var speechSamples = 0
+    /// Pre-roll samples at the head of `buffer` (not part of the speech span).
+    private var preRollSamples = 0
+    private var sustainedSent = false
 
     public init(config: Config = Config()) {
         self.config = config
@@ -74,9 +83,10 @@ public struct EnergyVAD: Sendable {
         if !inSpeech {
             if loud {
                 inSpeech = true
+                preRollSamples = preRoll.count
                 buffer = preRoll + frame
-                speechSamples = frame.count
                 silenceSamples = 0
+                sustainedSent = false
                 events.append(.speechStarted)
             } else {
                 preRoll.append(contentsOf: frame)
@@ -88,16 +98,24 @@ public struct EnergyVAD: Sendable {
 
         buffer.append(contentsOf: frame)
         if loud {
-            speechSamples += frame.count
             silenceSamples = 0
         } else {
             silenceSamples += frame.count
         }
 
+        if loud && !sustainedSent &&
+            buffer.count - preRollSamples >= samples(ms: config.sustainMs) {
+            sustainedSent = true
+            events.append(.sustained)
+        }
+
         let ended = silenceSamples >= samples(ms: config.silenceToEndMs)
         let tooLong = buffer.count >= samples(ms: config.maxUtteranceMs)
         if ended || tooLong {
-            if speechSamples >= samples(ms: config.minSpeechMs) || tooLong {
+            // Speech span: first loud frame to the last one. Counting only loud frames
+            // discarded ordinary sentences, whose syllables have quiet gaps between them.
+            let span = buffer.count - preRollSamples - silenceSamples
+            if span >= samples(ms: config.minSpeechMs) || tooLong {
                 events.append(.utterance(buffer))
             } else {
                 events.append(.discarded)
@@ -113,6 +131,7 @@ public struct EnergyVAD: Sendable {
         buffer = []
         preRoll = []
         silenceSamples = 0
-        speechSamples = 0
+        preRollSamples = 0
+        sustainedSent = false
     }
 }

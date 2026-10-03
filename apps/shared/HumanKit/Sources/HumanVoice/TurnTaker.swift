@@ -25,14 +25,12 @@ public struct TurnTaker: Sendable {
 
     public init() {}
 
-    /// The user started speaking.
-    public mutating func speechStarted(assistant: VoiceSession.State) -> [Action] {
-        switch assistant {
-        case .speaking, .thinking:
-            return [.bargeIn]
-        case .idle, .listening:
-            return []
-        }
+    /// The user has been speaking for a moment (`EnergyVAD.Event.sustained`). Only a
+    /// reply that is playing is interrupted. While the assistant is still thinking there
+    /// is nothing to stop, and what the user says then is held and sent next; cutting
+    /// the pending reply there let a cough or a door silently drop whole answers.
+    public mutating func speechSustained(assistant: VoiceSession.State) -> [Action] {
+        assistant == .speaking ? [.bargeIn] : []
     }
 
     /// The VAD produced a complete utterance.

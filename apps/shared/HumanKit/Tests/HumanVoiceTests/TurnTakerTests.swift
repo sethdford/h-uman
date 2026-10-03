@@ -26,12 +26,13 @@ final class TurnTakerTests: XCTestCase {
         XCTAssertEqual(t.turnFinished(), [.submit([0.5] + TurnTaker.joinGap + [0.7])])
     }
 
-    func testSpeechInterruptsAReplyButNotSilence() {
+    func testSustainedSpeechInterruptsOnlyAReplyThatIsPlaying() {
         var t = TurnTaker()
-        XCTAssertEqual(t.speechStarted(assistant: .speaking), [.bargeIn])
-        XCTAssertEqual(t.speechStarted(assistant: .thinking), [.bargeIn])
-        XCTAssertEqual(t.speechStarted(assistant: .listening), [])
-        XCTAssertEqual(t.speechStarted(assistant: .idle), [])
+        XCTAssertEqual(t.speechSustained(assistant: .speaking), [.bargeIn])
+        // Nothing is playing yet while thinking; speech then is held for the next turn.
+        XCTAssertEqual(t.speechSustained(assistant: .thinking), [])
+        XCTAssertEqual(t.speechSustained(assistant: .listening), [])
+        XCTAssertEqual(t.speechSustained(assistant: .idle), [])
     }
 
     func testResetDropsHeldSpeech() {

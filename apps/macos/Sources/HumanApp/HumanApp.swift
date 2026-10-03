@@ -62,6 +62,13 @@ struct HumanApp: App {
                     .keyboardShortcut("5", modifiers: .command)
                     .accessibilityLabel("Navigate to Settings tab")
             }
+            CommandMenu("Voice") {
+                Button(voice.isOn ? "Turn Off Voice Mode" : "Turn On Voice Mode") {
+                    voice.toggle()
+                }
+                .keyboardShortcut("v", modifiers: [.command, .shift])
+                .accessibilityLabel("Talk to h-uman hands-free")
+            }
             CommandMenu("Service") {
                 Button("Start Service") {
                     withAnimation(springMotion9) {
