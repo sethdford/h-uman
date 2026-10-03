@@ -13,6 +13,7 @@ let package = Package(
         .library(name: "HumanChatUI", targets: ["HumanChatUI"]),
         .library(name: "HumanOnDevice", targets: ["HumanOnDevice"]),
         .library(name: "HumanOnDeviceServer", targets: ["HumanOnDeviceServer"]),
+        .library(name: "HumanVoice", targets: ["HumanVoice"]),
     ],
     targets: [
         .target(
@@ -42,6 +43,17 @@ let package = Package(
             dependencies: ["HumanOnDevice"],
             path: "Sources/HumanOnDeviceServer",
             swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .target(
+            name: "HumanVoice",
+            dependencies: ["HumanProtocol", "HumanClient"],
+            path: "Sources/HumanVoice",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .testTarget(
+            name: "HumanVoiceTests",
+            dependencies: ["HumanVoice", "HumanClient", "HumanProtocol"],
+            path: "Tests/HumanVoiceTests"
         ),
         .testTarget(
             name: "HumanProtocolTests",

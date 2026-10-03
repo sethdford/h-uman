@@ -33,6 +33,8 @@ targets:
         product: HumanOnDevice
       - package: HumanKit
         product: HumanOnDeviceServer
+      - package: HumanKit
+        product: HumanVoice
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ai.human.macos
@@ -44,4 +46,6 @@ targets:
         INFOPLIST_KEY_CFBundleDisplayName: Human
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.productivity
         INFOPLIST_KEY_NSHumanReadableCopyright: "© 2026 Human"
+        # Voice mode listens continuously while it is switched on.
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: "Human listens for your voice while Voice Mode is on, so you can talk to it hands-free."
         MACOSX_DEPLOYMENT_TARGET: "14.0"
