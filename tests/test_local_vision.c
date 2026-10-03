@@ -4,11 +4,13 @@
  * VLM caption plus Apple Vision OCR, loopback only, tried BEFORE the
  * local_only "[They sent a photo]" placeholder.
  *
- * Driven through the production symbols the daemon calls
- * (hu_daemon_local_photo on the per-message path, hu_daemon_describe_image on
- * the latest-attachment path). Hermetic: the caption POST and the OCR exec
- * are test seams; hu_vision_read_image is the HU_IS_TEST mock; no socket, no
- * process, no file.
+ * Driven through the production symbols the daemon calls:
+ * hu_daemon_local_photo on the per-message (ingress) path, the ONLY place a
+ * photo is described, and hu_daemon_describe_image on the step-6
+ * latest-attachment path, which must not re-run it. Hermetic: the caption POST
+ * and the OCR exec are test seams; hu_vision_read_image is the HU_IS_TEST
+ * mock; no socket, no process. The shadow sample store writes only under a
+ * mkdtemp HU_STATE_DIR.
  */
 
 #include "human/agent.h"
@@ -19,8 +21,12 @@
 #include "human/daemon/message_router.h"
 #include "test_framework.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <time.h>
+#include <unistd.h>
 
 /* ── Fakes ──────────────────────────────────────────────────────────────── */
 
@@ -34,9 +40,13 @@ static hu_error_t g_caption_err;
 static hu_error_t g_ocr_err;
 static const char *g_caption_resp;
 static const char *g_ocr_resp;
+static int g_caption_delay_ms;
+static char g_state_dir[256];
 
 static hu_error_t fake_caption(hu_allocator_t *alloc, const char *url, const char *body,
                                size_t body_len, long timeout_ms, char **resp, size_t *resp_len) {
+    if (g_caption_delay_ms > 0)
+        usleep((useconds_t)g_caption_delay_ms * 1000);
     g_caption_calls++;
     g_caption_timeout_ms = timeout_ms;
     snprintf(g_caption_url, sizeof(g_caption_url), "%s", url);
@@ -80,6 +90,15 @@ static void lv_reset(const char *mode) {
     unsetenv("HU_LOCAL_VISION_MODEL");
     unsetenv("HU_LOCAL_ONLY");
     hu_local_only_reset();
+    if (!g_state_dir[0]) { /* the shadow sample store must never touch ~/.human */
+        snprintf(g_state_dir, sizeof(g_state_dir), "/tmp/hu-lv-test-XXXXXX");
+        HU_ASSERT_NOT_NULL(mkdtemp(g_state_dir));
+    }
+    setenv("HU_STATE_DIR", g_state_dir, 1);
+    char sp[320];
+    snprintf(sp, sizeof(sp), "%s/local_vision_shadow.jsonl", g_state_dir);
+    unlink(sp);
+    g_caption_delay_ms = 0;
     g_caption_calls = g_ocr_calls = 0;
     g_caption_timeout_ms = g_ocr_timeout_ms = 0;
     g_caption_url[0] = g_caption_body[0] = '\0';
@@ -90,8 +109,39 @@ static void lv_reset(const char *mode) {
 }
 
 static void lv_done(void) {
+    hu_local_vision_test_wait_shadow();
     lv_reset(NULL);
     hu_local_vision_set_test_hooks(NULL, NULL);
+    unsetenv("HU_STATE_DIR");
+}
+
+static double lv_now_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1e6;
+}
+
+/* The shadow sample store, read back whole ("" when absent). */
+static size_t lv_read_samples(char *buf, size_t cap, struct stat *st) {
+    char sp[320];
+    snprintf(sp, sizeof(sp), "%s/local_vision_shadow.jsonl", g_state_dir);
+    buf[0] = '\0';
+    if (st && stat(sp, st) != 0)
+        memset(st, 0, sizeof(*st));
+    FILE *f = fopen(sp, "r");
+    if (!f)
+        return 0;
+    size_t n = fread(buf, 1, cap - 1, f);
+    fclose(f);
+    buf[n] = '\0';
+    return n;
+}
+
+static size_t lv_count_lines(const char *s) {
+    size_t n = 0;
+    for (; *s; s++)
+        n += *s == '\n';
+    return n;
 }
 
 /* ── Mode ───────────────────────────────────────────────────────────────── */
@@ -197,21 +247,34 @@ static void live_keeps_typed_caption(void) {
     lv_done();
 }
 
-/* hu_daemon_describe_image under local_only=enforce: the local path answers
- * BEFORE the refusal (the latest-attachment caller relies on this). */
-static void live_describe_image_answers_before_local_only_refusal(void) {
+/* HIGH-1 (#617 review): a photo is described exactly once, at ingress. Under
+ * local_only the step-6 latest-attachment path (hu_daemon_describe_image)
+ * keeps refusing first: it must not re-run the pipeline on this turn or on
+ * any later turn whose history still holds the photo, and no OCR text may
+ * reach the system-side "### Image Context" block it feeds. */
+static void live_photo_described_once_across_turns(void) {
     lv_reset("live");
     hu_local_only_configure(HU_GATE_LIVE);
     HU_ASSERT_TRUE(hu_local_only_enforced()); /* precondition */
+    char buf[1024];
+    size_t len = 7;
+    const char *in = hu_daemon_local_photo(PHOTO, "[Photo]", &len, buf, sizeof(buf));
+    HU_ASSERT_NOT_NULL(strstr(in, "HAPPY 40th")); /* ingress: user turn only */
+    HU_ASSERT_EQ(g_caption_calls, 1);
+    HU_ASSERT_EQ(g_ocr_calls, 1);
+
     hu_allocator_t alloc = hu_system_allocator();
     hu_agent_t *agent = (hu_agent_t *)calloc(1, sizeof(hu_agent_t));
-    char *desc = NULL;
-    size_t desc_len = 0;
-    HU_ASSERT_EQ((int)hu_daemon_describe_image(&alloc, agent, NULL, PHOTO, strlen(PHOTO), "m", 1,
-                                               &desc, &desc_len),
-                 (int)HU_OK);
-    HU_ASSERT_STR_EQ(desc, "A pink birthday cake on it. Text in it: \"HAPPY 40th\"");
-    alloc.free(alloc.ctx, desc, desc_len + 1);
+    for (int turn = 0; turn < 3; turn++) { /* step 6 this turn + two later turns */
+        char *desc = NULL;
+        size_t desc_len = 0;
+        HU_ASSERT_EQ((int)hu_daemon_describe_image(&alloc, agent, NULL, PHOTO, strlen(PHOTO), "m",
+                                                   1, &desc, &desc_len),
+                     (int)HU_ERR_NOT_SUPPORTED);
+        HU_ASSERT_NULL(desc); /* nothing for hu_vision_build_context → no OCR in system ctx */
+    }
+    HU_ASSERT_EQ(g_caption_calls, 1);
+    HU_ASSERT_EQ(g_ocr_calls, 1);
     free(agent);
     lv_done();
 }
@@ -267,13 +330,21 @@ static void live_ocr_only_still_describes(void) {
 
 /* ── SHADOW ─────────────────────────────────────────────────────────────── */
 
-static void shadow_runs_but_returns_placeholder(void) {
+/* HIGH-2 (#617 review): SHADOW never holds the reply. The pipeline runs
+ * detached; the caller gets the placeholder at once even when the caption
+ * server is slow. */
+static void shadow_returns_placeholder_without_waiting(void) {
     lv_reset("shadow");
+    g_caption_delay_ms = 1500; /* a cold E2B load */
     char buf[256];
     size_t len = 7;
+    double t0 = lv_now_ms();
     const char *out = hu_daemon_local_photo(PHOTO, "[Photo]", &len, buf, sizeof(buf));
+    double took = lv_now_ms() - t0;
     HU_ASSERT_STR_EQ(out, PLACEHOLDER);
-    HU_ASSERT_EQ(g_caption_calls, 1); /* it really ran */
+    HU_ASSERT_TRUE(took < 500.0);
+    hu_local_vision_test_wait_shadow();
+    HU_ASSERT_EQ(g_caption_calls, 1); /* it really ran, in the background */
     HU_ASSERT_EQ(g_ocr_calls, 1);
 
     hu_allocator_t alloc = hu_system_allocator();
@@ -285,12 +356,28 @@ static void shadow_runs_but_returns_placeholder(void) {
     lv_done();
 }
 
-/* The shadow line carries numbers and flags only — no caption, no OCR. */
+/* One shadow job at a time: a burst of photos cannot pile up 4 GB-model
+ * requests behind each other. */
+static void shadow_skips_while_one_is_running(void) {
+    lv_reset("shadow");
+    g_caption_delay_ms = 400;
+    char buf[256];
+    size_t len = 7;
+    (void)hu_daemon_local_photo(PHOTO, "[Photo]", &len, buf, sizeof(buf));
+    len = 7;
+    HU_ASSERT_STR_EQ(hu_daemon_local_photo(PHOTO, "[Photo]", &len, buf, sizeof(buf)), PLACEHOLDER);
+    hu_local_vision_test_wait_shadow();
+    HU_ASSERT_EQ(g_caption_calls, 1);
+    lv_done();
+}
+
+/* The log line carries numbers and flags only — no caption, no OCR. */
 static void shadow_log_line_is_aggregate_only(void) {
     lv_reset("shadow");
     char buf[256];
     size_t len = 7;
     (void)hu_daemon_local_photo(PHOTO, "[Photo]", &len, buf, sizeof(buf));
+    hu_local_vision_test_wait_shadow();
     const char *line = hu_local_vision_test_last_log();
     HU_ASSERT_NOT_NULL(line);
     HU_ASSERT_TRUE(strncmp(line, "[HU_LOCAL_VISION shadow] ", 25) == 0);
@@ -302,6 +389,73 @@ static void shadow_log_line_is_aggregate_only(void) {
     HU_ASSERT_NULL(strstr(line, "cake"));
     HU_ASSERT_NULL(strstr(line, PHOTO));
     lv_done();
+}
+
+/* MEASUREMENT (#617 review): the owner's promotion read needs the captions.
+ * They go to a private 0600 file under the state dir, never to the log. */
+static void shadow_writes_private_sample_for_owner_review(void) {
+    lv_reset("shadow");
+    char buf[4096];
+    struct stat st;
+    HU_ASSERT_EQ(lv_read_samples(buf, sizeof(buf), NULL), (size_t)0); /* pre: absent */
+    size_t len = 7;
+    (void)hu_daemon_local_photo(PHOTO, "[Photo]", &len, buf, sizeof(buf));
+    hu_local_vision_test_wait_shadow();
+    HU_ASSERT_TRUE(lv_read_samples(buf, sizeof(buf), &st) > 0);
+    HU_ASSERT_EQ((int)(st.st_mode & 0777), 0600);
+    HU_ASSERT_EQ(lv_count_lines(buf), (size_t)1);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_json_value_t *row = NULL;
+    HU_ASSERT_EQ((int)hu_json_parse(&alloc, buf, strlen(buf), &row), (int)HU_OK);
+    HU_ASSERT_STR_EQ(hu_json_get_string(row, "path"), PHOTO);
+    HU_ASSERT_NOT_NULL(strstr(hu_json_get_string(row, "caption"), "pink birthday cake"));
+    HU_ASSERT_STR_EQ(hu_json_get_string(row, "ocr"), "HAPPY 40th");
+    HU_ASSERT_STR_EQ(hu_json_get_string(row, "description"),
+                     "A pink birthday cake on it. Text in it: \"HAPPY 40th\"");
+    HU_ASSERT_TRUE(hu_json_get_bool(row, "disagree", false));
+    HU_ASSERT_TRUE(hu_json_get_number(row, "ts", 0) > 1.7e9);
+    HU_ASSERT_TRUE(hu_json_get_number(row, "latency_ms", -1) >= 0);
+    hu_json_free(&alloc, row);
+    lv_done();
+}
+
+static void shadow_sample_store_keeps_latest_50(void) {
+    lv_reset("shadow");
+    for (int i = 0; i < 55; i++) {
+        char path[64], buf[256];
+        snprintf(path, sizeof(path), "/tmp/p-%02d.heic", i);
+        size_t len = 7;
+        (void)hu_daemon_local_photo(path, "[Photo]", &len, buf, sizeof(buf));
+        hu_local_vision_test_wait_shadow();
+    }
+    static char all[200000];
+    HU_ASSERT_TRUE(lv_read_samples(all, sizeof(all), NULL) > 0);
+    HU_ASSERT_EQ(lv_count_lines(all), (size_t)50);
+    HU_ASSERT_NULL(strstr(all, "p-04.heic")); /* the oldest five rolled off */
+    HU_ASSERT_TRUE(strncmp(all, "{", 1) == 0 &&
+                   strstr(all, "p-05.heic") < strstr(all, "p-54.heic"));
+    HU_ASSERT_NOT_NULL(strstr(all, "p-05.heic"));
+    lv_done();
+}
+
+/* LIVE writes no sample: the store exists only to license promotion. */
+static void live_writes_no_sample(void) {
+    lv_reset("live");
+    char buf[1024];
+    size_t len = 7;
+    (void)hu_daemon_local_photo(PHOTO, "[Photo]", &len, buf, sizeof(buf));
+    HU_ASSERT_EQ(lv_read_samples(buf, sizeof(buf), NULL), (size_t)0);
+    lv_done();
+}
+
+/* LOW (#617 review): a helper killed by a signal before the budget is a crash,
+ * not a timeout. */
+static void ocr_exit_maps_crash_and_timeout_apart(void) {
+    HU_ASSERT_EQ((int)hu_local_vision_ocr_exit_error(true, 0, 300, 8000), (int)HU_OK);
+    HU_ASSERT_EQ((int)hu_local_vision_ocr_exit_error(false, 1, 300, 8000), (int)HU_ERR_IO);
+    HU_ASSERT_EQ((int)hu_local_vision_ocr_exit_error(false, -1, 40, 8000), (int)HU_ERR_IO);
+    HU_ASSERT_EQ((int)hu_local_vision_ocr_exit_error(false, -1, 8010, 8000), (int)HU_ERR_TIMEOUT);
+    HU_ASSERT_EQ((int)hu_local_vision_ocr_exit_error(false, -1, 7900, 8000), (int)HU_ERR_TIMEOUT);
 }
 
 /* ── OFF is byte-identical to today ─────────────────────────────────────── */
@@ -404,13 +558,18 @@ void run_local_vision_tests(void) {
     HU_RUN_TEST(live_posts_image_to_loopback_default);
     HU_RUN_TEST(live_ocr_overrides_vlm_text);
     HU_RUN_TEST(live_keeps_typed_caption);
-    HU_RUN_TEST(live_describe_image_answers_before_local_only_refusal);
+    HU_RUN_TEST(live_photo_described_once_across_turns);
     HU_RUN_TEST(live_failure_falls_back_to_placeholder);
     HU_RUN_TEST(live_garbage_reply_falls_back_to_placeholder);
     HU_RUN_TEST(live_timeout_falls_back_to_placeholder);
     HU_RUN_TEST(live_ocr_only_still_describes);
-    HU_RUN_TEST(shadow_runs_but_returns_placeholder);
+    HU_RUN_TEST(shadow_returns_placeholder_without_waiting);
+    HU_RUN_TEST(shadow_skips_while_one_is_running);
     HU_RUN_TEST(shadow_log_line_is_aggregate_only);
+    HU_RUN_TEST(shadow_writes_private_sample_for_owner_review);
+    HU_RUN_TEST(shadow_sample_store_keeps_latest_50);
+    HU_RUN_TEST(live_writes_no_sample);
+    HU_RUN_TEST(ocr_exit_maps_crash_and_timeout_apart);
     HU_RUN_TEST(off_is_byte_identical_to_placeholder);
     HU_RUN_TEST(compose_cuts_hallucinated_text_without_ocr);
     HU_RUN_TEST(compose_keeps_quote_the_ocr_confirms);

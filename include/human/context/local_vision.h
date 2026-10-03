@@ -59,14 +59,23 @@ hu_error_t hu_local_vision_compose(hu_allocator_t *alloc, const char *caption, s
 
 /* Run the pipeline for the image at path, per hu_local_vision_mode():
  *   OFF    -> HU_ERR_NOT_SUPPORTED, nothing runs.
- *   SHADOW -> runs, logs one "[HU_LOCAL_VISION shadow]" aggregate line
- *             (latency, byte counts, disagreement flag — never the text), then
- *             HU_ERR_NOT_SUPPORTED with *out NULL: the caller does what it
- *             does today.
+ *   SHADOW -> HU_ERR_NOT_SUPPORTED at once with *out NULL (the caller does
+ *             what it does today). The pipeline runs on a detached thread, one
+ *             at a time, logs one "[HU_LOCAL_VISION shadow]" aggregate line
+ *             (latency, byte counts, disagreement flag — never the text) and
+ *             appends the caption/OCR to the owner-only 0600 sample store
+ *             <state>/local_vision_shadow.jsonl (latest 50) for the promotion
+ *             read.
  *   LIVE   -> HU_OK with the composed description (caller frees len + 1), or
  *             an error with *out NULL when it failed or timed out. */
 hu_error_t hu_local_vision_describe(hu_allocator_t *alloc, const char *path, size_t path_len,
                                     char **out, size_t *out_len);
+
+/* Pure. The OCR helper's outcome: HU_OK on a clean exit 0; HU_ERR_TIMEOUT
+ * only when it was killed (exit_code -1) at or near the budget; any other
+ * signal death (a crash) or non-zero exit is HU_ERR_IO. */
+hu_error_t hu_local_vision_ocr_exit_error(bool success, int exit_code, long elapsed_ms,
+                                          long budget_ms);
 
 #if defined(HU_IS_TEST) && HU_IS_TEST
 /* Test seams. Without them a test build never opens a socket or runs a
@@ -79,6 +88,8 @@ typedef hu_error_t (*hu_local_vision_ocr_fn)(hu_allocator_t *alloc, const char *
 void hu_local_vision_set_test_hooks(hu_local_vision_caption_fn caption, hu_local_vision_ocr_fn ocr);
 /* The last aggregate log line written (shadow or live), "" before any. */
 const char *hu_local_vision_test_last_log(void);
+/* Block until the background shadow job (if any) has finished. */
+void hu_local_vision_test_wait_shadow(void);
 #endif
 
 #endif /* HU_CONTEXT_LOCAL_VISION_H */

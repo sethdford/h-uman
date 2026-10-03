@@ -11,13 +11,17 @@
 #include "human/core/http.h"
 #include "human/core/json.h"
 #include "human/core/log.h"
+#include "human/core/paths.h"
 #include "human/core/process_util.h"
 #include "human/core/string.h"
 #include "human/core/time.h"
+#include <fcntl.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #define LV_CAPTION_CAP 280 /* bytes of caption kept */
@@ -272,6 +276,18 @@ static hu_error_t lv_caption_http(hu_allocator_t *alloc, const char *url, const 
 #endif
 }
 
+hu_error_t hu_local_vision_ocr_exit_error(bool success, int exit_code, long elapsed_ms,
+                                          long budget_ms) {
+    if (success && exit_code == 0)
+        return HU_OK;
+    /* exit_code -1 is any signal death. The timeout path SIGKILLs at the
+     * budget (whole seconds, floored), so only a death near it is a timeout;
+     * an early one is the helper crashing. */
+    if (exit_code == -1 && elapsed_ms >= budget_ms - 1000)
+        return HU_ERR_TIMEOUT;
+    return HU_ERR_IO;
+}
+
 static hu_error_t lv_ocr_exec(hu_allocator_t *alloc, const char *path, long timeout_ms, char **json,
                               size_t *json_len) {
 #if (defined(HU_IS_TEST) && HU_IS_TEST) || !defined(__APPLE__)
@@ -289,11 +305,13 @@ static hu_error_t lv_ocr_exec(hu_allocator_t *alloc, const char *path, long time
     const char *argv[] = {bin, path, NULL};
     long secs = timeout_ms / 1000;
     hu_run_result_t r = {0};
+    int64_t t = hu_time_get_current_ms();
     hu_error_t err =
         hu_process_run_with_timeout(alloc, argv, NULL, 65536, (unsigned)(secs < 1 ? 1 : secs), &r);
-    if (err == HU_OK && r.exit_code == -1)
-        err = HU_ERR_TIMEOUT;
-    else if (err == HU_OK && (!r.success || r.exit_code != 0 || !r.stdout_buf))
+    if (err == HU_OK)
+        err = hu_local_vision_ocr_exit_error(r.success, r.exit_code,
+                                             (long)(hu_time_get_current_ms() - t), timeout_ms);
+    if (err == HU_OK && !r.stdout_buf)
         err = HU_ERR_IO;
     if (err == HU_OK) {
         *json = hu_strndup(alloc, r.stdout_buf, r.stdout_len);
@@ -352,6 +370,8 @@ typedef struct lv_stats {
     int64_t caption_ms, ocr_ms;
     size_t caption_bytes, ocr_bytes;
     bool disagree;
+    char caption[LV_CAPTION_CAP * 2]; /* raw VLM text, for the owner-only shadow sample */
+    char ocr[LV_OCR_CAP * 2];
 } lv_stats_t;
 
 static hu_error_t lv_post_caption(hu_allocator_t *alloc, const char *path, size_t path_len,
@@ -478,6 +498,8 @@ static hu_error_t lv_run(hu_allocator_t *alloc, const char *path, size_t path_le
         ocr_n = lv_ocr_text(oj, ocr, sizeof(ocr));
     st->caption_bytes = caption ? strlen(caption) : 0;
     st->ocr_bytes = ocr_n;
+    snprintf(st->caption, sizeof(st->caption), "%s", caption ? caption : "");
+    snprintf(st->ocr, sizeof(st->ocr), "%.*s", (int)ocr_n, ocr);
 
     hu_error_t err = hu_local_vision_compose(alloc, caption, st->caption_bytes, ocr_n ? ocr : NULL,
                                              ocr_n, out, out_len, &st->disagree);
@@ -497,18 +519,206 @@ static hu_error_t lv_run(hu_allocator_t *alloc, const char *path, size_t path_le
 
 /* One aggregate line per photo: timings, byte counts, a flag. Never the
  * caption, the OCR text, the path or who sent it. */
-static void lv_log(hu_gate_mode_t mode, const lv_stats_t *st, int64_t ms, hu_error_t err) {
+static void lv_log(hu_gate_mode_t mode, const lv_stats_t *st, int64_t ms, const char *result) {
     char line[256];
     snprintf(line, sizeof(line),
              "[HU_LOCAL_VISION %s] ms=%lld caption_ms=%lld ocr_ms=%lld caption_bytes=%zu "
              "ocr_bytes=%zu disagree=%d result=%s",
              mode == HU_GATE_LIVE ? "live" : "shadow", (long long)ms, (long long)st->caption_ms,
-             (long long)st->ocr_ms, st->caption_bytes, st->ocr_bytes, st->disagree ? 1 : 0,
-             err == HU_OK ? "ok" : hu_error_string(err));
+             (long long)st->ocr_ms, st->caption_bytes, st->ocr_bytes, st->disagree ? 1 : 0, result);
 #if defined(HU_IS_TEST) && HU_IS_TEST
     snprintf(g_last_log, sizeof(g_last_log), "%s", line);
 #endif
     hu_log_info("local_vision", NULL, "%s", line);
+}
+
+/* ── Owner-only shadow samples ──────────────────────────────────────────── */
+
+#define LV_SAMPLE_KEEP     50
+#define LV_SAMPLE_READ_CAP (512u * 1024u)
+#define LV_SAMPLE_FILE     "local_vision_shadow.jsonl"
+
+/* The promotion read (docs/guides/local-vision.md) needs the captions the log
+ * must never carry. They go to <state>/local_vision_shadow.jsonl, mode 0600,
+ * the latest LV_SAMPLE_KEEP rows: {ts, path, caption, ocr, description,
+ * disagree, latency_ms}. No sender: the daemon never passes one in. Rewritten
+ * through a temp file + rename, so a crash leaves the old file whole. */
+static void lv_sample_append(hu_allocator_t *a, const char *path, const lv_stats_t *st,
+                             const char *desc, size_t dl, int64_t ms) {
+#if defined(HU_IS_TEST) && HU_IS_TEST
+    const char *sd = getenv("HU_STATE_DIR");
+    if (!sd || !sd[0])
+        return; /* a test never writes the real ~/.human */
+#endif
+    char fp[1024], tmp[1100];
+    int n = hu_paths_state(fp, sizeof(fp), "%s", LV_SAMPLE_FILE);
+    if (n <= 0 || snprintf(tmp, sizeof(tmp), "%s.tmp-%d", fp, (int)getpid()) >= (int)sizeof(tmp))
+        return;
+    hu_json_buf_t row;
+    if (hu_json_buf_init(&row, a) != HU_OK)
+        return;
+    hu_error_t e = hu_json_buf_append_raw(&row, "{", 1);
+    if (!e)
+        e = hu_json_append_key_int(&row, "ts", 2, (long long)(hu_time_wall_ms() / 1000));
+    if (!e)
+        e = hu_json_buf_append_raw(&row, ",", 1);
+    if (!e)
+        e = hu_json_append_key_value(&row, "path", 4, path, strlen(path));
+    if (!e)
+        e = hu_json_buf_append_raw(&row, ",", 1);
+    if (!e)
+        e = hu_json_append_key_value(&row, "caption", 7, st->caption, strlen(st->caption));
+    if (!e)
+        e = hu_json_buf_append_raw(&row, ",", 1);
+    if (!e)
+        e = hu_json_append_key_value(&row, "ocr", 3, st->ocr, strlen(st->ocr));
+    if (!e)
+        e = hu_json_buf_append_raw(&row, ",", 1);
+    if (!e)
+        e = hu_json_append_key_value(&row, "description", 11, desc, dl);
+    if (!e)
+        e = hu_json_buf_append_raw(&row, ",", 1);
+    if (!e)
+        e = hu_json_append_key_bool(&row, "disagree", 8, st->disagree);
+    if (!e)
+        e = hu_json_buf_append_raw(&row, ",", 1);
+    if (!e)
+        e = hu_json_append_key_int(&row, "latency_ms", 10, (long long)ms);
+    if (!e)
+        e = hu_json_buf_append_raw(&row, "}\n", 2);
+
+    char *old = NULL;
+    size_t old_n = 0, keep = 0;
+    FILE *f = e ? NULL : fopen(fp, "rb");
+    if (f) {
+        old = (char *)a->alloc(a->ctx, LV_SAMPLE_READ_CAP);
+        if (old)
+            old_n = fread(old, 1, LV_SAMPLE_READ_CAP, f);
+        fclose(f);
+    }
+    if (old_n > 0) { /* keep the last LV_SAMPLE_KEEP - 1 complete lines */
+        size_t lines = 0, k = old_n;
+        if (old[old_n - 1] != '\n') /* drop a torn last line */
+            while (k > 0 && old[k - 1] != '\n')
+                k--;
+        old_n = k;
+        while (k > 0) {
+            size_t j = k - 1;
+            while (j > 0 && old[j - 1] != '\n')
+                j--;
+            if (++lines > LV_SAMPLE_KEEP - 1)
+                break;
+            keep = old_n - j;
+            k = j;
+        }
+    }
+    int fd = e ? -1 : open(tmp, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0600);
+    bool ok = fd >= 0 && fchmod(fd, 0600) == 0;
+    if (ok && keep > 0)
+        ok = write(fd, old + old_n - keep, keep) == (ssize_t)keep;
+    if (ok)
+        ok = write(fd, row.ptr, row.len) == (ssize_t)row.len;
+    if (fd >= 0)
+        close(fd);
+    if (ok)
+        ok = rename(tmp, fp) == 0;
+    if (!ok && fd >= 0)
+        unlink(tmp);
+    if (!ok && !e)
+        hu_log_warn("local_vision", NULL, "[HU_LOCAL_VISION shadow] sample store not written");
+    if (old)
+        a->free(a->ctx, old, LV_SAMPLE_READ_CAP);
+    hu_json_buf_free(&row);
+}
+
+/* ── Detached shadow job ────────────────────────────────────────────────── */
+
+/* SHADOW never holds the reply (#617 review): the pipeline runs on its own
+ * thread with a private copy of the path, at most one at a time; a photo that
+ * arrives while one is running is logged result=busy and skipped. */
+static atomic_bool g_shadow_busy;
+#if defined(HU_IS_TEST) && HU_IS_TEST
+static pthread_t g_shadow_tid;
+static bool g_shadow_joinable;
+
+void hu_local_vision_test_wait_shadow(void) {
+    if (g_shadow_joinable) {
+        pthread_join(g_shadow_tid, NULL);
+        g_shadow_joinable = false;
+    }
+}
+#endif
+
+typedef struct lv_shadow_job {
+    char *path;
+    size_t path_len;
+} lv_shadow_job_t;
+
+static void *lv_shadow_thread(void *arg) {
+    lv_shadow_job_t *job = (lv_shadow_job_t *)arg;
+    hu_allocator_t a = hu_system_allocator();
+    lv_stats_t *st = (lv_stats_t *)a.alloc(a.ctx, sizeof(*st));
+    if (st) {
+        memset(st, 0, sizeof(*st));
+        int64_t t0 = hu_time_get_current_ms();
+        char *desc = NULL;
+        size_t dl = 0;
+        hu_error_t err = lv_run(&a, job->path, job->path_len, t0, st, &desc, &dl);
+        int64_t ms = hu_time_get_current_ms() - t0;
+        lv_log(HU_GATE_SHADOW, st, ms, err == HU_OK ? "ok" : hu_error_string(err));
+        if (err == HU_OK && desc)
+            lv_sample_append(&a, job->path, st, desc, dl, ms);
+        if (desc)
+            a.free(a.ctx, desc, dl + 1);
+        a.free(a.ctx, st, sizeof(*st));
+    }
+    a.free(a.ctx, job->path, job->path_len + 1);
+    a.free(a.ctx, job, sizeof(*job));
+    atomic_store(&g_shadow_busy, false);
+    return NULL;
+}
+
+static void lv_shadow_spawn(const char *path, size_t path_len) {
+    if (atomic_exchange(&g_shadow_busy, true)) {
+        lv_stats_t zero = {0};
+        lv_log(HU_GATE_SHADOW, &zero, 0, "busy");
+        return;
+    }
+#if defined(HU_IS_TEST) && HU_IS_TEST
+    hu_local_vision_test_wait_shadow(); /* finished but not yet joined */
+#endif
+    hu_allocator_t a = hu_system_allocator();
+    lv_shadow_job_t *job = (lv_shadow_job_t *)a.alloc(a.ctx, sizeof(*job));
+    char *p = hu_strndup(&a, path, path_len);
+    pthread_attr_t attr;
+    bool attr_ok = pthread_attr_init(&attr) == 0;
+#if !(defined(HU_IS_TEST) && HU_IS_TEST)
+    if (attr_ok)
+        pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+#endif
+    pthread_t tid;
+    bool started = false;
+    if (job && p && attr_ok) {
+        job->path = p;
+        job->path_len = path_len;
+        started = pthread_create(&tid, &attr, lv_shadow_thread, job) == 0;
+    }
+    if (attr_ok)
+        pthread_attr_destroy(&attr);
+    if (started) {
+#if defined(HU_IS_TEST) && HU_IS_TEST
+        g_shadow_tid = tid;
+        g_shadow_joinable = true;
+#endif
+        return;
+    }
+    if (p)
+        a.free(a.ctx, p, path_len + 1);
+    if (job)
+        a.free(a.ctx, job, sizeof(*job));
+    atomic_store(&g_shadow_busy, false);
+    lv_stats_t zero = {0};
+    lv_log(HU_GATE_SHADOW, &zero, 0, "spawn_failed");
 }
 
 hu_error_t hu_local_vision_describe(hu_allocator_t *alloc, const char *path, size_t path_len,
@@ -524,16 +734,24 @@ hu_error_t hu_local_vision_describe(hu_allocator_t *alloc, const char *path, siz
         return HU_ERR_INVALID_ARGUMENT;
     /* HU_LOCAL_VISION activation gated on the 7-day shadow + owner read in
      * docs/guides/local-vision.md: do not default it on without that. */
-    lv_stats_t st = {0};
+    if (mode == HU_GATE_SHADOW) {
+        lv_shadow_spawn(path, path_len); /* returns at once; the caller keeps today's note */
+        return HU_ERR_NOT_SUPPORTED;
+    }
+    lv_stats_t *st = (lv_stats_t *)alloc->alloc(alloc->ctx, sizeof(*st));
+    if (!st)
+        return HU_ERR_OUT_OF_MEMORY;
+    memset(st, 0, sizeof(*st));
     int64_t t0 = hu_time_get_current_ms();
     char *desc = NULL;
     size_t dl = 0;
-    hu_error_t err = lv_run(alloc, path, path_len, t0, &st, &desc, &dl);
-    lv_log(mode, &st, hu_time_get_current_ms() - t0, err);
-    if (mode != HU_GATE_LIVE || err != HU_OK) {
+    hu_error_t err = lv_run(alloc, path, path_len, t0, st, &desc, &dl);
+    lv_log(mode, st, hu_time_get_current_ms() - t0, err == HU_OK ? "ok" : hu_error_string(err));
+    alloc->free(alloc->ctx, st, sizeof(*st));
+    if (err != HU_OK) {
         if (desc)
             alloc->free(alloc->ctx, desc, dl + 1);
-        return mode != HU_GATE_LIVE ? HU_ERR_NOT_SUPPORTED : err;
+        return err;
     }
     *out = desc;
     *out_len = dl;

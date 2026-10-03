@@ -707,14 +707,13 @@ hu_error_t hu_daemon_describe_image(hu_allocator_t *alloc, hu_agent_t *agent,
                                     size_t *desc_len) {
     if (!alloc || !agent)
         return HU_ERR_INVALID_ARGUMENT;
-    /* HU_LOCAL_VISION first: loopback-only caption + OCR, allowed under
-     * local_only. LIVE success answers here; OFF / SHADOW / failure fall
-     * through to exactly what happened before. */
-    if (hu_local_vision_describe(alloc, path, path_len, desc_out, desc_len) == HU_OK)
-        return HU_OK;
     /* local_only: no image bytes leave the process — the cloud is off-limits
      * and the local server is text-only (422s). The caller substitutes a
-     * placeholder the model can react to. */
+     * placeholder the model can react to. HU_LOCAL_VISION deliberately does
+     * NOT run here: the per-message path (hu_daemon_local_photo) describes
+     * each photo once, into the user turn. This step-6 latest-attachment call
+     * would re-describe it on every later turn, uncached, into system-side
+     * context (#617 review). */
     if (hu_local_only_enforced())
         return HU_ERR_NOT_SUPPORTED;
     const char *vp = NULL, *vm = NULL;

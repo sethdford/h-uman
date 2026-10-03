@@ -28,22 +28,24 @@ instead, over loopback only:
   not `http://127.0.0.1`) leaves today's placeholder in place.
 
 Code lives in `src/context/local_vision.c`, with the contract in
-`include/human/context/local_vision.h`. There are two plug-in points, and both
-run before the local_only refusal:
+`include/human/context/local_vision.h`. There is exactly one plug-in point:
+`hu_daemon_local_photo` (`src/daemon/daemon_message_router.c`), called from the
+per-message attachment branch in `src/daemon.c` in place of the local_only
+placeholder. Each photo is described once, when it arrives, into the user turn.
 
-1. `hu_daemon_local_photo` (`src/daemon/daemon_message_router.c`) for the
-   per-message attachment branch in `src/daemon.c`.
-2. `hu_daemon_describe_image` for the latest-attachment context.
-
-This path deliberately does not use `hu_vision_describe_image`, which is the
-cloud path and carries the privacy kill-switch.
+`hu_daemon_describe_image` (the step-6 latest-attachment context) deliberately
+does **not** run local vision and keeps refusing under local_only. Otherwise
+the latest photo would be re-described on every later turn, uncached, and its
+OCR text would land in the system-side "### Image Context" block. This path
+also does not use `hu_vision_describe_image`, which is the cloud path and
+carries the privacy kill-switch.
 
 ## Gate
 
 | `HU_LOCAL_VISION` | Behaviour |
 |---|---|
 | `off` (default, also unset or unknown) | Nothing runs. The output is byte-identical to before (`off_is_byte_identical_to_placeholder`). |
-| `shadow` | The pipeline runs and logs one aggregate line. The model still gets exactly what it got before. |
+| `shadow` | The pipeline runs on a detached background thread (one at a time; a photo arriving while one runs is logged `result=busy` and skipped). The reply is not delayed and the model gets exactly what it got before. One aggregate log line plus one owner-only sample row per photo. |
 | `live` | The description is injected. Any failure falls back to the placeholder. |
 
 Optional overrides:
@@ -63,8 +65,28 @@ The line holds timings, byte counts, the OCR/VLM disagreement flag and the
 result only. It never contains the caption, the OCR text, the path or the
 sender (`shadow_log_line_is_aggregate_only`).
 
-In shadow, a photo reply waits for the pipeline (about 1–2 s, at most 8 s)
-even though the result is discarded.
+Shadow never delays a reply: the caller gets the placeholder immediately
+(`shadow_returns_placeholder_without_waiting`), and the pipeline finishes in
+the background. `ms` is what LIVE would add to the reply.
+
+### Owner-only sample store (shadow)
+
+The promotion read needs the captions, which the log must never carry. In
+shadow, each successful run appends one row to
+`~/.human/local_vision_shadow.jsonl` (resolved through `hu_paths_state`, so
+`HU_STATE_DIR` moves it):
+
+```json
+{"ts":1759460000,"path":"/Users/…/Attachments/…/IMG_1234.HEIC","caption":"…","ocr":"…","description":"…","disagree":false,"latency_ms":1240}
+```
+
+- The file is mode `0600` and keeps only the **latest 50** rows. It is
+  rewritten through a temp file and a rename.
+- `caption` is the raw VLM sentence. `description` is exactly what LIVE would
+  inject, after quotes the OCR did not confirm are cut. `ocr` is the helper's
+  text.
+- Rows hold no contact handle or name, only the attachment path, so the owner
+  can open the photo. Agents must not read this file.
 
 ## Install (owner, once)
 
@@ -118,19 +140,20 @@ grep -h '\[HU_LOCAL_VISION shadow\]' ~/.human/logs/service-loop-error.log* |
 ps -o rss= -p "$(pgrep -f 'mlx_vlm.server.*8746')"
 ```
 
-**4. Quality (owner only, agents never see the photos).** Take 20 recent
-photos and run, for each:
+**4. Quality (owner only, agents never read the store).** Open the latest 20
+rows and look at each photo next to its `description`:
 
 ```bash
-~/.local/bin/hu-vision-ocr <photo>
-curl -s http://127.0.0.1:8746/v1/chat/completions -H 'Content-Type: application/json' \
-  -d "{\"model\":\"mlx-community/gemma-4-e2b-it-4bit\",\"max_tokens\":96,\"temperature\":0,\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"image_url\",\"image_url\":{\"url\":\"data:image/jpeg;base64,$(sips -s format jpeg -Z 2048 <photo> --out /tmp/lv.jpg >/dev/null && base64 -i /tmp/lv.jpg)\"}},{\"type\":\"text\",\"text\":\"Describe this photo in one short, plain sentence, the way a friend would glance at it. Do not quote, read out or guess any words written in it.\"}]}]}" |
-  python3 -c 'import json,sys; print(json.load(sys.stdin)["choices"][0]["message"]["content"])'
+tail -n 20 ~/.human/local_vision_shadow.jsonl |
+  python3 -c 'import json,sys
+for l in sys.stdin:
+    r=json.loads(l); print(r["path"]); print("  ->", r["description"], "(disagree)" if r["disagree"] else "")'
+open "$(tail -n 1 ~/.human/local_vision_shadow.jsonl | python3 -c 'import json,sys; print(json.load(sys.stdin)["path"])')"
 ```
 
-For each photo, score: "would I be fine if the twin said this?" The daemon
-cuts any caption quote the OCR doesn't confirm, so judging the raw caption is
-the stricter test.
+For each one, ask: "would I be fine if the twin said this?" Count the ones you
+accept. `disagree=true` rows are where the VLM quoted text the OCR did not
+read; check that the cut left a sensible sentence.
 
 **Go live when all of these hold:**
 - at least 18 of 20 captions are acceptable;
@@ -151,10 +174,11 @@ Disable the gate. This is immediate and needs no rebuild:
 launchctl bootout gui/$(id -u)/ai.human.service-loop; launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.human.service-loop.plist
 ```
 
-Then free the memory:
+Then free the memory, and delete the samples once the read is done:
 
 ```bash
 scripts/install-local-vision.sh --uninstall
+rm -f ~/.human/local_vision_shadow.jsonl
 ```
 
 With the gate off, nothing calls the server or the helper, so either can stay
