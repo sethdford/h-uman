@@ -134,6 +134,15 @@ static const char *const KNOWN_MESSAGE_COLUMNS[] = {
     "is_stewie",
     /* Sonoma+ */
     "associated_message_emoji",
+    /* Sequoia/Tahoe+ (seen 2026-10-02: logged as drift at every daemon start) */
+    "date_recovered",
+    "is_sos",
+    "is_critical",
+    "bia_reference_id",
+    "is_kt_verified",
+    "fallback_hash",
+    "is_pending_satellite_send",
+    "needs_relay",
     NULL,
 };
 

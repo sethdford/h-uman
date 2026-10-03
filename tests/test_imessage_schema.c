@@ -221,6 +221,39 @@ static void test_schema_probe_drift_canary_captures_unknown_columns(void) {
     (void)unlink(path);
 }
 
+/* macOS 2026: the 8 columns Apple added to `message` (logged as drift at every
+ * daemon start on 2026-10-02) are now known, so a current chat.db is clean. */
+static const char *tahoe_schema_sql = "CREATE TABLE message ("
+                                      "  ROWID INTEGER PRIMARY KEY AUTOINCREMENT,"
+                                      "  guid TEXT UNIQUE,"
+                                      "  text TEXT,"
+                                      "  handle_id INTEGER,"
+                                      "  date INTEGER DEFAULT 0,"
+                                      "  is_from_me INTEGER DEFAULT 0,"
+                                      "  associated_message_emoji TEXT,"
+                                      "  date_recovered INTEGER DEFAULT 0,"
+                                      "  is_sos INTEGER DEFAULT 0,"
+                                      "  is_critical INTEGER DEFAULT 0,"
+                                      "  bia_reference_id TEXT,"
+                                      "  is_kt_verified INTEGER DEFAULT 0,"
+                                      "  fallback_hash TEXT,"
+                                      "  is_pending_satellite_send INTEGER DEFAULT 0,"
+                                      "  needs_relay INTEGER DEFAULT 0"
+                                      ");";
+
+static void test_schema_probe_tahoe_columns_are_not_drift(void) {
+    char path[256];
+    make_tmp_db_path(path, sizeof(path));
+    HU_ASSERT_EQ(build_db(path, tahoe_schema_sql), 0);
+    hu_imessage_schema_reset_cache();
+
+    hu_imessage_schema_caps_t caps;
+    HU_ASSERT_EQ(hu_imessage_schema_probe(path, &caps), HU_OK);
+    HU_ASSERT_TRUE(caps.probed);
+    HU_ASSERT_EQ((int)caps.unknown_column_count, 0);
+    (void)unlink(path);
+}
+
 static void test_schema_probe_caches_result_across_calls(void) {
     char path[256];
     make_tmp_db_path(path, sizeof(path));
@@ -294,6 +327,7 @@ void run_imessage_schema_tests(void) {
     HU_RUN_TEST(test_schema_probe_ventura_has_thread_and_retract_not_emoji);
     HU_RUN_TEST(test_schema_probe_sonoma_has_associated_message_emoji);
     HU_RUN_TEST(test_schema_probe_drift_canary_captures_unknown_columns);
+    HU_RUN_TEST(test_schema_probe_tahoe_columns_are_not_drift);
     HU_RUN_TEST(test_schema_probe_caches_result_across_calls);
     HU_RUN_TEST(test_schema_probe_rejects_null_out);
     HU_RUN_TEST(test_schema_probe_returns_io_for_nonexistent_db);
