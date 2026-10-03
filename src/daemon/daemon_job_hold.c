@@ -11,6 +11,7 @@
 #include "human/core/log_redact.h"
 #include "human/core/time.h"
 #include "human/daemon.h"
+#include "human/daemon/owner_notify.h"
 #include "human/ml/mlx_admin.h"
 #include <stdio.h>
 #include <string.h>
@@ -20,6 +21,10 @@ static hu_daemon_job_hold_metrics_t g_metrics;
 static hu_job_hold_shadow_entry_t g_shadow[HU_JOB_HOLD_SHADOW_SLOTS];
 static size_t g_shadow_next;
 static int64_t g_test_now;
+/* LIVE: rowids a release handed to a turn (ring). A failed turn on one of
+ * them means the message is `done` but unanswered. */
+static int64_t g_released[HU_JOB_HOLD_SHADOW_SLOTS];
+static size_t g_released_next;
 #ifdef HU_ENABLE_SQLITE
 static sqlite3 *g_db;
 #endif
@@ -138,6 +143,8 @@ void hu_daemon_job_hold_reset_for_test(void) {
     memset(g_shadow, 0, sizeof(g_shadow));
     g_shadow_next = 0;
     g_test_now = 0;
+    memset(g_released, 0, sizeof(g_released));
+    g_released_next = 0;
     hu_job_hold_release_reset();
 #ifdef HU_ENABLE_SQLITE
     g_db = NULL;
@@ -160,13 +167,54 @@ int64_t hu_job_hold_now(void) {
     return g_test_now ? g_test_now : hu_time_wall_ms() / 1000;
 }
 
-hu_job_probe_t hu_job_hold_probe(const struct hu_config *config) {
+hu_job_probe_t hu_job_hold_probe(const struct hu_config *config, bool fresh) {
     const char *url = config ? hu_config_get_provider_base_url(config, "mlx_local") : NULL;
     if (!url || !url[0])
         return HU_JOB_PROBE_UNKNOWN;
     hu_allocator_t alloc = hu_system_allocator();
-    return hu_mlx_admin_probe_health(&alloc, url, strlen(url)) ? HU_JOB_PROBE_UP
-                                                               : HU_JOB_PROBE_DOWN;
+    bool up = fresh ? hu_mlx_admin_probe_health_fresh(&alloc, url, strlen(url))
+                    : hu_mlx_admin_probe_health(&alloc, url, strlen(url));
+    return up ? HU_JOB_PROBE_UP : HU_JOB_PROBE_DOWN;
+}
+
+void hu_job_hold_note_released(int64_t rowid) {
+    g_released[g_released_next++ % HU_JOB_HOLD_SHADOW_SLOTS] = rowid;
+}
+
+/* Forget one released message id; true if it was released. */
+static bool forget_released(int64_t id) {
+    if (id <= 0)
+        return false;
+    for (size_t r = 0; r < HU_JOB_HOLD_SHADOW_SLOTS; r++)
+        if (g_released[r] == id) {
+            g_released[r] = 0;
+            return true;
+        }
+    return false;
+}
+
+/* Released messages in this failed batch: forget them (one report each). */
+static size_t take_reinjected(const hu_channel_loop_msg_t *msgs, size_t bs, size_t be) {
+    size_t n = 0;
+    for (size_t i = bs; i <= be; i++)
+        if (forget_released(msgs[i].message_id))
+            n++;
+    return n;
+}
+
+/* A re-injected message whose turn failed again is `done` in the table and
+ * will not be held twice: tell the owner (counts only), or it is lost
+ * silently (model crash-looping across a probe that briefly said UP). */
+static void report_reinjected_failure(hu_observer_t *obs, size_t n, hu_error_t err) {
+    g_metrics.reinjected_failed += n;
+    hu_log_warn("jobq", obs, "[jobq live] re-injected turn failed n=%zu err=%d; owner notified", n,
+                (int)err);
+    char body[200];
+    snprintf(body, sizeof(body),
+             "h-uman could not answer %zu held message%s even after the local model came back. "
+             "Check Messages and reply yourself.",
+             n, n == 1 ? "" : "s");
+    (void)hu_owner_notify_local(body);
 }
 
 bool hu_job_hold_is_imessage(const struct hu_service_channel *ch) {
@@ -261,16 +309,22 @@ static void hold_live(hu_observer_t *obs, const hu_channel_loop_msg_t *msgs, siz
 void hu_daemon_jobs_on_turn_error(struct hu_agent *agent, const struct hu_config *config,
                                   const struct hu_service_channel *ch,
                                   const hu_channel_loop_msg_t *msgs, size_t batch_start,
-                                  size_t batch_end, hu_error_t err) {
+                                  size_t batch_end, const char *batch_key, size_t key_len,
+                                  hu_error_t err) {
     hu_observer_t *obs = agent ? agent->observer : NULL;
-    const char *who = msgs ? msgs[batch_start].session_key : "";
     /* Today's line, byte for byte (it was inline in hu_service_run). */
-    hu_log_error("human", obs, "agent turn failed for %s: %s", HU_LOG_WHO(who, strlen(who)),
+    hu_log_error("human", obs, "agent turn failed for %s: %s", HU_LOG_WHO(batch_key, key_len),
                  hu_error_string(err));
-    if (g_metrics.mode == HU_GATE_OFF || !msgs || batch_end < batch_start ||
-        !hu_agent_error_is_transport(err) || !hu_job_hold_is_imessage(ch))
+    if (g_metrics.mode == HU_GATE_OFF || !msgs || batch_end < batch_start)
         return;
-    hu_job_probe_t probe = hu_job_hold_probe(config);
+    size_t reinjected = take_reinjected(msgs, batch_start, batch_end);
+    if (reinjected)
+        report_reinjected_failure(obs, reinjected, err);
+    if (!hu_agent_error_is_transport(err) || !hu_job_hold_is_imessage(ch))
+        return;
+    /* Fresh: the 60 s cache can still say UP for a server that just died,
+     * which would write the first minute of the outage off as one-offs. */
+    hu_job_probe_t probe = hu_job_hold_probe(config, true);
     if (hu_job_hold_decide(err, probe) != HU_JOB_TURN_HOLD) {
         g_metrics.transport_one_offs++;
         hu_log_info("jobq", obs, "[jobq] one-off err=%d probe=%s", (int)err,

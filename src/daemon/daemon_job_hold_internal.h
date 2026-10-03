@@ -22,8 +22,12 @@ typedef struct hu_job_hold_shadow_entry {
 /* Wall-clock seconds, or the test clock when one is set. */
 int64_t hu_job_hold_now(void);
 
-/* hu_mlx_admin_probe_health against config's mlx_local base URL. */
-hu_job_probe_t hu_job_hold_probe(const struct hu_config *config);
+/* hu_mlx_admin_probe_health (2 s cap, 60 s cache) against config's
+ * mlx_local base URL; `fresh` bypasses and refreshes the cache. */
+hu_job_probe_t hu_job_hold_probe(const struct hu_config *config, bool fresh);
+
+/* LIVE release handed this rowid to a turn (see hu_daemon_jobs_on_turn_error). */
+void hu_job_hold_note_released(int64_t rowid);
 
 /* The channel's vtable name is HU_JOB_HOLD_CHANNEL. */
 bool hu_job_hold_is_imessage(const struct hu_service_channel *ch);

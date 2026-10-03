@@ -230,12 +230,15 @@ int64_t hu_imessage_my_reaction_count(int64_t message_rowid);
 bool hu_imessage_user_responded_recently(void *channel_ctx, const char *handle, size_t handle_len,
                                          int within_seconds);
 
-/** hu_imessage_user_replied_after against the live chat.db (HU_CHATDB
- * honoured), excluding the channel's own sends via its echo ring. False when
- * chat.db cannot be opened (fail open). Used to cancel a held inbound the
- * owner already answered (include/human/daemon/job_hold.h). */
-bool hu_imessage_channel_replied_after(void *channel_ctx, const char *chat_guid, const char *handle,
-                                       int64_t rowid);
+/** hu_imessage_user_replied_after for each of msgs[0..n) (chat_id,
+ * session_key, message_id) against the live chat.db (HU_CHATDB honoured),
+ * opened ONCE, excluding the channel's own sends via its echo ring. Fills
+ * out_replied. HU_ERR_IO when chat.db cannot be opened: the caller must
+ * then treat every answer as unknown. Used before releasing held inbound
+ * messages (include/human/daemon/job_hold.h). */
+hu_error_t hu_imessage_channel_replied_after_batch(void *channel_ctx,
+                                                   const hu_channel_loop_msg_t *msgs, size_t n,
+                                                   bool *out_replied);
 
 /** Query the attachment path for a given message ROWID from chat.db.
  * Returns the attachment file path or NULL if not found. Caller owns. */

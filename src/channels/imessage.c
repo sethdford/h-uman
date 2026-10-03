@@ -1163,15 +1163,20 @@ bool hu_imessage_user_responded_recently(void *channel_ctx, const char *handle, 
     return found;
 }
 
-bool hu_imessage_channel_replied_after(void *channel_ctx, const char *chat_guid, const char *handle,
-                                       int64_t rowid) {
+hu_error_t hu_imessage_channel_replied_after_batch(void *channel_ctx,
+                                                   const hu_channel_loop_msg_t *msgs, size_t n,
+                                                   bool *out_replied) {
+    if (!msgs || !out_replied)
+        return HU_ERR_INVALID_ARGUMENT;
     sqlite3 *db = NULL;
     if (!imessage_open_live_chatdb(&db))
-        return false;
-    bool replied = hu_imessage_user_replied_after(
-        db, chat_guid, handle, rowid, channel_ctx ? imessage_is_ours_cb : NULL, channel_ctx);
+        return HU_ERR_IO;
+    for (size_t i = 0; i < n; i++)
+        out_replied[i] = hu_imessage_user_replied_after(
+            db, msgs[i].chat_id, msgs[i].session_key, msgs[i].message_id,
+            channel_ctx ? imessage_is_ours_cb : NULL, channel_ctx);
     sqlite3_close(db);
-    return replied;
+    return HU_OK;
 }
 #endif
 #endif

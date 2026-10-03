@@ -24,6 +24,7 @@
 #include "human/core/allocator.h"
 #include "human/core/endpoints.h"
 #include "human/core/error.h"
+#include "human/core/http.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -222,18 +223,40 @@ void hu_mlx_admin_reset_observability_for_test(void);
  * a non-curl build. The router stays pure: it consumes the bool this
  * returns via cfg.mlx_local_healthy; it never calls this itself.
  *
- * TIMEOUT CAVEAT: hu_http_get uses the default (~30s) timeout — there is
- * no bounded-timeout GET helper yet. A dead server therefore stalls the
- * FIRST probe of each 60s window up to that bound. mlx_local routing is
- * operator opt-in (the operator is running the server), so this is
- * acceptable for v1; adding a bounded-timeout GET is a tracked follow-up. */
+ * Caps: HU_MLX_ADMIN_PROBE_TIMEOUT_SECS whole request, 1 s connect
+ * (hu_mlx_admin_probe_request_opts). /adapters/current takes no lock on the
+ * threaded mlx-server, so a live server answers in milliseconds even while
+ * generating; a server that accepts and never answers costs one caller at
+ * most 2 s per cache window instead of the 600 s HTTP default. The cache is
+ * stamped after the request. Callers: the per-turn router health probe
+ * (src/agent/model_router_health.c) and the inbound hold path
+ * (src/daemon/daemon_job_hold.c, daemon_job_release.c). */
 bool hu_mlx_admin_probe_health(hu_allocator_t *alloc, const char *base_url, size_t base_url_len);
+
+#define HU_MLX_ADMIN_PROBE_TIMEOUT_SECS         2L
+#define HU_MLX_ADMIN_PROBE_CONNECT_TIMEOUT_SECS 1L
+
+/* The transport caps every health probe runs under. */
+hu_http_request_opts_t hu_mlx_admin_probe_request_opts(void);
+
+/* Same probe, ignoring (and refreshing) the 60 s cache. For a caller that
+ * just saw a transport error and must not trust an UP cached before the
+ * server died. Same short caps. */
+bool hu_mlx_admin_probe_health_fresh(hu_allocator_t *alloc, const char *base_url,
+                                     size_t base_url_len);
 
 /* Test-only: force the probe result without touching the network, and
  * clear the override (also clears the 60s cache). Honored in both curl
  * and non-curl builds. Mirrors hu_mlx_admin_reset_observability_for_test. */
 void hu_mlx_admin_set_test_health(bool healthy);
 void hu_mlx_admin_clear_test_health(void);
+
+#if defined(HU_IS_TEST) && HU_IS_TEST
+/* Probes that reached the transport (cache misses and fresh probes). */
+unsigned hu_mlx_admin_test_probe_requests(void);
+/* Pretend a probe just answered `healthy` (fills the 60 s cache). */
+void hu_mlx_admin_seed_health_cache_for_test(bool healthy);
+#endif
 
 #ifdef __cplusplus
 }

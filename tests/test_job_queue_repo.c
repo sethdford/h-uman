@@ -451,6 +451,35 @@ static void test_job_queue_repo_rejects_bad_arguments(void) {
     jq_close(&f);
 }
 
+static void test_job_queue_repo_count_due_counts_only_due_pending_of_kind(void) {
+    jq_fixture_t f;
+    jq_open(&f);
+    HU_ASSERT_EQ(hu_job_queue_repo_ensure_schema(f.db), HU_OK);
+    int64_t n = -1;
+    HU_ASSERT_EQ(hu_job_queue_repo_count_due(f.db, HU_JOB_KIND_INBOUND_HOLD, 2000, &n), HU_OK);
+    HU_ASSERT_EQ(n, 0);
+    hu_job_spec_t a = sched_spec("hold:a", 1000, "x");
+    a.kind = HU_JOB_KIND_INBOUND_HOLD;
+    hu_job_spec_t later = sched_spec("hold:b", 3000, "x"); /* not due yet */
+    later.kind = HU_JOB_KIND_INBOUND_HOLD;
+    hu_job_spec_t other = sched_spec("sched:c", 1000, "x"); /* other kind */
+    HU_ASSERT_EQ(hu_job_queue_repo_enqueue(f.db, &a, 900, NULL, NULL), HU_OK);
+    HU_ASSERT_EQ(hu_job_queue_repo_enqueue(f.db, &later, 900, NULL, NULL), HU_OK);
+    HU_ASSERT_EQ(hu_job_queue_repo_enqueue(f.db, &other, 900, NULL, NULL), HU_OK);
+    HU_ASSERT_EQ(hu_job_queue_repo_count_due(f.db, HU_JOB_KIND_INBOUND_HOLD, 2000, &n), HU_OK);
+    HU_ASSERT_EQ(n, 1);
+    /* A claimed row is no longer due. */
+    hu_job_t j;
+    size_t got = 0;
+    HU_ASSERT_EQ(
+        hu_job_queue_repo_claim_due(f.db, HU_JOB_KIND_INBOUND_HOLD, 2000, 120, &j, 1, &got), HU_OK);
+    HU_ASSERT_EQ(got, 1);
+    HU_ASSERT_EQ(hu_job_queue_repo_count_due(f.db, HU_JOB_KIND_INBOUND_HOLD, 2000, &n), HU_OK);
+    HU_ASSERT_EQ(n, 0);
+    HU_ASSERT_EQ(hu_job_queue_repo_count_due(f.db, NULL, 2000, &n), HU_ERR_INVALID_ARGUMENT);
+    jq_close(&f);
+}
+
 void run_job_queue_repo_tests(void) {
     HU_TEST_SUITE("job queue repo");
     HU_RUN_TEST(test_job_queue_repo_ensure_schema_is_idempotent);
@@ -466,6 +495,7 @@ void run_job_queue_repo_tests(void) {
     HU_RUN_TEST(test_job_queue_repo_finish_is_fenced_for_claimed_rows);
     HU_RUN_TEST(test_job_queue_repo_expiry_of_sched_sends_uses_due_at);
     HU_RUN_TEST(test_job_queue_repo_rejects_bad_arguments);
+    HU_RUN_TEST(test_job_queue_repo_count_due_counts_only_due_pending_of_kind);
 }
 #else
 void run_job_queue_repo_tests(void) {}
