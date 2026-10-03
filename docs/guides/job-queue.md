@@ -81,8 +81,19 @@ both hold:
 
 - the turn failed with a transport error (`hu_agent_error_is_transport`:
   `HU_ERR_IO`, `HU_ERR_TIMEOUT`, `HU_ERR_PROVIDER_UNAVAILABLE`), and
-- `hu_mlx_admin_probe_health` against the `mlx_local` provider's base URL says
-  the server is down (the probe caches its answer for 60 s).
+- `hu_mlx_admin_probe_health_fresh` against the `mlx_local` provider's base URL
+  says the server is down. The hold side bypasses the probe's 60 s cache: a
+  cached UP from just before the server died would otherwise write the first
+  minute of the outage off as one-offs.
+
+Every health probe runs under a 2 s request cap and a 1 s connect cap
+(`hu_mlx_admin_probe_request_opts`), not the 600 s HTTP default, and its cache
+is stamped after the request. `/v1/adapters/current` takes no lock on the
+threaded mlx-server, so a live server answers in milliseconds even while it is
+generating. A server that accepts connections and never answers costs one
+caller at most 2 s per minute. The per-turn router health probe
+(`src/agent/model_router_health.c`) shares the same probe and gets the same
+bound.
 
 A transport error while the probe is up, or with no `mlx_local` provider
 configured, is a one-off: today's behaviour (no reply), counted and logged as
@@ -97,7 +108,7 @@ in `hu_service_run` and still prints that line unchanged. Release is
 |---|---|---|
 | `off` (default) | Logs the failure, as before. Nothing else. | Calls the channel's poll; output untouched |
 | `shadow` | `[jobq] shadow would hold n=<count> err=<code> probe=down`; remembers rowids in memory only | `[jobq] shadow would expire n=…`, `would release n=… age_max=…s`, `would cancel n=…`; batch untouched |
-| `live` | One `inbound_hold` job per message, key `hold:<chat_id>:<rowid>`; `[jobq live] held n= dup= skipped=` | Expires holds older than 3 h, then, if the probe is up, claims due holds, cancels any the owner already answered, and puts the rest at the front of the poll batch; `[jobq live] released n= age_max= canceled=` |
+| `live` | One `inbound_hold` job per message, key `hold:<chat_id>:<rowid>`; `[jobq live] held n= dup= skipped=` | Expires holds older than 3 h. Then, only if a held row is due, probes the model; if it is up, claims the due holds, checks chat.db once for all of them, cancels any the owner already answered, and puts the rest at the front of the poll batch; `[jobq live] released n= age_max= canceled=` |
 
 `live` needs the jobs table, so it also needs `HU_JOB_QUEUE=shadow|live` and a
 clean start. Without that it runs as `shadow` and logs why at start. Log lines
@@ -109,6 +120,12 @@ is the job's `contact`. If it would exceed 4096 bytes the message is not held
 (`[jobq live] not held: … over the 4096-byte payload cap`) and gets today's
 behaviour.
 
+Nothing is released on a tick whose poll failed, because the daemon may
+drop that batch and the released rows are already `done`. If chat.db cannot be
+opened to check whether the owner already answered, the claimed rows go back to
+`pending` (`[jobq live] chat.db unavailable; n= stay held`) and are tried on a
+later tick. Neither case is released unchecked.
+
 **At most once.** Release runs claim → `mark_sending` → copy into the batch →
 `finish done` inside one poll call, before the turn that answers the message
 runs. A crash before `mark_sending` leaves nothing sent and the lease expires,
@@ -116,15 +133,21 @@ so the row is retried. A crash after it leaves the row `sending`, which start
 recovery turns into `unknown`, never re-claimed: the message may go unanswered,
 never answered twice. A released message whose turn fails again is not held
 again (its key already exists). The daemon's reply dedup still applies to the
-re-injected batch as a second guard.
+re-injected batch as a second guard. If the model dies again right after a
+release, the re-injected turn fails and the message is unanswered. The
+failed-turn hook recognises the released rowids, counts them
+(`reinjected_failed`), logs `[jobq live] re-injected turn failed n=`, and
+sends the owner one banner naming only the count.
 
 **Owner already answered.** Before release, `hu_imessage_channel_replied_after`
 asks chat.db whether a human-written outbound (not one of the daemon's own sends)
 landed in that conversation after the held rowid. If so the job is `canceled`.
 
 **Expiry.** A hold older than 3 hours (the retrain window is 02:00–05:00) is
-`expired` before any release is attempted, and the owner gets one Notification
-Center banner per expiry batch naming only the count.
+`expired` before any release is attempted. The owner gets one Notification
+Center banner per outage, naming only the count. Holds expire on staggered
+ticks, so the banner is re-armed only by a successful release, or after an
+hour.
 
 The contact never gets an "I'm down" message. They see at most a typing
 indicator, then a late normal reply.

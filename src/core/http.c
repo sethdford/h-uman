@@ -56,13 +56,33 @@ static bool hu_http_body_within_cap(const char *url, size_t body_len) {
 }
 
 #if HU_IS_TEST
+/* What the last mock GET would have run under, so tests can pin the caps a
+ * caller passes (e.g. the mlx health probe's 2 s budget). */
+static _Thread_local unsigned s_test_get_count;
+static _Thread_local long s_test_last_get_timeout;
+static _Thread_local long s_test_last_get_connect_timeout;
+
+unsigned hu_http_test_get_count(void) {
+    return s_test_get_count;
+}
+long hu_http_test_last_get_timeout_secs(void) {
+    return s_test_last_get_timeout;
+}
+long hu_http_test_last_get_connect_timeout_secs(void) {
+    return s_test_last_get_connect_timeout;
+}
+
 /* In test mode, skip real HTTP and return mock response */
 static hu_error_t hu_http_get_impl(hu_allocator_t *alloc, const char *url, const char *auth_header,
-                                   long max_redirs, hu_http_response_t *out) {
+                                   long max_redirs, const hu_http_request_opts_t *opts,
+                                   hu_http_response_t *out) {
     (void)max_redirs;
     if (!alloc || !url || !out)
         return HU_ERR_INVALID_ARGUMENT;
     (void)auth_header;
+    s_test_get_count++;
+    s_test_last_get_timeout = hu_http_effective_timeout_secs(opts);
+    s_test_last_get_connect_timeout = hu_http_effective_connect_timeout_secs(opts);
 
     const char *mock = "{\"status\":\"ok\",\"mock\":\"hu_http_get\"}";
     size_t mock_len = strlen(mock);
@@ -232,22 +252,31 @@ static void curl_setup_common(CURL *curl, const hu_http_request_opts_t *opts) {
     curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2TLS);
 }
 
-static hu_error_t hu_http_get_impl(hu_allocator_t *alloc, const char *url, const char *auth_header,
-                                   long max_redirs, hu_http_response_t *out) {
+/* Shared start of a GET/POST: argument check, plain-HTTP warning, a pooled
+ * handle, and a zeroed response. */
+static hu_error_t http_request_begin(hu_allocator_t *alloc, const char *url,
+                                     hu_http_response_t *out, CURL **curl_out) {
     if (!alloc || !url || !out)
         return HU_ERR_INVALID_ARGUMENT;
-
 #if !defined(HU_IS_TEST) || !HU_IS_TEST
     if (strncmp(url, "https://", 8) != 0 && strncmp(url, "http://localhost", 16) != 0 &&
         strncmp(url, "http://127.0.0.1", 16) != 0)
         hu_log_warn("http", NULL, "non-HTTPS URL: scheme enforcement recommended");
 #endif
-
-    CURL *curl = curl_pool_acquire();
-    if (!curl)
+    *curl_out = curl_pool_acquire();
+    if (!*curl_out)
         return HU_ERR_NOT_SUPPORTED;
-
     memset(out, 0, sizeof(*out));
+    return HU_OK;
+}
+
+static hu_error_t hu_http_get_impl(hu_allocator_t *alloc, const char *url, const char *auth_header,
+                                   long max_redirs, const hu_http_request_opts_t *opts,
+                                   hu_http_response_t *out) {
+    CURL *curl = NULL;
+    hu_error_t begin_err = http_request_begin(alloc, url, out, &curl);
+    if (begin_err != HU_OK)
+        return begin_err;
 
     struct curl_slist *headers = NULL;
     char auth_buf[512];
@@ -272,7 +301,7 @@ static hu_error_t hu_http_get_impl(hu_allocator_t *alloc, const char *url, const
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_cb);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &w);
-    curl_setup_common(curl, NULL);
+    curl_setup_common(curl, opts);
     /* Opt-in redirect following (feeds: publishers move RSS URLs behind
      * 301/307 and never come back). HTTPS-only on the hop, so a redirect
      * cannot downgrade the transport; credentials are not re-sent to a
@@ -386,20 +415,10 @@ static hu_error_t hu_http_post_json_impl(hu_allocator_t *alloc, const char *url,
                                          const char *json_body, size_t json_body_len,
                                          const hu_http_request_opts_t *opts,
                                          hu_http_response_t *out) {
-    if (!alloc || !url || !out)
-        return HU_ERR_INVALID_ARGUMENT;
-
-#if !defined(HU_IS_TEST) || !HU_IS_TEST
-    if (strncmp(url, "https://", 8) != 0 && strncmp(url, "http://localhost", 16) != 0 &&
-        strncmp(url, "http://127.0.0.1", 16) != 0)
-        hu_log_warn("http", NULL, "non-HTTPS URL: scheme enforcement recommended");
-#endif
-
-    CURL *curl = curl_pool_acquire();
-    if (!curl)
-        return HU_ERR_NOT_SUPPORTED;
-
-    memset(out, 0, sizeof(*out));
+    CURL *curl = NULL;
+    hu_error_t begin_err = http_request_begin(alloc, url, out, &curl);
+    if (begin_err != HU_OK)
+        return begin_err;
 
     struct curl_slist *headers = NULL;
     char auth_buf[512];
@@ -534,11 +553,13 @@ static hu_error_t hu_http_post_json_stream_impl(hu_allocator_t *alloc, const cha
 }
 #else
 static hu_error_t hu_http_get_impl(hu_allocator_t *alloc, const char *url, const char *auth_header,
-                                   long max_redirs, hu_http_response_t *out) {
+                                   long max_redirs, const hu_http_request_opts_t *opts,
+                                   hu_http_response_t *out) {
     (void)alloc;
     (void)url;
     (void)auth_header;
     (void)max_redirs;
+    (void)opts;
     (void)out;
     return HU_ERR_NOT_SUPPORTED;
 }
@@ -595,7 +616,12 @@ hu_error_t hu_http_post_json_opts(hu_allocator_t *alloc, const char *url, const 
 
 hu_error_t hu_http_get(hu_allocator_t *alloc, const char *url, const char *auth_header,
                        hu_http_response_t *out) {
-    return hu_http_get_impl(alloc, url, auth_header, 0L, out);
+    return hu_http_get_impl(alloc, url, auth_header, 0L, NULL, out);
+}
+
+hu_error_t hu_http_get_opts(hu_allocator_t *alloc, const char *url, const char *auth_header,
+                            const hu_http_request_opts_t *opts, hu_http_response_t *out) {
+    return hu_http_get_impl(alloc, url, auth_header, 0L, opts, out);
 }
 
 hu_error_t hu_http_get_follow(hu_allocator_t *alloc, const char *url, const char *auth_header,
@@ -604,7 +630,7 @@ hu_error_t hu_http_get_follow(hu_allocator_t *alloc, const char *url, const char
         max_redirects = 0;
     if (max_redirects > 10)
         max_redirects = 10;
-    return hu_http_get_impl(alloc, url, auth_header, (long)max_redirects, out);
+    return hu_http_get_impl(alloc, url, auth_header, (long)max_redirects, NULL, out);
 }
 
 #if defined(HU_HTTP_CURL) && !HU_IS_TEST

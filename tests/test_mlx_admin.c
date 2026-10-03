@@ -21,6 +21,7 @@
 
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/core/http.h"
 #include "human/ml/mlx_admin.h"
 #include "test_framework.h"
 #include "test_tmpdir.h"
@@ -162,6 +163,44 @@ static void probe_health_null_args_return_false(void) {
 static void probe_health_unreachable_server_returns_false(void) {
     hu_allocator_t alloc = A();
     hu_mlx_admin_clear_test_health(); /* also clears the 60s cache */
+    HU_ASSERT_FALSE(hu_mlx_admin_probe_health(&alloc, "http://127.0.0.1:9/v1", 21));
+    hu_mlx_admin_clear_test_health();
+}
+
+/* The probe runs under a 2 s budget, not the 600 s HTTP default: a server
+ * that accepts and never answers must not stall the daemon's poll loop.
+ * hu_http_get_opts carries the caps to the transport (the mock records the
+ * caps the real curl request would get). */
+static void probe_health_runs_under_short_caps(void) {
+    hu_http_request_opts_t o = hu_mlx_admin_probe_request_opts();
+    HU_ASSERT_EQ(o.timeout_secs, 2);
+    HU_ASSERT_EQ(o.connect_timeout_secs, 1);
+    hu_allocator_t alloc = A();
+    hu_http_response_t r = {0};
+    unsigned before = hu_http_test_get_count();
+    HU_ASSERT_EQ(hu_http_get_opts(&alloc, "http://127.0.0.1:9/v1/adapters/current", NULL, &o, &r),
+                 HU_OK);
+    hu_http_response_free(&alloc, &r);
+    HU_ASSERT_EQ(hu_http_test_get_count(), before + 1);
+    HU_ASSERT_EQ(hu_http_test_last_get_timeout_secs(), 2);
+    HU_ASSERT_EQ(hu_http_test_last_get_connect_timeout_secs(), 1);
+    /* Plain hu_http_get keeps the provider default. */
+    HU_ASSERT_EQ(hu_http_get(&alloc, "http://127.0.0.1:9/v1/adapters/current", NULL, &r), HU_OK);
+    hu_http_response_free(&alloc, &r);
+    HU_ASSERT_EQ(hu_http_test_last_get_timeout_secs(), HU_HTTP_DEFAULT_TIMEOUT_SECS);
+}
+
+/* A fresh probe ignores a cached UP and refreshes the cache. (Test builds
+ * have no transport, so a real probe answers DOWN.) */
+static void probe_health_fresh_ignores_a_cached_up(void) {
+    hu_allocator_t alloc = A();
+    hu_mlx_admin_clear_test_health();
+    hu_mlx_admin_seed_health_cache_for_test(true);
+    unsigned n = hu_mlx_admin_test_probe_requests();
+    HU_ASSERT_TRUE(hu_mlx_admin_probe_health(&alloc, "http://127.0.0.1:9/v1", 21));
+    HU_ASSERT_EQ(hu_mlx_admin_test_probe_requests(), n); /* served from cache */
+    HU_ASSERT_FALSE(hu_mlx_admin_probe_health_fresh(&alloc, "http://127.0.0.1:9/v1", 21));
+    HU_ASSERT_EQ(hu_mlx_admin_test_probe_requests(), n + 1);
     HU_ASSERT_FALSE(hu_mlx_admin_probe_health(&alloc, "http://127.0.0.1:9/v1", 21));
     hu_mlx_admin_clear_test_health();
 }
@@ -352,4 +391,6 @@ void run_mlx_admin_tests(void) {
     HU_RUN_TEST(probe_health_test_override_false_returns_false);
     HU_RUN_TEST(probe_health_null_args_return_false);
     HU_RUN_TEST(probe_health_unreachable_server_returns_false);
+    HU_RUN_TEST(probe_health_runs_under_short_caps);
+    HU_RUN_TEST(probe_health_fresh_ignores_a_cached_up);
 }

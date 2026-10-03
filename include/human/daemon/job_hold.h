@@ -90,6 +90,8 @@ typedef struct hu_daemon_job_hold_metrics {
     uint64_t expired;            /* LIVE: held longer than HU_JOB_HOLD_MAX_AGE_S */
     uint64_t expiry_notices;     /* LIVE: owner notifications (one per expiry batch) */
     uint64_t release_failures;   /* LIVE: undecodable payload / transition refused */
+    uint64_t release_deferred;   /* LIVE: ticks that kept rows held (chat.db unavailable) */
+    uint64_t reinjected_failed;  /* LIVE: released messages whose turn failed again */
     uint64_t shadow_would_release;
     uint64_t shadow_would_cancel;
     uint64_t shadow_would_expire;
@@ -102,36 +104,48 @@ void hu_daemon_job_hold_reset_for_test(void);
 void hu_daemon_job_hold_set_now_for_test(int64_t now);
 
 /* The daemon's failed-turn hook: logs today's "agent turn failed for <who>"
- * line, then (only for a transport error on the iMessage channel, gate not
- * OFF) probes the model and applies the verdict to msgs[batch_start..
- * batch_end]. `config` supplies the mlx_local base URL for the probe. */
+ * line (who = batch_key), then:
+ *   - if the batch holds messages a release re-injected (LIVE), counts them
+ *     and tells the owner once (counts only): they are `done` and will not
+ *     be held again, so this is the only trace they went unanswered;
+ *   - for a transport error on the iMessage channel, gate not OFF, probes the
+ *     model FRESH (a cached UP may predate the outage) and applies the
+ *     verdict to msgs[batch_start..batch_end].
+ * `config` supplies the mlx_local base URL for the probe. */
 void hu_daemon_jobs_on_turn_error(struct hu_agent *agent, const struct hu_config *config,
                                   const struct hu_service_channel *ch,
                                   const hu_channel_loop_msg_t *msgs, size_t batch_start,
-                                  size_t batch_end, hu_error_t err);
+                                  size_t batch_end, const char *batch_key, size_t key_len,
+                                  hu_error_t err);
 
 /* The daemon's poll call (hu_service_run): runs ch->poll_fn exactly as
- * before, then, on the iMessage channel with the gate not OFF, at most every
- * 30 s:
+ * before. Then, only when the poll succeeded, on the iMessage channel with
+ * the gate not OFF, at most every 30 s:
  *   LIVE    expires held rows older than HU_JOB_HOLD_MAX_AGE_S (one owner
- *           notification per expiry batch); if the model probe is UP, claims
- *           due inbound_hold rows that fit in max_msgs, cancels any the owner
- *           already answered, and puts the rest BEFORE the polled messages
+ *           notification per outage, re-armed by a release or after 1 h);
+ *           if due rows remain, probes the model (cached, 2 s cap) and when
+ *           it is UP claims the due inbound_hold rows that fit in max_msgs,
+ *           checks chat.db ONCE for the whole set, cancels the ones the owner
+ *           already answered and puts the rest BEFORE the polled messages
  *           (oldest first) so they take the normal turn. Each row goes
  *           claimed -> sending -> done before this returns, i.e. before any
- *           turn runs: a held message is handed to a turn at most once.
+ *           turn runs: a held message is handed to a turn at most once. If
+ *           chat.db cannot be read the rows go back to pending (never released
+ *           unchecked).
  *   SHADOW  logs `would expire n` / `would release n age_max=` /
  *           `would cancel n` for the in-memory would-holds; msgs unchanged.
- * OFF returns poll_fn's result and output untouched. */
+ * OFF (or a failed poll) returns poll_fn's result and output untouched. */
 hu_error_t hu_daemon_jobs_poll(struct hu_service_channel *ch, hu_allocator_t *alloc,
                                struct hu_agent *agent, const struct hu_config *config,
                                hu_channel_loop_msg_t *msgs, size_t max_msgs, size_t *out_count);
 
-/* Did the owner answer this conversation after `rowid`? Default: chat.db via
- * hu_imessage_channel_replied_after (macOS iMessage builds; false elsewhere
- * and in tests). Tests inject a stub; NULL restores the default. */
-typedef bool (*hu_job_hold_replied_fn)(void *channel_ctx, const char *chat_id, const char *handle,
-                                       int64_t rowid);
+/* Did the owner answer each conversation after its message? One call per
+ * tick for all claimed rows (one chat.db open). Fills out_replied[0..n);
+ * non-OK means "could not tell" and nothing is released. Default: chat.db via
+ * hu_imessage_channel_replied_after_batch (macOS iMessage builds; "nobody
+ * replied" elsewhere and in tests). Tests inject a stub; NULL restores it. */
+typedef hu_error_t (*hu_job_hold_replied_fn)(void *channel_ctx, const hu_channel_loop_msg_t *msgs,
+                                             size_t n, bool *out_replied);
 void hu_daemon_job_hold_set_replied_fn_for_test(hu_job_hold_replied_fn fn);
 
 #ifdef HU_ENABLE_SQLITE

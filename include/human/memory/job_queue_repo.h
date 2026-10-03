@@ -172,6 +172,11 @@ hu_error_t hu_job_queue_repo_recover_on_start(sqlite3 *db, int64_t now, int64_t 
 hu_error_t hu_job_queue_repo_expire_older_than(sqlite3 *db, const char *kind, int64_t cutoff,
                                                int64_t now, int64_t *out_n);
 
+/* pending rows of `kind` (required) with due_at <= now: what claim_due
+ * would hand out. Lets a caller skip expensive work (a model probe) when
+ * there is nothing to release. */
+hu_error_t hu_job_queue_repo_count_due(sqlite3 *db, const char *kind, int64_t now, int64_t *out_n);
+
 hu_error_t hu_job_queue_repo_counts(sqlite3 *db, hu_job_queue_counts_t *out);
 
 #ifdef __cplusplus
