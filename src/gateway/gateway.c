@@ -1488,6 +1488,21 @@ int hu_gateway_test_pair_request(hu_allocator_t *alloc, void *guard, size_t max_
 
 /* ── Main gateway run loop (poll-based) ─────────────────────────────────── */
 
+void hu_gateway_harden_signals(void) {
+#ifdef HU_GATEWAY_POSIX
+    signal(SIGPIPE, SIG_IGN);
+#endif
+}
+
+void hu_gateway_socket_no_sigpipe(int fd) {
+#if defined(HU_GATEWAY_POSIX) && defined(SO_NOSIGPIPE)
+    int one = 1;
+    (void)setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one));
+#else
+    (void)fd;
+#endif
+}
+
 hu_error_t hu_gateway_run(hu_allocator_t *alloc, const char *host, uint16_t port,
                           const hu_gateway_config_t *config) {
     (void)host;
@@ -1512,6 +1527,7 @@ hu_error_t hu_gateway_run(hu_allocator_t *alloc, const char *host, uint16_t port
         return HU_OK;
     }
 
+    hu_gateway_harden_signals();
     s_cors_origins = cfg.cors_origins;
     s_cors_origins_len = cfg.cors_origins_len;
 
@@ -1751,6 +1767,7 @@ hu_error_t hu_gateway_run(hu_allocator_t *alloc, const char *host, uint16_t port
             int client = accept(fd, (struct sockaddr *)&client_addr, &client_len);
             if (client < 0)
                 continue;
+            hu_gateway_socket_no_sigpipe(client);
 
             char client_ip[64];
             inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, sizeof(client_ip));

@@ -120,9 +120,49 @@ static void test_gateway_config_defaults(void) {
     HU_ASSERT_EQ(cfg.cors_origins_len, 0);
 }
 
+#if defined(HU_GATEWAY_POSIX)
+#include <signal.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
+/* The standalone `human gateway` died with SIGPIPE when a voice client quit mid-reply. */
+static void gateway_harden_signals_ignores_sigpipe(void) {
+    struct sigaction prev, now;
+    HU_ASSERT_EQ(sigaction(SIGPIPE, NULL, &prev), 0);
+    signal(SIGPIPE, SIG_DFL);
+    hu_gateway_harden_signals();
+    HU_ASSERT_EQ(sigaction(SIGPIPE, NULL, &now), 0);
+    HU_ASSERT_TRUE(now.sa_handler == SIG_IGN);
+    (void)sigaction(SIGPIPE, &prev, NULL);
+}
+
+#ifdef SO_NOSIGPIPE
+static void gateway_socket_no_sigpipe_sets_the_option(void) {
+    int sv[2];
+    HU_ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
+    int v = -1;
+    socklen_t len = sizeof(v);
+    HU_ASSERT_EQ(getsockopt(sv[0], SOL_SOCKET, SO_NOSIGPIPE, &v, &len), 0);
+    HU_ASSERT_EQ(v, 0);
+    hu_gateway_socket_no_sigpipe(sv[0]);
+    len = sizeof(v);
+    HU_ASSERT_EQ(getsockopt(sv[0], SOL_SOCKET, SO_NOSIGPIPE, &v, &len), 0);
+    HU_ASSERT_TRUE(v != 0);
+    close(sv[0]);
+    close(sv[1]);
+}
+#endif
+#endif
+
 void run_gateway_tests(void) {
     HU_TEST_SUITE("gateway");
     HU_RUN_TEST(test_gateway_run_does_not_bind_in_test_mode);
+#if defined(HU_GATEWAY_POSIX)
+    HU_RUN_TEST(gateway_harden_signals_ignores_sigpipe);
+#ifdef SO_NOSIGPIPE
+    HU_RUN_TEST(gateway_socket_no_sigpipe_sets_the_option);
+#endif
+#endif
     HU_RUN_TEST(test_health_mark_ok_then_readiness);
     HU_RUN_TEST(test_health_mark_error_then_not_ready);
     HU_RUN_TEST(test_health_empty_registry_ready);
