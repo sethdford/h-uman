@@ -14,6 +14,7 @@
 #include "human/agent/awareness.h"
 #include "human/agent/outcomes.h"
 #include "human/agent/proactive.h"
+#include "human/agent/spoken_turn.h"
 #include "human/agent/turn.h"
 #include "human/context/contact_style_overlay.h"
 #include "human/context/emotional_state.h"
@@ -537,7 +538,7 @@ hu_error_t hu_turn_context(hu_turn_ctx_t *turn_ctx) {
 
     /* Build cross-app PWA context */
 #if HU_HAS_PWA
-    {
+    if (hu_spoken_turn_wants_app_context(agent->spoken_turn)) {
         char *pwa_ctx = NULL;
         size_t pwa_ctx_len = 0;
         hu_error_t pwa_err = hu_pwa_context_build(agent->alloc, &pwa_ctx, &pwa_ctx_len);

@@ -135,6 +135,11 @@ static void spoken_turn_lean_head_has_fewer_examples_and_spoken_directive(void) 
     hu_persona_deinit(&alloc, &p);
 }
 
+static void spoken_turn_skips_open_app_context_text_keeps_it(void) {
+    HU_ASSERT_TRUE(hu_spoken_turn_wants_app_context(false));
+    HU_ASSERT_FALSE(hu_spoken_turn_wants_app_context(true));
+}
+
 void run_spoken_turn_tests(void) {
     HU_TEST_SUITE("spoken_turn");
     HU_RUN_TEST(spoken_turn_caps_shrink_memory_and_examples);
@@ -143,4 +148,5 @@ void run_spoken_turn_tests(void) {
     HU_RUN_TEST(spoken_turn_end_restores_a_lean_prompt_that_was_already_on);
     HU_RUN_TEST(spoken_turn_begin_off_and_shadow_leave_agent_alone);
     HU_RUN_TEST(spoken_turn_lean_head_has_fewer_examples_and_spoken_directive);
+    HU_RUN_TEST(spoken_turn_skips_open_app_context_text_keeps_it);
 }

@@ -43,6 +43,33 @@ static void turn_context_without_a_plan_leaves_it_out(void) {
     hu_turn_ctx_free(turn_ctx);
     tf_close(&f);
 }
+
+#if HU_HAS_PWA
+/* The open-browser-app scan (HU_IS_TEST stub: "[Slack] Test: hello from alice") is part
+ * of a text turn's awareness context and skipped on a spoken turn. */
+static void turn_context_spoken_turn_skips_the_open_app_scan(void) {
+    tf_fixture_t f;
+    HU_ASSERT_TRUE(tf_open(&f, NULL, 0, true, HU_AUTONOMY_AUTONOMOUS));
+
+    hu_turn_ctx_t *text_turn =
+        hu_turn_ctx_new(&f.agent, "how was your day", 16, &f.resp, &f.resp_len);
+    HU_ASSERT_NOT_NULL(text_turn);
+    HU_ASSERT_EQ(hu_turn_context(text_turn), HU_OK);
+    HU_ASSERT_NOT_NULL(text_turn->context.awareness_ctx);
+    HU_ASSERT_STR_CONTAINS(text_turn->context.awareness_ctx, "[Slack] Test: hello from alice");
+    hu_turn_ctx_free(text_turn);
+
+    f.agent.spoken_turn = true;
+    hu_turn_ctx_t *spoken = hu_turn_ctx_new(&f.agent, "how was your day", 16, &f.resp, &f.resp_len);
+    HU_ASSERT_NOT_NULL(spoken);
+    HU_ASSERT_EQ(hu_turn_context(spoken), HU_OK);
+    HU_ASSERT_TRUE(!spoken->context.awareness_ctx ||
+                   strstr(spoken->context.awareness_ctx, "[Slack]") == NULL);
+    hu_turn_ctx_free(spoken);
+    f.agent.spoken_turn = false;
+    tf_close(&f);
+}
+#endif /* HU_HAS_PWA */
 #endif /* HU_ENABLE_SQLITE */
 
 void run_turn_context_tests(void) {
@@ -51,5 +78,8 @@ void run_turn_context_tests(void) {
 #ifdef HU_ENABLE_SQLITE
     HU_RUN_TEST(turn_context_folds_the_plan_into_the_intelligence_context);
     HU_RUN_TEST(turn_context_without_a_plan_leaves_it_out);
+#if HU_HAS_PWA
+    HU_RUN_TEST(turn_context_spoken_turn_skips_the_open_app_scan);
+#endif
 #endif
 }
