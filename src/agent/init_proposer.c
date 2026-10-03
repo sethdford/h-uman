@@ -1256,8 +1256,9 @@ hu_error_t hu_init_proposer_decide_once(hu_allocator_t *alloc, struct hu_provide
                                                    cap);
     char *response = NULL;
     size_t response_len = 0;
-    hu_error_t err = init_proposer_call_llm(alloc, provider, s_system_prompt, user_msg,
-                                            model ? model : "", &response, &response_len);
+    hu_error_t err =
+        init_proposer_call_llm(alloc, provider, hu_init_proposer_system_prompt_for(inputs),
+                               user_msg, model ? model : "", &response, &response_len);
     alloc->free(alloc->ctx, user_msg, cap);
     if (err != HU_OK || !response || response_len == 0) {
         if (response)
