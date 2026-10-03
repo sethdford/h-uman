@@ -8,7 +8,9 @@
 
 #ifdef HU_ENABLE_SQLITE
 
+#include "human/core/log.h"
 #include "human/memory/repo_util.h"
+#include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -176,20 +178,48 @@ static hu_error_t jq_select_due(sqlite3 *db, const char *kind, int64_t now, hu_j
     return HU_OK;
 }
 
+/* Open this module's own write transaction. The memory.db handle is shared
+ * (FULLMUTEX) with gateway worker threads: if one of them has a transaction
+ * open, our statements would join it and its ROLLBACK could undo a committed
+ * `sending`, which recovery would then hand out again. Refuse instead. The
+ * BEGIN itself is the atomic test: it fails when a transaction is open. */
+static hu_error_t jq_begin(sqlite3 *db) {
+    static atomic_bool warned = false;
+    if (sqlite3_get_autocommit(db) &&
+        sqlite3_exec(db, "BEGIN IMMEDIATE;", NULL, NULL, NULL) == SQLITE_OK)
+        return HU_OK;
+    if (sqlite3_get_autocommit(db))
+        return HU_ERR_MEMORY_STORE; /* BEGIN failed for another reason (locked) */
+    hu_log_warn_once(&warned, "jobq", NULL,
+                     "[jobq] refused: a transaction is already open on the shared memory.db "
+                     "connection; the queue never joins another subsystem's transaction");
+    return HU_ERR_IO_BUSY;
+}
+
+/* COMMIT on success, else ROLLBACK. A failed COMMIT is an error: the caller
+ * must not act (send) on a transition that did not stick. */
+static hu_error_t jq_end(sqlite3 *db, hu_error_t err) {
+    if (err == HU_OK && sqlite3_exec(db, "COMMIT;", NULL, NULL, NULL) == SQLITE_OK)
+        return HU_OK;
+    (void)sqlite3_exec(db, "ROLLBACK;", NULL, NULL, NULL);
+    return err == HU_OK ? HU_ERR_MEMORY_STORE : err;
+}
+
 hu_error_t hu_job_queue_repo_claim_due(sqlite3 *db, const char *kind, int64_t now, int64_t lease_s,
                                        hu_job_t *out, size_t cap, size_t *out_n) {
     if (!db || !out || cap == 0 || !out_n || lease_s <= 0 || (kind && !jq_kind_is_valid(kind)))
         return HU_ERR_INVALID_ARGUMENT;
     *out_n = 0;
-    if (sqlite3_exec(db, "BEGIN IMMEDIATE;", NULL, NULL, NULL) != SQLITE_OK)
-        return HU_ERR_MEMORY_STORE;
+    hu_error_t err = jq_begin(db);
+    if (err != HU_OK)
+        return err;
     /* A claim whose lease ran out never reached mark_sending (or it would be
      * in `sending`), so nothing was sent: it is safe to hand out again. */
     int64_t requeue[2] = {now, now};
-    hu_error_t err = jq_exec_i64(db,
-                                 "UPDATE jobs SET state='pending', lease_until=NULL, updated_at=?1 "
-                                 "WHERE state='claimed' AND lease_until < ?2;",
-                                 requeue, 2, NULL);
+    err = jq_exec_i64(db,
+                      "UPDATE jobs SET state='pending', lease_until=NULL, updated_at=?1 "
+                      "WHERE state='claimed' AND lease_until < ?2;",
+                      requeue, 2, NULL);
     if (err == HU_OK)
         err = jq_select_due(db, kind, now, out, cap, out_n);
     int64_t lease_until = now + lease_s;
@@ -201,11 +231,10 @@ hu_error_t hu_job_queue_repo_claim_due(sqlite3 *db, const char *kind, int64_t no
                           claim, 3, NULL);
         out[i].lease_until = lease_until;
     }
-    if (err == HU_OK && sqlite3_exec(db, "COMMIT;", NULL, NULL, NULL) == SQLITE_OK)
-        return HU_OK;
-    (void)sqlite3_exec(db, "ROLLBACK;", NULL, NULL, NULL);
-    *out_n = 0;
-    return err == HU_OK ? HU_ERR_MEMORY_STORE : err;
+    err = jq_end(db, err);
+    if (err != HU_OK)
+        *out_n = 0;
+    return err;
 }
 
 /* Exactly-one-row fenced transition: HU_ERR_NOT_FOUND when nothing matched. */
@@ -222,12 +251,16 @@ hu_error_t hu_job_queue_repo_mark_sending(sqlite3 *db, int64_t id, int64_t lease
     if (!db || id <= 0)
         return HU_ERR_INVALID_ARGUMENT;
     int64_t b[3] = {now, id, lease_until};
-    /* Autocommit: the row is durably `sending` before this returns. */
-    return jq_update_one(db,
-                         "UPDATE jobs SET state='sending', attempts=attempts+1, lease_until=NULL, "
-                         "updated_at=?1 WHERE id=?2 AND state='claimed' AND lease_until=?3 "
-                         "AND lease_until >= ?1;",
-                         b, 3);
+    /* Own transaction: the row is durably `sending` once COMMIT returns. */
+    hu_error_t err = jq_begin(db);
+    if (err != HU_OK)
+        return err;
+    err = jq_update_one(db,
+                        "UPDATE jobs SET state='sending', attempts=attempts+1, lease_until=NULL, "
+                        "updated_at=?1 WHERE id=?2 AND state='claimed' AND lease_until=?3 "
+                        "AND lease_until >= ?1;",
+                        b, 3);
+    return jq_end(db, err);
 }
 
 hu_error_t hu_job_queue_repo_release(sqlite3 *db, int64_t id, int64_t lease_until,
@@ -255,7 +288,7 @@ static const char *jq_finish_sources(const char *state) {
     return NULL;
 }
 
-hu_error_t hu_job_queue_repo_finish(sqlite3 *db, int64_t id, const char *state,
+hu_error_t hu_job_queue_repo_finish(sqlite3 *db, int64_t id, const char *state, int64_t lease_until,
                                     const char *last_error, int64_t now) {
     const char *sources = jq_finish_sources(state);
     if (!db || id <= 0 || !sources)
@@ -263,7 +296,7 @@ hu_error_t hu_job_queue_repo_finish(sqlite3 *db, int64_t id, const char *state,
     char sql[256];
     snprintf(sql, sizeof(sql),
              "UPDATE jobs SET state=?1, last_error=?2, lease_until=NULL, updated_at=?3 "
-             "WHERE id=?4 AND state IN %s;",
+             "WHERE id=?4 AND state IN %s AND (state <> 'claimed' OR lease_until = ?5);",
              sources);
     sqlite3_stmt *st = NULL;
     if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) != SQLITE_OK)
@@ -278,6 +311,7 @@ hu_error_t hu_job_queue_repo_finish(sqlite3 *db, int64_t id, const char *state,
     }
     sqlite3_bind_int64(st, 3, now);
     sqlite3_bind_int64(st, 4, id);
+    sqlite3_bind_int64(st, 5, lease_until);
     return hu_repo_step_update_one(db, st);
 }
 
@@ -289,42 +323,42 @@ hu_error_t hu_job_queue_repo_recover_on_start(sqlite3 *db, int64_t now, int64_t 
         *out_requeued = 0;
     if (!db)
         return HU_ERR_INVALID_ARGUMENT;
-    if (sqlite3_exec(db, "BEGIN IMMEDIATE;", NULL, NULL, NULL) != SQLITE_OK)
-        return HU_ERR_MEMORY_STORE;
+    hu_error_t err = jq_begin(db);
+    if (err != HU_OK)
+        return err;
     int64_t unknown = 0, requeued = 0;
     int64_t b[2] = {now, now};
     /* The send may or may not have happened: at-most-once means never again. */
-    hu_error_t err = jq_exec_i64(db,
-                                 "UPDATE jobs SET state='unknown', last_error='in flight at "
-                                 "restart', updated_at=?1 WHERE state='sending';",
-                                 b, 1, &unknown);
+    err = jq_exec_i64(db,
+                      "UPDATE jobs SET state='unknown', last_error='in flight at "
+                      "restart', updated_at=?1 WHERE state='sending';",
+                      b, 1, &unknown);
     if (err == HU_OK)
         err = jq_exec_i64(db,
                           "UPDATE jobs SET state='pending', lease_until=NULL, updated_at=?1 "
                           "WHERE state='claimed' AND lease_until < ?2;",
                           b, 2, &requeued);
-    if (err == HU_OK && sqlite3_exec(db, "COMMIT;", NULL, NULL, NULL) == SQLITE_OK) {
-        if (out_unknown)
-            *out_unknown = unknown;
-        if (out_requeued)
-            *out_requeued = requeued;
-        return HU_OK;
-    }
-    (void)sqlite3_exec(db, "ROLLBACK;", NULL, NULL, NULL);
-    return err == HU_OK ? HU_ERR_MEMORY_STORE : err;
+    err = jq_end(db, err);
+    if (err == HU_OK && out_unknown)
+        *out_unknown = unknown;
+    if (err == HU_OK && out_requeued)
+        *out_requeued = requeued;
+    return err;
 }
 
 hu_error_t hu_job_queue_repo_expire_older_than(sqlite3 *db, const char *kind, int64_t cutoff,
                                                int64_t now, int64_t *out_n) {
     if (out_n)
         *out_n = 0;
-    if (!db || (kind && !jq_kind_is_valid(kind)))
+    if (!db || !jq_kind_is_valid(kind))
         return HU_ERR_INVALID_ARGUMENT;
     sqlite3_stmt *st = NULL;
+    /* A held message ages from when it was held; a scheduled send ages from
+     * when it was due, so one scheduled far ahead never expires early. */
     if (sqlite3_prepare_v2(db,
                            "UPDATE jobs SET state='expired', last_error='max age', updated_at=?1 "
-                           "WHERE state='pending' AND created_at < ?2 "
-                           "AND (?3 IS NULL OR kind = ?3);",
+                           "WHERE state='pending' AND kind = ?3 AND (CASE kind WHEN 'sched_send' "
+                           "THEN due_at ELSE created_at END) < ?2;",
                            -1, &st, NULL) != SQLITE_OK)
         return HU_ERR_MEMORY_STORE;
     sqlite3_bind_int64(st, 1, now);

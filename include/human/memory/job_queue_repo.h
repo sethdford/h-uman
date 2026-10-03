@@ -35,6 +35,18 @@
  *
  * Callers run hu_job_queue_repo_ensure_schema once (daemon start); the other
  * functions do not re-run the DDL on every call.
+ *
+ * Transactions: claim_due, mark_sending and recover_on_start each run their
+ * own BEGIN IMMEDIATE ... COMMIT and refuse with HU_ERR_IO_BUSY (logged once)
+ * when the connection already has a transaction open. The daemon's memory.db
+ * handle is shared (FULLMUTEX) with gateway worker threads; joining someone
+ * else's transaction would let their ROLLBACK revert a committed `sending`
+ * and turn it into a re-send. A failed COMMIT is reported as an error, so a
+ * caller never sends on a transition that did not stick.
+ *
+ * Durability covers a process crash, not power loss: the shared connection
+ * keeps SQLite's default sync settings, and on macOS fsync does not flush the
+ * drive cache (PRAGMA fullfsync is off). See docs/guides/job-queue.md.
  */
 
 #include "human/core/error.h"
@@ -134,9 +146,12 @@ hu_error_t hu_job_queue_repo_mark_sending(sqlite3 *db, int64_t id, int64_t lease
  *   done             from sending
  *   failed           from claimed or sending (explicit not-delivered)
  *   canceled|expired from pending or claimed
- * Any other state string is HU_ERR_INVALID_ARGUMENT; a row not in an allowed
- * source state is HU_ERR_NOT_FOUND. */
-hu_error_t hu_job_queue_repo_finish(sqlite3 *db, int64_t id, const char *state,
+ * A `claimed` row is only finished when `lease_until` is that claim's token
+ * (same fencing as mark_sending), so a stale worker cannot finish a row a
+ * newer claim owns; pass 0 when the caller holds no claim. Any other state
+ * string is HU_ERR_INVALID_ARGUMENT; a row not in an allowed source state (or
+ * claimed under another token) is HU_ERR_NOT_FOUND. */
+hu_error_t hu_job_queue_repo_finish(sqlite3 *db, int64_t id, const char *state, int64_t lease_until,
                                     const char *last_error, int64_t now);
 
 /* claimed -> pending (a gate deferred it). No attempt is counted. Same
@@ -150,8 +165,10 @@ hu_error_t hu_job_queue_repo_release(sqlite3 *db, int64_t id, int64_t lease_unti
 hu_error_t hu_job_queue_repo_recover_on_start(sqlite3 *db, int64_t now, int64_t *out_unknown,
                                               int64_t *out_requeued);
 
-/* pending rows (of `kind`, NULL = any) created before `cutoff` -> expired.
- * *out_n = rows expired (may be NULL). */
+/* pending rows of `kind` (required) older than `cutoff` -> expired. Age is
+ * measured on created_at for inbound_hold (how long it has been held) and on
+ * due_at for sched_send (how overdue it is), so a send scheduled far ahead
+ * is never expired before it is due. *out_n = rows expired (may be NULL). */
 hu_error_t hu_job_queue_repo_expire_older_than(sqlite3 *db, const char *kind, int64_t cutoff,
                                                int64_t now, int64_t *out_n);
 

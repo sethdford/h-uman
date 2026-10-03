@@ -25,6 +25,25 @@ after that commit, the next start moves the row to `unknown`, and it is never
 claimed or sent again. A claim whose lease expired never reached `sending`,
 so it goes back to `pending` and is retried.
 
+Two limits on that guarantee:
+
+- **Process crash, not power loss.** The queue shares the daemon's `memory.db`
+  connection, which keeps SQLite's default sync settings. On macOS `fsync`
+  does not flush the drive's write cache, so after a power cut a committed
+  `sending` can revert to `claimed` and be retried. Turning on
+  `PRAGMA fullfsync` would fix that, but it would slow every memory write on
+  the shared connection, so it is left off. Revisit it, or give the queue its
+  own connection, before scheduled sends go live.
+- **No shared transactions.** Gateway worker threads use the same connection
+  (opened `FULLMUTEX`). `claim_due`, `mark_sending` and `recover_on_start` run
+  their own `BEGIN IMMEDIATE … COMMIT`. If another transaction is already open
+  on the connection they refuse with `HU_ERR_IO_BUSY`, and log that once,
+  rather than joining it. If they joined, that transaction's `ROLLBACK` could
+  undo a committed `sending`. A failed `COMMIT` is returned as an error, so a
+  worker never sends on a transition that did not stick. A `claimed` row can
+  only be finished (`failed`, `canceled`, `expired`) by the claim that holds its
+  lease.
+
 ## Gate: `HU_JOB_QUEUE=off|shadow|live`
 
 Parsed by `hu_gate_mode_from_env`. Unset, or any value it does not recognise,

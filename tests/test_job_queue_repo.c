@@ -119,7 +119,7 @@ static void test_job_queue_repo_claim_is_exclusive(void) {
 
     HU_ASSERT_EQ(hu_job_queue_repo_mark_sending(f.db, ida, jobs[0].lease_until, 1160), HU_OK);
     HU_ASSERT_EQ(jq_attempts(f.db, ida), 1);
-    HU_ASSERT_EQ(hu_job_queue_repo_finish(f.db, ida, HU_JOB_STATE_DONE, NULL, 1161), HU_OK);
+    HU_ASSERT_EQ(hu_job_queue_repo_finish(f.db, ida, HU_JOB_STATE_DONE, 0, NULL, 1161), HU_OK);
     HU_ASSERT_EQ(jq_count_state(f.db, "done"), 1);
     HU_ASSERT_EQ(jq_count_state(f.db, "pending"), 1);
     jq_close(&f);
@@ -310,14 +310,14 @@ static void test_job_queue_repo_finish_and_shadow_transitions(void) {
     HU_ASSERT_EQ(c.shadow, 1);
     HU_ASSERT_EQ(c.pending, 1);
     /* done requires sending; a pending row cannot be marked done. */
-    HU_ASSERT_EQ(hu_job_queue_repo_finish(f.db, idp, HU_JOB_STATE_DONE, NULL, 950),
+    HU_ASSERT_EQ(hu_job_queue_repo_finish(f.db, idp, HU_JOB_STATE_DONE, 0, NULL, 950),
                  HU_ERR_NOT_FOUND);
-    HU_ASSERT_EQ(hu_job_queue_repo_finish(f.db, idp, HU_JOB_STATE_CANCELED, "owner replied", 950),
-                 HU_OK);
+    HU_ASSERT_EQ(
+        hu_job_queue_repo_finish(f.db, idp, HU_JOB_STATE_CANCELED, 0, "owner replied", 950), HU_OK);
     /* Terminal: cannot be canceled twice, and no unknown state names. */
-    HU_ASSERT_EQ(hu_job_queue_repo_finish(f.db, idp, HU_JOB_STATE_CANCELED, NULL, 951),
+    HU_ASSERT_EQ(hu_job_queue_repo_finish(f.db, idp, HU_JOB_STATE_CANCELED, 0, NULL, 951),
                  HU_ERR_NOT_FOUND);
-    HU_ASSERT_EQ(hu_job_queue_repo_finish(f.db, idp, "sending", NULL, 951),
+    HU_ASSERT_EQ(hu_job_queue_repo_finish(f.db, idp, "sending", 0, NULL, 951),
                  HU_ERR_INVALID_ARGUMENT);
     /* Shadow rows are never claimed. */
     static hu_job_t j[2];
@@ -327,6 +327,101 @@ static void test_job_queue_repo_finish_and_shadow_transitions(void) {
     HU_ASSERT_EQ(hu_job_queue_repo_counts(f.db, &c), HU_OK);
     HU_ASSERT_EQ(c.canceled, 1);
     HU_ASSERT_EQ(c.shadow, 1);
+    jq_close(&f);
+}
+
+static int jq_exec_rc(sqlite3 *db, const char *sql) {
+    return sqlite3_exec(db, sql, NULL, NULL, NULL);
+}
+
+/* The memory.db handle is shared with other threads. Joining a transaction
+ * someone else opened would let their ROLLBACK undo a committed `sending`,
+ * so the queue refuses instead. */
+static void test_job_queue_repo_refuses_inside_an_open_transaction(void) {
+    jq_fixture_t f;
+    jq_open(&f);
+    HU_ASSERT_EQ(hu_job_queue_repo_ensure_schema(f.db), HU_OK);
+    hu_job_spec_t a = sched_spec("sched:txn", 1000, "x");
+    hu_job_spec_t b = sched_spec("sched:txn-b", 1000, "y");
+    int64_t id = 0;
+    HU_ASSERT_EQ(hu_job_queue_repo_enqueue(f.db, &a, 900, &id, NULL), HU_OK);
+    HU_ASSERT_EQ(hu_job_queue_repo_enqueue(f.db, &b, 900, NULL, NULL), HU_OK);
+    static hu_job_t j[1];
+    size_t n = 0;
+    HU_ASSERT_EQ(hu_job_queue_repo_claim_due(f.db, NULL, 1000, 120, j, 1, &n), HU_OK);
+    HU_ASSERT_EQ(n, 1);
+    HU_ASSERT_EQ(j[0].id, id);
+
+    /* Another subsystem opens a transaction on the same connection. */
+    HU_ASSERT_EQ(jq_exec_rc(f.db, "BEGIN;"), SQLITE_OK);
+    HU_ASSERT_EQ(hu_job_queue_repo_mark_sending(f.db, id, j[0].lease_until, 1001), HU_ERR_IO_BUSY);
+    static hu_job_t k[1];
+    HU_ASSERT_EQ(hu_job_queue_repo_claim_due(f.db, NULL, 1001, 120, k, 1, &n), HU_ERR_IO_BUSY);
+    HU_ASSERT_EQ(n, 0);
+    int64_t unknown = -1, requeued = -1;
+    HU_ASSERT_EQ(hu_job_queue_repo_recover_on_start(f.db, 1001, &unknown, &requeued),
+                 HU_ERR_IO_BUSY);
+    /* Nothing leaked into their transaction: it is still open, and the row is
+     * still claimed with no attempt. */
+    HU_ASSERT_EQ(sqlite3_get_autocommit(f.db), 0);
+    HU_ASSERT_EQ(jq_exec_rc(f.db, "ROLLBACK;"), SQLITE_OK);
+    HU_ASSERT_EQ(jq_count_state(f.db, "claimed"), 1);
+    HU_ASSERT_EQ(jq_count_state(f.db, "sending"), 0);
+    HU_ASSERT_EQ(jq_attempts(f.db, id), 0);
+    /* Once the connection is free the same claim proceeds. */
+    HU_ASSERT_EQ(hu_job_queue_repo_mark_sending(f.db, id, j[0].lease_until, 1002), HU_OK);
+    HU_ASSERT_EQ(jq_count_state(f.db, "sending"), 1);
+    jq_close(&f);
+}
+
+static void test_job_queue_repo_finish_is_fenced_for_claimed_rows(void) {
+    jq_fixture_t f;
+    jq_open(&f);
+    HU_ASSERT_EQ(hu_job_queue_repo_ensure_schema(f.db), HU_OK);
+    hu_job_spec_t a = sched_spec("sched:fence-finish", 1000, "x");
+    int64_t id = 0;
+    HU_ASSERT_EQ(hu_job_queue_repo_enqueue(f.db, &a, 900, &id, NULL), HU_OK);
+    static hu_job_t stale[1], fresh[1];
+    size_t n = 0;
+    HU_ASSERT_EQ(hu_job_queue_repo_claim_due(f.db, NULL, 1000, 120, stale, 1, &n), HU_OK);
+    HU_ASSERT_EQ(hu_job_queue_repo_claim_due(f.db, NULL, 1121, 120, fresh, 1, &n), HU_OK);
+    HU_ASSERT_EQ(n, 1);
+    /* The stale worker cannot fail, cancel or expire the new claim. */
+    HU_ASSERT_EQ(
+        hu_job_queue_repo_finish(f.db, id, HU_JOB_STATE_FAILED, stale[0].lease_until, "held", 1122),
+        HU_ERR_NOT_FOUND);
+    HU_ASSERT_EQ(
+        hu_job_queue_repo_finish(f.db, id, HU_JOB_STATE_CANCELED, stale[0].lease_until, NULL, 1122),
+        HU_ERR_NOT_FOUND);
+    HU_ASSERT_EQ(hu_job_queue_repo_finish(f.db, id, HU_JOB_STATE_EXPIRED, 0, NULL, 1122),
+                 HU_ERR_NOT_FOUND);
+    HU_ASSERT_EQ(jq_count_state(f.db, "claimed"), 1);
+    /* The current claimer still owns it. */
+    HU_ASSERT_EQ(hu_job_queue_repo_mark_sending(f.db, id, fresh[0].lease_until, 1123), HU_OK);
+    HU_ASSERT_EQ(hu_job_queue_repo_finish(f.db, id, HU_JOB_STATE_DONE, 0, NULL, 1124), HU_OK);
+    HU_ASSERT_EQ(jq_count_state(f.db, "done"), 1);
+    jq_close(&f);
+}
+
+static void test_job_queue_repo_expiry_of_sched_sends_uses_due_at(void) {
+    jq_fixture_t f;
+    jq_open(&f);
+    HU_ASSERT_EQ(hu_job_queue_repo_ensure_schema(f.db), HU_OK);
+    hu_job_spec_t later = sched_spec("sched:next-week", 50000, "later");
+    hu_job_spec_t overdue = sched_spec("sched:overdue", 2000, "late");
+    HU_ASSERT_EQ(hu_job_queue_repo_enqueue(f.db, &later, 1000, NULL, NULL), HU_OK);
+    HU_ASSERT_EQ(hu_job_queue_repo_enqueue(f.db, &overdue, 1000, NULL, NULL), HU_OK);
+    int64_t expired = -1;
+    /* Both were created at 1000; only the one due before the cutoff expires. */
+    HU_ASSERT_EQ(
+        hu_job_queue_repo_expire_older_than(f.db, HU_JOB_KIND_SCHED_SEND, 10000, 10000, &expired),
+        HU_OK);
+    HU_ASSERT_EQ(expired, 1);
+    HU_ASSERT_EQ(jq_count_state(f.db, "pending"), 1);
+    /* No kind means no rule for which clock to read: refused. */
+    HU_ASSERT_EQ(hu_job_queue_repo_expire_older_than(f.db, NULL, 99999, 99999, &expired),
+                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(jq_count_state(f.db, "pending"), 1);
     jq_close(&f);
 }
 
@@ -367,6 +462,9 @@ void run_job_queue_repo_tests(void) {
     HU_RUN_TEST(test_job_queue_repo_duplicate_key_is_ignored);
     HU_RUN_TEST(test_job_queue_repo_expires_old_pending_rows);
     HU_RUN_TEST(test_job_queue_repo_finish_and_shadow_transitions);
+    HU_RUN_TEST(test_job_queue_repo_refuses_inside_an_open_transaction);
+    HU_RUN_TEST(test_job_queue_repo_finish_is_fenced_for_claimed_rows);
+    HU_RUN_TEST(test_job_queue_repo_expiry_of_sched_sends_uses_due_at);
     HU_RUN_TEST(test_job_queue_repo_rejects_bad_arguments);
 }
 #else
