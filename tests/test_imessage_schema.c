@@ -206,6 +206,7 @@ static void test_schema_probe_drift_canary_captures_unknown_columns(void) {
 
     HU_ASSERT_TRUE(caps.probed);
     HU_ASSERT_EQ((int)caps.unknown_column_count, 2);
+    HU_ASSERT_EQ((int)caps.unknown_column_total, 2);
 
     bool found_apple_new = false;
     bool found_other_future = false;
@@ -238,7 +239,13 @@ static const char *tahoe_schema_sql = "CREATE TABLE message ("
                                       "  is_kt_verified INTEGER DEFAULT 0,"
                                       "  fallback_hash TEXT,"
                                       "  is_pending_satellite_send INTEGER DEFAULT 0,"
-                                      "  needs_relay INTEGER DEFAULT 0"
+                                      "  needs_relay INTEGER DEFAULT 0,"
+                                      "  schedule_type INTEGER DEFAULT 0,"
+                                      "  schedule_state INTEGER DEFAULT 0,"
+                                      "  sent_or_received_off_grid INTEGER DEFAULT 0,"
+                                      "  is_time_sensitive INTEGER DEFAULT 0,"
+                                      "  ck_chat_id TEXT,"
+                                      "  index_state INTEGER DEFAULT 0"
                                       ");";
 
 static void test_schema_probe_tahoe_columns_are_not_drift(void) {
@@ -251,6 +258,33 @@ static void test_schema_probe_tahoe_columns_are_not_drift(void) {
     HU_ASSERT_EQ(hu_imessage_schema_probe(path, &caps), HU_OK);
     HU_ASSERT_TRUE(caps.probed);
     HU_ASSERT_EQ((int)caps.unknown_column_count, 0);
+    HU_ASSERT_EQ((int)caps.unknown_column_total, 0);
+    (void)unlink(path);
+}
+
+/* More unknown columns than names kept: the total must still be the real count
+ * (2026-10-02 the log said "8 unknown" while chat.db had 14). */
+static const char *many_unknown_sql = "CREATE TABLE message ("
+                                      "  ROWID INTEGER PRIMARY KEY AUTOINCREMENT,"
+                                      "  guid TEXT UNIQUE,"
+                                      "  text TEXT,"
+                                      "  zz_future_1 INTEGER, zz_future_2 INTEGER,"
+                                      "  zz_future_3 INTEGER, zz_future_4 INTEGER,"
+                                      "  zz_future_5 INTEGER, zz_future_6 INTEGER,"
+                                      "  zz_future_7 INTEGER, zz_future_8 INTEGER,"
+                                      "  zz_future_9 INTEGER, zz_future_10 INTEGER"
+                                      ");";
+
+static void test_schema_probe_counts_every_unknown_column(void) {
+    char path[256];
+    make_tmp_db_path(path, sizeof(path));
+    HU_ASSERT_EQ(build_db(path, many_unknown_sql), 0);
+    hu_imessage_schema_reset_cache();
+
+    hu_imessage_schema_caps_t caps;
+    HU_ASSERT_EQ(hu_imessage_schema_probe(path, &caps), HU_OK);
+    HU_ASSERT_EQ((int)caps.unknown_column_count, HU_IMESSAGE_SCHEMA_UNKNOWN_MAX);
+    HU_ASSERT_EQ((int)caps.unknown_column_total, 10);
     (void)unlink(path);
 }
 
@@ -328,6 +362,7 @@ void run_imessage_schema_tests(void) {
     HU_RUN_TEST(test_schema_probe_sonoma_has_associated_message_emoji);
     HU_RUN_TEST(test_schema_probe_drift_canary_captures_unknown_columns);
     HU_RUN_TEST(test_schema_probe_tahoe_columns_are_not_drift);
+    HU_RUN_TEST(test_schema_probe_counts_every_unknown_column);
     HU_RUN_TEST(test_schema_probe_caches_result_across_calls);
     HU_RUN_TEST(test_schema_probe_rejects_null_out);
     HU_RUN_TEST(test_schema_probe_returns_io_for_nonexistent_db);
