@@ -6777,10 +6777,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         hu_log_info("human", agent ? agent->observer : NULL,
                                     "response hex[0..%zu]: %s", dump_n, hex);
                     }
+                    /* Logs the failure; HU_JOB_HOLD may hold the batch while the model is down. */
                     if (err != HU_OK)
-                        hu_log_error("human", agent ? agent->observer : NULL,
-                                     "agent turn failed for %s: %s", HU_LOG_WHO(batch_key, key_len),
-                                     hu_error_string(err));
+                        hu_daemon_jobs_on_turn_error(agent, config, ch, msgs, batch_start,
+                                                     batch_end, err);
 
                     /* W14 counterfactual rehearsal — enqueue at most once
                      * per hour for the active contact after a successful

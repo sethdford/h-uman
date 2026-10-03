@@ -20,6 +20,7 @@
 
 #include "human/core/error.h"
 #include "human/core/gate_mode.h"
+#include "human/daemon/job_hold.h" /* inbound hold: hu_service_run hooks */
 #include "human/memory/job_queue_repo.h"
 #include "human/observer.h"
 #include <stdbool.h>
