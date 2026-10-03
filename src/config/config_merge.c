@@ -583,6 +583,14 @@ static void sync_flat_fields(hu_config_t *cfg) {
     cfg->max_actions_per_hour = cfg->autonomy.max_actions_per_hour;
 }
 
+/* $HU_STATE_DIR/workspace (or ~/.human/workspace); "." only if that path
+ * cannot be formed. */
+static void default_workspace_dir(char *out, size_t cap) {
+    int n = hu_paths_state_or(out, cap, ".", "%s", HU_DEFAULT_WORKSPACE);
+    if (n <= 0 || (size_t)n >= cap)
+        snprintf(out, cap, ".");
+}
+
 static hu_error_t config_load_impl(hu_allocator_t *backing, hu_config_t *out,
                                    const char *path_override) {
     if (!backing || !out)
@@ -606,8 +614,10 @@ static hu_error_t config_load_impl(hu_allocator_t *backing, hu_config_t *out,
             plen = sizeof(global_path) - 1;
         memcpy(global_path, path_override, plen);
         global_path[plen] = '\0';
-        strncpy(workspace_dir, ".", sizeof(workspace_dir) - 1);
-        workspace_dir[sizeof(workspace_dir) - 1] = '\0';
+        /* Same default as without an override: a "." default made bootstrap's
+         * hu_agent_git_init run git init + add -A + commit in whatever
+         * directory the process was started from. */
+        default_workspace_dir(workspace_dir, sizeof(workspace_dir));
     } else {
         char path_buf[HU_MAX_PATH];
         int n = hu_paths_state_or(path_buf, sizeof(path_buf), ".", "%s", HU_CONFIG_FILE);
@@ -623,12 +633,7 @@ static hu_error_t config_load_impl(hu_allocator_t *backing, hu_config_t *out,
         strncpy(global_path, path_buf, sizeof(global_path) - 1);
         global_path[sizeof(global_path) - 1] = '\0';
 
-        n = hu_paths_state_or(path_buf, sizeof(path_buf), ".", "%s", HU_DEFAULT_WORKSPACE);
-        if (n > 0 && (size_t)n < sizeof(path_buf))
-            strncpy(workspace_dir, path_buf, sizeof(workspace_dir) - 1);
-        else
-            strncpy(workspace_dir, ".", sizeof(workspace_dir) - 1);
-        workspace_dir[sizeof(workspace_dir) - 1] = '\0';
+        default_workspace_dir(workspace_dir, sizeof(workspace_dir));
     }
 
     out->config_path = hu_strdup(&a, global_path);
