@@ -87,6 +87,7 @@
 #include "human/daemon/identity_graph.h"
 #include "human/daemon/insight_overuse.h"
 #include "human/daemon/intelligence_facade.h"
+#include "human/daemon/job_queue.h"
 #include "human/daemon/memory_facade.h"
 #include "human/daemon/ml_facade.h"
 #include "human/daemon/name_catch.h"
@@ -1536,10 +1537,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
          * reflection patterns that shaped the thumbed-down turn. Cleared
          * with the personal-model teardown below. */
         hu_reaction_handler_set_reflection_db(crosstalk_db);
-        /* Send provenance: record every delivered iMessage into
-         * outbound_sends so offline measurement can tell h-uman's chat.db
-         * rows from Seth's own. Logging only; uninstalled with the crosstalk
-         * teardown below, before the SQLite memory closes. */
+        /* Durable job queue start recovery (HU_JOB_QUEUE; OFF touches nothing), then send
+         * provenance (outbound_sends; uninstalled with the crosstalk teardown below). */
+        (void)hu_daemon_job_queue_start(crosstalk_db, agent->observer); /* logs failures */
         if (crosstalk_db && hu_daemon_send_provenance_install(crosstalk_db) != HU_OK)
             hu_log_warn("human", agent->observer,
                         "send provenance: install failed; outbound_sends will not be recorded");

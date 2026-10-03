@@ -1292,6 +1292,7 @@ set(HU_CORE_SOURCES
     src/daemon/daemon_prospective.c
     src/daemon/daemon_outbound_bus.c
     src/daemon/daemon_send_provenance.c
+    src/daemon/daemon_job_queue.c
     src/daemon/daemon_send_failure.c
     src/daemon/owner_notify.c
     src/daemon/daemon_reply_delay.c
@@ -1739,6 +1740,7 @@ if(HU_ENABLE_SQLITE)
         src/memory/repos/contact_stage_repo_sqlite.c
         src/memory/repos/prospective_repo_sqlite.c
         src/memory/repos/reminder_repo_sqlite.c
+        src/memory/repos/job_queue_repo_sqlite.c
         src/memory/repos/briefing_repo_sqlite.c
         src/memory/repos/person_dates_repo_sqlite.c
         src/memory/repos/repo_util_sqlite.c
@@ -3684,6 +3686,7 @@ set(HU_TEST_SOURCES
     tests/test_daemon_commitment_guard.c
     tests/test_daemon_config_reload.c
     tests/test_daemon_identity_graph.c
+    tests/test_daemon_job_queue.c
     tests/test_daemon_name_catch.c
     tests/test_daemon_thread_context.c
     tests/test_daemon_reply_fallback.c
@@ -4300,6 +4303,7 @@ if(HU_ENABLE_SQLITE)
     list(APPEND HU_TEST_SOURCES tests/test_daemon_send_failure.c)
     list(APPEND HU_TEST_SOURCES tests/test_contact_optout_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_reminder_repo.c)
+    list(APPEND HU_TEST_SOURCES tests/test_job_queue_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_person_dates_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_repo_util_sqlite.c)
     list(APPEND HU_TEST_SOURCES tests/test_proactive_send_circuit.c)
