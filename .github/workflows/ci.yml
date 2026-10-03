@@ -1255,5 +1255,13 @@ jobs:
       # fake `human` binary, temp dirs — never ~/.human, chat.db or a model.
       - name: Replay harness exporter + driver + feed (hermetic)
         run: python3 -m pytest -q scripts/blind_ab/test_replay_export_turns.py scripts/blind_ab/test_replay_driver.py scripts/blind_ab/test_replay_feed.py scripts/blind_ab/test_replay_real_binary.py
+      # Adapter retention (2026-10-03 disk-fill fix): the pruner's classify/
+      # protect/keep-newest-2 logic (stdlib-only, temp dirs), and the
+      # nightly-retrain.sh wiring (free_gb_check's new 50 GB floor + the
+      # run_adapter_prune_stage call), both hermetic (fake $HOME, no real disk).
+      - name: Adapter retention pruner + nightly-retrain wiring (hermetic)
+        run: |
+          python3 -m pytest -q scripts/retrain/test_prune_adapters.py
+          bash scripts/test_nightly_retrain_adapter_prune.sh
       - name: Enforce capability registry against blind_ab gate
         run: python3 scripts/check_capability_gates.py

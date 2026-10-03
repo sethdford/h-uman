@@ -87,12 +87,35 @@ for a in it:
     log "retention: $removed adapter dir(s) removed; free now $(df -g / | awk 'NR==2{print $4}') GB"
 }
 free_gb_check() {
-    local need="${HU_RETRAIN_MIN_FREE_GB:-20}" free; free=$(df -g / | awk 'NR==2{print $4}')
+    # 2026-10-03: owner-approved policy raised the floor 20 -> 50 GB. retain_adapters
+    # above (and the adapter_prune stage below, after the run) usually keep this from
+    # ever tripping, but a precheck must still refuse a run that cannot possibly save
+    # its own output rather than start one and die mid-write. "skipped: disk" is the
+    # literal the watchdog/caretaker greps for, matching the skipped+=("$name:...")
+    # convention in nightly-watchdog.sh.
+    local need="${HU_RETRAIN_MIN_FREE_GB:-50}" free; free=$(df -g / | awk 'NR==2{print $4}')
     if (( free < need )); then
-        log "FATAL: only ${free} GB free on / (need ${need}); refusing to stop :8741 for a run that cannot save its adapter"
+        log "skipped: disk (${free} GB free on /, need ${need}) — refusing to stop :8741 for a run that cannot save its adapter"
         return 1
     fi
     log "disk: ${free} GB free (need ${need})"
+}
+# scripts/retrain/prune_adapters.py — the owner-approved retention policy (newest 2
+# candidate adapters of each kind; protects the served adapter, anything in a plist,
+# anything in registry.json). Called AFTER the run, success or failure, so a crashed
+# training attempt still gets cleaned up. Default HU_ADAPTER_PRUNE=shadow (logs only,
+# deletes nothing) until the first shadow log has been reviewed — see
+# docs/guides/nightly-retrain.md for how to flip to live. Never fatal to the window:
+# a pruner refusal (bad/missing config.json) or failure is logged and swallowed, the
+# same way retain_adapters above is best-effort.
+run_adapter_prune_stage() {
+    local dir="${1:-$HOME/.human/training-data/adapters}"
+    if [[ ! -f "$REPO/scripts/retrain/prune_adapters.py" ]]; then
+        log "adapter_prune: script not found — skipping"
+        return 0
+    fi
+    python3 "$REPO/scripts/retrain/prune_adapters.py" --adapters-dir "$dir" 2>&1 | tee -a "$LOG"
+    log "adapter_prune: exited rc=${PIPESTATUS[0]}"
 }
 # Keep the Mac awake for the whole window. 2026-09-11: Maintenance-Sleep /
 # DarkWake cycles from 03:00 to 03:48 stretched a 5-minute base training to 85
@@ -774,6 +797,10 @@ fi
 # EXIT trap below), i.e. still inside the dark window. See the function
 # definition near the top of this file for the full contract.
 run_mlxtune_candidate_stage
+
+# Prune nightly candidate adapters — AFTER the run (success or failure above),
+# still inside the dark window so a `live`-mode delete never races a loader.
+run_adapter_prune_stage "$ADAPTERS_DIR"
 
 log "=== nightly retrain done ==="
 # restore_serving runs via the EXIT trap.

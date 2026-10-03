@@ -592,6 +592,11 @@ static hu_doctor_check_result_t run_contact_optout_check(hu_doctor_check_t *self
     return hu_doctor_check_contact_optout.run(self, NULL);
 }
 
+static hu_doctor_check_result_t run_adapter_disk_check(hu_doctor_check_t *self, void *ctx) {
+    (void)ctx;
+    return hu_doctor_check_adapter_disk.run(self, NULL); /* NULL ctx → production defaults */
+}
+
 hu_error_t hu_doctor_registry_register_defaults(hu_doctor_registry_t *r) {
     if (!r)
         return HU_ERR_INVALID_ARGUMENT;
@@ -644,6 +649,8 @@ hu_error_t hu_doctor_registry_register_defaults(hu_doctor_registry_t *r) {
          run_persona_integrity_check, NULL, NULL},
         {"contact_optout", "Contacts who asked us to stop texting first (O5 contestability)",
          run_contact_optout_check, NULL, NULL},
+        {"adapter_disk", "Nightly retrain adapter output is pruned and the disk has headroom",
+         run_adapter_disk_check, NULL, NULL},
     };
 
     size_t num_checks = sizeof(checks) / sizeof(checks[0]);
