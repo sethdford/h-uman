@@ -35,6 +35,7 @@
 #endif
 #endif
 
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -212,6 +213,17 @@ hu_error_t hu_service_run_agent_cron(hu_allocator_t *alloc, hu_agent_t *agent,
             continue;
         if (!hu_cron_schedule_matches(jobs[i].expression, &tm))
             continue;
+        /* HU_PROACTIVE_CHECKINS activation gated on the owner reviewing shadow
+         * check-ins: they write to contacts with no approval step. */
+        bool is_checkin = hu_cron_job_is_proactive_checkin(jobs[i].name);
+        hu_gate_mode_t checkin_mode = is_checkin ? hu_proactive_checkin_mode() : HU_GATE_LIVE;
+        if (checkin_mode == HU_GATE_OFF) {
+            static atomic_bool warned_checkins_off = false;
+            hu_log_info_once(&warned_checkins_off, "human", NULL,
+                             "proactive check-ins off (HU_PROACTIVE_CHECKINS unset); set it to "
+                             "shadow to draft them into the log, or live to send them");
+            continue;
+        }
 
         const char *prompt = jobs[i].command;
         char *fresh_prompt = NULL;
@@ -321,6 +333,13 @@ hu_error_t hu_service_run_agent_cron(hu_allocator_t *alloc, hu_agent_t *agent,
                                                 mod_r.violence_score, mod_r.self_harm_score);
                                 }
                             }
+                            if (checkin_mode == HU_GATE_SHADOW) {
+                                hu_log_info("human", NULL,
+                                            "proactive check-in (shadow): %s would send %zu "
+                                            "chars; not sent",
+                                            jobs[i].name, response_len);
+                                break;
+                            }
                             hu_error_t send_err = channels[c].channel->vtable->send(
                                 channels[c].channel->ctx, target_part, target_part_len, response,
                                 response_len, NULL, 0);
@@ -411,3 +430,33 @@ hu_error_t hu_service_run_agent_cron(hu_allocator_t *alloc, hu_agent_t *agent,
 }
 
 #endif /* HU_HAS_CRON */
+
+/* Proactive check-in helpers: pure, compiled with or without HU_HAS_CRON. */
+bool hu_cron_job_is_proactive_checkin(const char *job_name) {
+    return job_name && strncmp(job_name, "proactive:", 10) == 0;
+}
+
+hu_gate_mode_t hu_proactive_checkin_mode(void) {
+    return hu_gate_mode_from_env("HU_PROACTIVE_CHECKINS", HU_GATE_OFF);
+}
+
+int hu_proactive_checkin_target(char *buf, size_t cap, const char *channel,
+                                const char *contact_id) {
+    if (!buf || cap == 0)
+        return -1;
+    buf[0] = '\0';
+    if (!channel || !channel[0])
+        return -1;
+    int n;
+    if (strchr(channel, ':'))
+        n = snprintf(buf, cap, "%s", channel); /* already "channel:handle" */
+    else if (contact_id && contact_id[0])
+        n = snprintf(buf, cap, "%s:%s", channel, contact_id);
+    else
+        return -1;
+    if (n < 0 || (size_t)n >= cap) {
+        buf[0] = '\0';
+        return -1;
+    }
+    return n;
+}

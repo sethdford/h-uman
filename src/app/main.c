@@ -40,6 +40,7 @@
 #include "human/daemon.h"
 #include "human/daemon/config_reload.h"
 #include "human/daemon/send_budget.h"
+#include "human/daemon_cron.h"
 #include "human/doctor.h"
 #include "human/doctor/check.h"
 #include "human/doctor_fix.h"
@@ -1548,10 +1549,11 @@ static hu_error_t cmd_service_loop(hu_allocator_t *alloc, int argc, char **argv)
             snprintf(job_name, sizeof(job_name), "proactive:%s",
                      cp->name ? cp->name : cp->contact_id);
 
-            /* Encode target as "channel:contact_id" for directed sends */
+            /* "channel:handle"; a persona channel may already carry the handle */
             char channel_target[192];
-            snprintf(channel_target, sizeof(channel_target), "%s:%s", cp->proactive_channel,
-                     cp->contact_id);
+            if (hu_proactive_checkin_target(channel_target, sizeof(channel_target),
+                                            cp->proactive_channel, cp->contact_id) < 0)
+                continue;
 
             uint64_t job_id = 0;
             hu_error_t jerr =
