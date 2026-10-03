@@ -40,7 +40,8 @@ typedef struct {
 
     /* drift canary: columns we don't recognize */
     char unknown_columns[HU_IMESSAGE_SCHEMA_UNKNOWN_MAX][HU_IMESSAGE_SCHEMA_UNKNOWN_NAME_MAX];
-    size_t unknown_column_count;
+    size_t unknown_column_count; /* names stored, at most HU_IMESSAGE_SCHEMA_UNKNOWN_MAX */
+    size_t unknown_column_total; /* all unknown columns seen */
 
     /* SHA-256 hex of the sorted column-name list — stable across runs of
      * the same schema. Used as a single compare-value when checking whether

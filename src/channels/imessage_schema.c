@@ -143,6 +143,12 @@ static const char *const KNOWN_MESSAGE_COLUMNS[] = {
     "fallback_hash",
     "is_pending_satellite_send",
     "needs_relay",
+    "schedule_type",
+    "schedule_state",
+    "sent_or_received_off_grid",
+    "is_time_sensitive",
+    "ck_chat_id",
+    "index_state",
     NULL,
 };
 
@@ -238,6 +244,7 @@ static void classify_column(hu_imessage_schema_caps_t *caps, const char *name) {
         caps->has_message_summary_info = true;
 
     if (!is_known_column(name)) {
+        caps->unknown_column_total++; /* every one, not just the names we keep */
         if (caps->unknown_column_count < HU_IMESSAGE_SCHEMA_UNKNOWN_MAX) {
             size_t i = caps->unknown_column_count++;
             strncpy(caps->unknown_columns[i], name, HU_IMESSAGE_SCHEMA_UNKNOWN_NAME_MAX - 1);
@@ -392,8 +399,10 @@ void hu_imessage_schema_log_fingerprint(const hu_imessage_schema_caps_t *caps) {
         }
         buf[sizeof(buf) - 1] = '\0';
         hu_log_warn("imessage", NULL,
-                    "schema drift: %zu unknown column(s) in chat.db `message` table: %s "
+                    "schema drift: %zu unknown column(s) in chat.db `message` table%s: %s "
                     "— Apple may have added fields this build doesn't recognize",
-                    caps->unknown_column_count, buf);
+                    caps->unknown_column_total,
+                    caps->unknown_column_total > caps->unknown_column_count ? " (first ones)" : "",
+                    buf);
     }
 }
