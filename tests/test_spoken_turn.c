@@ -7,7 +7,11 @@
 #include "human/agent/spoken_turn.h"
 #include "human/core/allocator.h"
 #include "human/persona.h"
+#include "test_env_guard.h"
 #include "test_framework.h"
+#include "test_tmpdir.h"
+#include "turn_recording_provider.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -140,6 +144,69 @@ static void spoken_turn_skips_open_app_context_text_keeps_it(void) {
     HU_ASSERT_FALSE(hu_spoken_turn_wants_app_context(true));
 }
 
+/* 2026-10-03, live voice on Gemini 3.5 Flash: the adaptive token budget gave spoken
+ * turns thinkingBudget 1024-2048 against max_tokens 300 (replies cut mid-sentence,
+ * first word delayed) and temperature 0.3 on short messages (stiff). A spoken turn
+ * gets neither; the same message as a text turn still does. */
+static char s_spoken_req_scratch[256];
+
+static char *spoken_turn_request_log(const char *msg, bool spoken) {
+    hu_allocator_t alloc = hu_system_allocator();
+    char dir[256];
+    if (!hu_test_mkdtemp("/tmp/hu_spoken_req_", dir, sizeof(dir)))
+        return NULL;
+    snprintf(s_spoken_req_scratch, sizeof(s_spoken_req_scratch), "%s", dir);
+    setenv("HOME", dir, 1);
+    setenv("HU_STATE_DIR", dir, 1);
+    trp_t trp;
+    trp_init(&trp, NULL, 0, "ok.");
+    hu_agent_t agent;
+    char *log = NULL;
+    if (hu_agent_from_config(&agent, &alloc, trp_provider(&trp), NULL, 0, NULL, NULL, NULL, NULL,
+                             "voice-model", 11, "gateway", 7, 0.7, dir, strlen(dir), 5, 50, false,
+                             1, NULL, 0, NULL, 0, NULL) == HU_OK) {
+        hu_spoken_turn_saved_t saved;
+        hu_spoken_turn_begin(&agent, spoken ? HU_GATE_LIVE : HU_GATE_OFF, &saved);
+        char *r = NULL;
+        size_t rlen = 0;
+        if (hu_agent_turn(&agent, msg, strlen(msg), &r, &rlen) == HU_OK && trp.log)
+            log = strdup(trp.log);
+        if (r)
+            alloc.free(alloc.ctx, r, rlen + 1);
+        hu_spoken_turn_end(&agent, &saved);
+        hu_agent_deinit(&agent);
+    }
+    trp_deinit(&trp);
+    return log;
+}
+
+static void spoken_turn_request_has_no_thinking_on_an_analytical_message(void) {
+    const char *msg = "can you compare thai and pizza for me";
+    char *text = spoken_turn_request_log(msg, false);
+    char *voice = spoken_turn_request_log(msg, true);
+    HU_ASSERT_NOT_NULL(text);
+    HU_ASSERT_NOT_NULL(voice);
+    /* Text turn: planning mode / the token budget give it thinking (2048 today). */
+    HU_ASSERT_NOT_NULL(strstr(text, "thinking_budget="));
+    HU_ASSERT_NULL(strstr(text, "thinking_budget=0 "));
+    /* Spoken turn: exactly none. */
+    HU_ASSERT_NOT_NULL(strstr(voice, "thinking_budget=0 "));
+    free(text);
+    free(voice);
+}
+
+static void spoken_turn_request_is_not_cold_on_a_short_message(void) {
+    char *text = spoken_turn_request_log("hey whats up", false);
+    char *voice = spoken_turn_request_log("hey whats up", true);
+    HU_ASSERT_NOT_NULL(text);
+    HU_ASSERT_NOT_NULL(voice);
+    HU_ASSERT_NOT_NULL(strstr(text, " temperature=0.300"));
+    HU_ASSERT_NULL(strstr(voice, " temperature=0.300"));
+    HU_ASSERT_NOT_NULL(strstr(voice, " temperature=0.800"));
+    free(text);
+    free(voice);
+}
+
 void run_spoken_turn_tests(void) {
     HU_TEST_SUITE("spoken_turn");
     HU_RUN_TEST(spoken_turn_caps_shrink_memory_and_examples);
@@ -149,4 +216,8 @@ void run_spoken_turn_tests(void) {
     HU_RUN_TEST(spoken_turn_begin_off_and_shadow_leave_agent_alone);
     HU_RUN_TEST(spoken_turn_lean_head_has_fewer_examples_and_spoken_directive);
     HU_RUN_TEST(spoken_turn_skips_open_app_context_text_keeps_it);
+    HU_RUN_TEST_ENV_GUARDED(spoken_turn_request_has_no_thinking_on_an_analytical_message,
+                            s_spoken_req_scratch);
+    HU_RUN_TEST_ENV_GUARDED(spoken_turn_request_is_not_cold_on_a_short_message,
+                            s_spoken_req_scratch);
 }

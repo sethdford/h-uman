@@ -4032,7 +4032,7 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
         hu_agent_internal_apply_turn_request_overrides(agent, &req);
         /* Planning mode: give the model more room to reason when the cognition
          * system detects a complex task, without overriding explicit CoT config. */
-        if (cognition_budget.enable_planning && req.thinking_budget == 0)
+        if (cognition_budget.enable_planning && req.thinking_budget == 0 && !agent->spoken_turn)
             req.thinking_budget = 2048;
 
         /* Somatic energy influence: low energy → shorter responses, lower creativity. */
@@ -4050,7 +4050,7 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
 
         /* Empathy mode: slightly warmer temperature for emotional responses,
          * and remove token caps that might truncate heartfelt replies. */
-        if (cognition_budget.prioritize_empathy) {
+        if (cognition_budget.prioritize_empathy || agent->spoken_turn) {
             if (turn_temp < 0.8)
                 turn_temp = 0.8;
             if (req.max_tokens > 0 && req.max_tokens < 600)
@@ -4058,7 +4058,7 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
         }
 
         /* Adaptive token budget: classify tier and apply budget constraints */
-        if (agent->sota.token_budget.enabled) {
+        if (agent->sota.token_budget.enabled && !agent->spoken_turn) {
             hu_thinking_tier_t tier =
                 hu_token_budget_classify(msg, msg_len, agent->history_count, agent->tools_count);
             const hu_tier_budget_t *budget = hu_token_budget_get(&agent->sota.token_budget, tier);
