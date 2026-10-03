@@ -475,6 +475,7 @@ void run_daemon_hurt_handoff_tests(void);
 void run_daemon_dated_followup_tests(void);
 void run_contact_optout_repo_tests(void);
 void run_reminder_repo_tests(void);
+void run_job_queue_repo_tests(void);
 void run_person_dates_repo_tests(void);
 void run_daemon_outbound_bus_tests(void);
 void run_repo_util_sqlite_tests(void);
@@ -1610,6 +1611,7 @@ int main(int argc, char **argv) {
     run_daemon_dated_followup_tests();
     run_contact_optout_repo_tests();
     run_reminder_repo_tests();
+    run_job_queue_repo_tests();
     run_person_dates_repo_tests();
     run_daemon_outbound_bus_tests();
     run_repo_util_sqlite_tests();
