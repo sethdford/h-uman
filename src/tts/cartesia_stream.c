@@ -17,7 +17,8 @@ struct hu_cartesia_stream {
     bool has_voice_controls;
 #if HU_IS_TEST
     unsigned mock_send_count;
-    unsigned mock_recv_phase;
+    unsigned mock_pending_chunks; /* audio queued by sends, not yet received */
+    bool mock_flushed;            /* context closed; "done" follows the queued audio */
 #endif
 };
 
@@ -71,6 +72,8 @@ hu_error_t hu_cartesia_stream_send_generation(hu_cartesia_stream_t *s, hu_alloca
     if (!s || !alloc)
         return HU_ERR_INVALID_ARGUMENT;
     s->mock_send_count++;
+    s->mock_pending_chunks++;
+    s->mock_flushed = false;
     return HU_OK;
 }
 
@@ -80,6 +83,7 @@ hu_error_t hu_cartesia_stream_flush_context(hu_cartesia_stream_t *s, hu_allocato
     if (!s || !alloc)
         return HU_ERR_INVALID_ARGUMENT;
     s->mock_send_count++;
+    s->mock_flushed = true;
     return HU_OK;
 }
 
@@ -88,21 +92,25 @@ hu_error_t hu_cartesia_stream_cancel_context(hu_cartesia_stream_t *s, hu_allocat
     (void)context_id;
     if (!s || !alloc)
         return HU_ERR_INVALID_ARGUMENT;
-    s->mock_recv_phase = 0;
+    s->mock_pending_chunks = 0;
+    s->mock_flushed = false;
     return HU_OK;
 }
 
-hu_error_t hu_cartesia_stream_recv_next(hu_cartesia_stream_t *s, hu_allocator_t *alloc,
-                                        void **pcm_out, size_t *pcm_len, bool *recv_done) {
+/* Mirrors the service: each send yields one audio chunk; "done" comes only after the
+ * context is flushed; with nothing to deliver on an open context the wait times out. */
+hu_error_t hu_cartesia_stream_recv_next_wait(hu_cartesia_stream_t *s, hu_allocator_t *alloc,
+                                             int timeout_ms, void **pcm_out, size_t *pcm_len,
+                                             bool *recv_done) {
+    (void)timeout_ms;
     if (!s || !alloc || !pcm_out || !pcm_len || !recv_done)
         return HU_ERR_INVALID_ARGUMENT;
     *pcm_out = NULL;
     *pcm_len = 0;
     *recv_done = false;
 
-    /* After each send, yield one small PCM chunk then done. */
-    if (s->mock_recv_phase == 0) {
-        s->mock_recv_phase = 1;
+    if (s->mock_pending_chunks > 0) {
+        s->mock_pending_chunks--;
         size_t nsamp = 64;
         size_t nbytes = nsamp * sizeof(float);
         float *pcm = (float *)alloc->alloc(alloc->ctx, nbytes);
@@ -114,7 +122,9 @@ hu_error_t hu_cartesia_stream_recv_next(hu_cartesia_stream_t *s, hu_allocator_t 
         *pcm_len = nbytes;
         return HU_OK;
     }
-    s->mock_recv_phase = 0;
+    if (!s->mock_flushed)
+        return HU_ERR_TIMEOUT;
+    s->mock_flushed = false;
     *recv_done = true;
     return HU_OK;
 }
@@ -292,8 +302,9 @@ hu_error_t hu_cartesia_stream_cancel_context(hu_cartesia_stream_t *s, hu_allocat
     return err;
 }
 
-hu_error_t hu_cartesia_stream_recv_next(hu_cartesia_stream_t *s, hu_allocator_t *alloc,
-                                        void **pcm_out, size_t *pcm_len, bool *recv_done) {
+hu_error_t hu_cartesia_stream_recv_next_wait(hu_cartesia_stream_t *s, hu_allocator_t *alloc,
+                                             int timeout_ms, void **pcm_out, size_t *pcm_len,
+                                             bool *recv_done) {
     if (!s || !alloc || !pcm_out || !pcm_len || !recv_done)
         return HU_ERR_INVALID_ARGUMENT;
     *pcm_out = NULL;
@@ -302,7 +313,7 @@ hu_error_t hu_cartesia_stream_recv_next(hu_cartesia_stream_t *s, hu_allocator_t 
 
     char *raw = NULL;
     size_t rl = 0;
-    hu_error_t err = hu_ws_recv(s->ws, alloc, &raw, &rl, 30000);
+    hu_error_t err = hu_ws_recv(s->ws, alloc, &raw, &rl, timeout_ms);
     if (err != HU_OK)
         return err;
     if (!raw || rl == 0) {
@@ -400,8 +411,10 @@ hu_error_t hu_cartesia_stream_cancel_context(hu_cartesia_stream_t *s, hu_allocat
     return HU_ERR_NOT_SUPPORTED;
 }
 
-hu_error_t hu_cartesia_stream_recv_next(hu_cartesia_stream_t *s, hu_allocator_t *alloc,
-                                        void **pcm_out, size_t *pcm_len, bool *recv_done) {
+hu_error_t hu_cartesia_stream_recv_next_wait(hu_cartesia_stream_t *s, hu_allocator_t *alloc,
+                                             int timeout_ms, void **pcm_out, size_t *pcm_len,
+                                             bool *recv_done) {
+    (void)timeout_ms;
     (void)s;
     (void)alloc;
     (void)pcm_out;
@@ -412,3 +425,8 @@ hu_error_t hu_cartesia_stream_recv_next(hu_cartesia_stream_t *s, hu_allocator_t 
 
 #endif /* HU_GATEWAY_POSIX && HU_HAS_TLS */
 #endif /* !HU_IS_TEST */
+
+hu_error_t hu_cartesia_stream_recv_next(hu_cartesia_stream_t *s, hu_allocator_t *alloc,
+                                        void **pcm_out, size_t *pcm_len, bool *recv_done) {
+    return hu_cartesia_stream_recv_next_wait(s, alloc, 30000, pcm_out, pcm_len, recv_done);
+}
