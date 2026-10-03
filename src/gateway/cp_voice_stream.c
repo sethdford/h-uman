@@ -5,6 +5,7 @@
 #include "cp_internal.h"
 #include "human/bus.h"
 #include "human/config.h"
+#include "human/core/log.h"
 #include "human/core/time.h"
 #include "human/gateway/voice_stream.h"
 #include "human/multimodal.h"
@@ -49,6 +50,7 @@ typedef struct {
     unsigned turn_counter;
     char voice_id[128];
     char model_id[128];
+    int64_t tts_last_used_ms; /* opened or last started a spoken turn */
     hu_duplex_session_t duplex;
     hu_voice_emotion_t current_emotion;
     hu_voice_params_t emotion_voice_params;
@@ -640,6 +642,7 @@ hu_error_t cp_voice_session_start(hu_allocator_t *alloc, hu_app_context_t *app, 
                                               model_id ? model_id : "", &sl->tts);
     if (oerr != HU_OK)
         return oerr;
+    sl->tts_last_used_ms = vs_now_ms();
 
     if (voice_id && voice_id[0])
         (void)snprintf(sl->voice_id, sizeof(sl->voice_id), "%s", voice_id);
@@ -724,8 +727,31 @@ hu_error_t cp_voice_session_interrupt(hu_allocator_t *alloc, hu_app_context_t *a
 
 /* Arm Lester's voice for a new turn and hand `text` to the agent as the user's message.
  * The reply arrives on the bus and is spoken by vs_bus_cb. */
+bool hu_voice_stream_tts_stale(int64_t now_ms, int64_t last_used_ms) {
+    return now_ms - last_used_ms >= HU_VOICE_STREAM_TTS_IDLE_REOPEN_MS;
+}
+
+/* Reopen the session's TTS socket with the voice and model it was opened with. */
+static void vs_reopen_tts(hu_app_context_t *app, vs_slot_t *sl) {
+    const char *key = hu_config_get_provider_key((const hu_config_t *)app->config, "cartesia");
+    if (!key || !key[0])
+        key = getenv("CARTESIA_API_KEY");
+    if (!key || !key[0])
+        return;
+    hu_cartesia_stream_t *fresh = NULL;
+    if (hu_cartesia_stream_open(app->alloc, key, sl->voice_id, sl->model_id, &fresh) != HU_OK)
+        return; /* keep the old socket; the turn may still work */
+    hu_cartesia_stream_close(sl->tts, app->alloc);
+    sl->tts = fresh;
+    hu_log_info("voice", NULL, "reopened an idle TTS stream before a spoken turn");
+}
+
 static void vs_start_spoken_turn(hu_app_context_t *app, hu_ws_conn_t *conn, vs_slot_t *sl,
                                  const char *session_key, char *text) {
+    int64_t now = vs_now_ms();
+    if (sl->tts && app->config && hu_voice_stream_tts_stale(now, sl->tts_last_used_ms))
+        vs_reopen_tts(app, sl);
+    sl->tts_last_used_ms = now;
     (void)snprintf(sl->tts_context, sizeof(sl->tts_context), "ctx-%llu-%u",
                    (unsigned long long)conn->id, ++sl->turn_counter);
     sl->tts_armed = true;

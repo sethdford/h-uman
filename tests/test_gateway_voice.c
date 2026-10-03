@@ -368,6 +368,16 @@ static bool greet_capture_cb(hu_bus_event_type_t type, const hu_bus_event_t *ev,
     return true;
 }
 
+/* Cartesia closes an idle TTS socket: after ~6.7 min idle a reply had no audio. */
+static void voice_stream_tts_is_reopened_only_after_a_long_idle(void) {
+    int64_t t0 = 1000000;
+    HU_ASSERT_FALSE(hu_voice_stream_tts_stale(t0, t0));
+    HU_ASSERT_FALSE(hu_voice_stream_tts_stale(t0 + 30 * 1000, t0));
+    HU_ASSERT_FALSE(hu_voice_stream_tts_stale(t0 + HU_VOICE_STREAM_TTS_IDLE_REOPEN_MS - 1, t0));
+    HU_ASSERT_TRUE(hu_voice_stream_tts_stale(t0 + HU_VOICE_STREAM_TTS_IDLE_REOPEN_MS, t0));
+    HU_ASSERT_TRUE(hu_voice_stream_tts_stale(t0 + 400 * 1000, t0));
+}
+
 static void gateway_voice_greet_starts_a_spoken_turn_after_session_start(void) {
     hu_allocator_t backing = hu_system_allocator();
     hu_config_t cfg;
@@ -667,6 +677,7 @@ void run_gateway_voice_tests(void) {
     HU_RUN_TEST(test_gateway_voice_on_conn_close_frees_slot);
     HU_RUN_TEST(test_gateway_voice_audio_end_no_data_returns_error);
     HU_RUN_TEST(gateway_voice_greet_starts_a_spoken_turn_after_session_start);
+    HU_RUN_TEST(voice_stream_tts_is_reopened_only_after_a_long_idle);
     HU_RUN_TEST(test_gateway_voice_double_start_reuses_slot);
     HU_RUN_TEST(test_gateway_voice_interrupt_without_session_returns_ok);
     HU_RUN_TEST(test_gateway_voice_clone_returns_voice_id);
