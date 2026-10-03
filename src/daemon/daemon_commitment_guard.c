@@ -305,15 +305,16 @@ static void clip_into(char *buf, size_t cap, size_t *pos, const char *label, con
     *pos = hu_buf_appendf(buf, cap, *pos, "%s%.*s", label, (int)n, s ? s : "");
 }
 
-/* One local call under X-HU-Purpose: commitment_check. *out is allocated with
- * io->alloc (size *out_len + 1) on success. */
+/* One local call under X-HU-Purpose: commitment_check, unless the caller
+ * already tagged the thread (a proactive caller keeps PROACTIVE, so its batch
+ * priority). *out is allocated with io->alloc (size *out_len + 1) on success. */
 static hu_error_t local_call(const hu_commitment_guard_io_t *io, const char *sys, size_t sys_len,
                              const char *msg, size_t msg_len, char **out, size_t *out_len) {
     *out = NULL;
     *out_len = 0;
     if (!io->local.vtable || !io->local.vtable->chat_with_system)
         return HU_ERR_NOT_SUPPORTED;
-    hu_llm_purpose_t prev = hu_llm_purpose_set(HU_LLM_PURPOSE_COMMITMENT_CHECK);
+    hu_llm_purpose_t prev = hu_llm_purpose_set_if_untagged(HU_LLM_PURPOSE_COMMITMENT_CHECK);
     hu_error_t err =
         io->local.vtable->chat_with_system(io->local.ctx, io->alloc, sys, sys_len, msg, msg_len,
                                            io->model, io->model_len, 0.0, out, out_len);

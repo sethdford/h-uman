@@ -177,6 +177,34 @@ static void shadow_keeps_extraction_inline_and_counts_it(void) {
     psd_teardown();
 }
 
+/* SHADOW only counts: it never copies the message for a job it will not
+ * queue (#604 review). Same ingest under OFF and SHADOW: identical bytes. */
+static size_t psd_extract_bytes_under(const char *mode) {
+    static hu_personal_model_t m;
+    memset(&m, 0, sizeof(m));
+    hu_tracking_allocator_t *ta = hu_tracking_allocator_create();
+    psd_setup(mode);
+    s_alloc = hu_tracking_allocator_allocator(ta);
+    hu_personal_model_set_llm_extractor(&s_alloc, &s_prov, "m", 1);
+    hu_post_send_defer_begin();
+    psd_ingest(&m);
+    HU_ASSERT_EQ(s_rec.calls, 1); /* inline either way */
+    (void)hu_post_send_defer_flush();
+    size_t bytes = hu_tracking_allocator_total_allocated(ta);
+    psd_teardown();
+    HU_ASSERT_EQ(hu_tracking_allocator_leaks(ta), 0u);
+    hu_tracking_allocator_destroy(ta);
+    return bytes;
+}
+
+static void shadow_extract_allocates_nothing_extra(void) {
+    size_t off = psd_extract_bytes_under(NULL);
+    size_t shadow = psd_extract_bytes_under("shadow");
+    HU_ASSERT_TRUE(off > 0); /* the inline extraction does allocate */
+    HU_ASSERT_EQ(shadow, off);
+    HU_ASSERT_EQ(hu_post_send_defer_last_stats().extract, 1u); /* still counted */
+}
+
 static void live_outside_window_runs_inline(void) {
     static hu_personal_model_t m;
     memset(&m, 0, sizeof(m));
@@ -286,6 +314,49 @@ static void live_defers_row_embedding_until_flush(void) {
     vs.vtable->deinit(vs.ctx, &alloc);
     mem.vtable->deinit(mem.ctx);
 }
+/* SHADOW only counts the embedding: no key/content copy for a job it will
+ * not queue (#604 review). Same-size rows under OFF and SHADOW: identical
+ * bytes through the memory's allocator. */
+static size_t psd_embed_bytes_under(const char *mode, size_t *embeds) {
+    hu_tracking_allocator_t *ta = hu_tracking_allocator_create();
+    hu_allocator_t alloc = hu_tracking_allocator_allocator(ta);
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.vtable);
+    hu_embedder_t emb = {.ctx = NULL, .vtable = &psd_emb_vt};
+    hu_vector_store_t vs =
+        hu_vector_store_sqlite_vec_create(&alloc, hu_sqlite_memory_get_db(&mem), 3);
+    HU_ASSERT_NOT_NULL(vs.ctx);
+    hu_sqlite_memory_set_semantic_index(&mem, &emb, &vs);
+    s_embeds = 0;
+    if (mode)
+        setenv("HU_POST_SEND_DEFER", mode, 1);
+    else
+        unsetenv("HU_POST_SEND_DEFER");
+    hu_post_send_defer_begin();
+    size_t before = hu_tracking_allocator_total_allocated(ta);
+    HU_ASSERT_EQ(mem.vtable->store(mem.ctx, "user:likes:tea", 14, "tea", 3, NULL, "", 0), HU_OK);
+    size_t bytes = hu_tracking_allocator_total_allocated(ta) - before;
+    (void)hu_post_send_defer_flush();
+    unsetenv("HU_POST_SEND_DEFER");
+    *embeds = (size_t)s_embeds;
+    vs.vtable->deinit(vs.ctx, &alloc);
+    mem.vtable->deinit(mem.ctx);
+    HU_ASSERT_EQ(hu_tracking_allocator_leaks(ta), 0u);
+    hu_tracking_allocator_destroy(ta);
+    return bytes;
+}
+
+static void shadow_embed_allocates_nothing_extra(void) {
+    size_t off_embeds = 0, shadow_embeds = 0;
+    size_t off = psd_embed_bytes_under(NULL, &off_embeds);
+    size_t shadow = psd_embed_bytes_under("shadow", &shadow_embeds);
+    HU_ASSERT_EQ(off_embeds, 1u);
+    HU_ASSERT_EQ(shadow_embeds, 1u); /* inline: SHADOW changes nothing */
+    HU_ASSERT_EQ(shadow, off);
+    hu_post_send_defer_stats_t st = hu_post_send_defer_last_stats();
+    HU_ASSERT_EQ((int)st.mode, (int)HU_GATE_SHADOW);
+    HU_ASSERT_EQ(st.embed, 1u); /* still counted for the SHADOW->LIVE measurement */
+}
 #endif
 
 void run_post_send_defer_tests(void) {
@@ -294,10 +365,12 @@ void run_post_send_defer_tests(void) {
     HU_RUN_TEST(live_runs_extraction_once_after_flush);
     HU_RUN_TEST(live_final_model_equals_inline_model);
     HU_RUN_TEST(shadow_keeps_extraction_inline_and_counts_it);
+    HU_RUN_TEST(shadow_extract_allocates_nothing_extra);
     HU_RUN_TEST(live_outside_window_runs_inline);
     HU_RUN_TEST(begin_runs_jobs_a_skipped_flush_left);
     HU_RUN_TEST(full_queue_refuses_and_flush_runs_in_background_lane);
 #ifdef HU_ENABLE_SQLITE
     HU_RUN_TEST(live_defers_row_embedding_until_flush);
+    HU_RUN_TEST(shadow_embed_allocates_nothing_extra);
 #endif
 }

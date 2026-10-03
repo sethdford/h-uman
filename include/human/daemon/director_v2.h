@@ -18,6 +18,7 @@
 
 #include "human/channel.h"
 #include "human/core/allocator.h"
+#include "human/core/gate_mode.h"
 #include "human/daemon/director.h"
 #include "human/daemon/director_tapback.h"
 #include "human/provider.h"
@@ -104,5 +105,19 @@ bool hu_director_v2_decide(hu_allocator_t *alloc, struct hu_agent *agent, hu_cha
                            const char *key, size_t key_len, const char *combined,
                            size_t combined_len, const hu_channel_history_entry_t *entries,
                            size_t entry_count, const char *situation, hu_director_result_t *result);
+
+/* hu_director_v2_decide with the gate passed in instead of read from the
+ * environment (hu_director_v2_decide is this with HU_DIRECTOR_V2). */
+bool hu_director_v2_decide_mode(hu_gate_mode_t mode, hu_allocator_t *alloc, struct hu_agent *agent,
+                                hu_channel_t *channel, const char *key, size_t key_len,
+                                const char *combined, size_t combined_len,
+                                const hu_channel_history_entry_t *entries, size_t entry_count,
+                                const char *situation, hu_director_result_t *result);
+
+/* The gate a replay (`human replay`, replay_turn.c) runs the director under:
+ * HU_DIRECTOR_V2 with SHADOW pinned to OFF, so a replayed turn never queues a
+ * shadow job at the live local endpoint. LIVE stays LIVE: the cut-over A/B
+ * measures HU_DIRECTOR_V2=live through the replay harness. */
+hu_gate_mode_t hu_director_v2_replay_mode(void);
 
 #endif /* HU_DAEMON_DIRECTOR_V2_H */

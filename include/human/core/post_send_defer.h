@@ -50,6 +50,11 @@ void hu_post_send_defer_begin(void);
 /* True while this thread has an armed window (SHADOW or LIVE). */
 bool hu_post_send_defer_armed(void);
 
+/* Mode of this thread's armed window (OFF when not armed). A work site checks
+ * it before copying its inputs: under SHADOW offer() never keeps the job, so
+ * the site offers a NULL arg (counted only) and allocates nothing. */
+hu_gate_mode_t hu_post_send_defer_window_mode(void);
+
 /* Offer a job. LIVE + armed + room: the queue takes ownership of `arg`, `run`
  * is called once at flush, then `free_arg` (may be NULL); returns true and the
  * caller must NOT run the work. Otherwise returns false, `arg` stays the

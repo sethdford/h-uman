@@ -1527,9 +1527,14 @@ static void pm_extract_job_free(void *arg) {
 static bool pm_defer_llm_fallback(hu_personal_model_t *model, const char *message,
                                   size_t message_len, int64_t timestamp,
                                   const hu_provenance_t *prov) {
-    if (!hu_post_send_defer_armed() || llm_fact_extract_gate() == 0 || !s_llm_extract_provider ||
+    hu_gate_mode_t mode = hu_post_send_defer_window_mode();
+    if (mode == HU_GATE_OFF || llm_fact_extract_gate() == 0 || !s_llm_extract_provider ||
         !s_llm_extract_alloc || message_len < HU_LLM_FACT_EXTRACT_MIN_LEN)
         return false;
+    if (mode != HU_GATE_LIVE) { /* SHADOW: count it, copy nothing; the caller runs it inline */
+        (void)hu_post_send_defer_offer(HU_POST_SEND_JOB_EXTRACT, pm_extract_job_run, NULL, NULL);
+        return false;
+    }
     hu_allocator_t *a = s_llm_extract_alloc;
     pm_extract_job_t *job = (pm_extract_job_t *)a->alloc(a->ctx, sizeof(*job));
     char *copy = job ? (char *)a->alloc(a->ctx, message_len + 1) : NULL;

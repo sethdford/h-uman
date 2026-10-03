@@ -574,7 +574,21 @@ bool hu_director_v2_decide(hu_allocator_t *alloc, struct hu_agent *agent, hu_cha
                            size_t combined_len, const hu_channel_history_entry_t *entries,
                            size_t entry_count, const char *situation,
                            hu_director_result_t *result) {
+    return hu_director_v2_decide_mode(hu_gate_mode_from_env("HU_DIRECTOR_V2", HU_GATE_OFF), alloc,
+                                      agent, channel, key, key_len, combined, combined_len, entries,
+                                      entry_count, situation, result);
+}
+
+hu_gate_mode_t hu_director_v2_replay_mode(void) {
     hu_gate_mode_t mode = hu_gate_mode_from_env("HU_DIRECTOR_V2", HU_GATE_OFF);
+    return mode == HU_GATE_SHADOW ? HU_GATE_OFF : mode;
+}
+
+bool hu_director_v2_decide_mode(hu_gate_mode_t mode, hu_allocator_t *alloc, struct hu_agent *agent,
+                                hu_channel_t *channel, const char *key, size_t key_len,
+                                const char *combined, size_t combined_len,
+                                const hu_channel_history_entry_t *entries, size_t entry_count,
+                                const char *situation, hu_director_result_t *result) {
     if (mode == HU_GATE_OFF)
         return hu_daemon_director_call(alloc, combined, combined_len, entries, entry_count,
                                        situation, result);
