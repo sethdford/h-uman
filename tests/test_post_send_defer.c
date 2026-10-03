@@ -341,6 +341,7 @@ static size_t psd_embed_bytes_under(const char *mode, size_t *embeds) {
     *embeds = (size_t)s_embeds;
     vs.vtable->deinit(vs.ctx, &alloc);
     mem.vtable->deinit(mem.ctx);
+    HU_ASSERT_EQ(hu_tracking_allocator_leaks(ta), 0u);
     hu_tracking_allocator_destroy(ta);
     return bytes;
 }

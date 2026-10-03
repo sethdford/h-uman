@@ -13,6 +13,8 @@
 #include "human/agent.h"
 #include "human/config.h"
 #include "human/core/allocator.h"
+#include "human/daemon/common.h"
+#include "human/daemon/director.h"
 #include "human/daemon/director_v2.h"
 #include "human/daemon/replay_turn.h"
 #include "human/memory.h"
@@ -236,6 +238,37 @@ static void replay_turn_director_v2_shadow_queues_no_shadow_job(void) {
     rt_teardown(&f);
 }
 
+/* LIVE replays through v2, end to end: the cut-over kit's candidate arm sets
+ * HU_DIRECTOR_V2=live and measures exactly this path. The test director (v1)
+ * tapbacks "k"; v2 answers text, so a replay that ran v1 (live mapped to off)
+ * would skip the reply turn and fail every assertion below. */
+static void replay_turn_director_v2_live_uses_the_v2_decision(void) {
+    rt_fixture_t f;
+    HU_ASSERT_TRUE(rt_setup(&f, "yeah for sure"));
+    hu_provider_t saved = g_classify_provider;
+    bool saved_ok = g_classify_provider_ok;
+    g_classify_provider = (hu_provider_t){.ctx = NULL, .vtable = &k_v2_worker_vt};
+    g_classify_provider_ok = true;
+    s_v2_worker_calls = 0;
+
+    setenv("HU_DIRECTOR_V2", "live", 1);
+    hu_replay_turn_input_t in = rt_input("k");
+    hu_replay_turn_result_t r;
+    HU_ASSERT_EQ(hu_replay_turn_run(&f.alloc, &f.agent, NULL, &f.rp, &in, &r), HU_OK);
+    unsetenv("HU_DIRECTOR_V2");
+    g_classify_provider = saved;
+    g_classify_provider_ok = saved_ok;
+
+    HU_ASSERT_EQ(s_v2_worker_calls, 1); /* v2 decided, inline */
+    HU_ASSERT_TRUE(r.director_valid);
+    HU_ASSERT_EQ((int)r.director.action, (int)DIR_TEXT);
+    HU_ASSERT_STR_EQ(r.director.direction, "engage fully");
+    HU_ASSERT_EQ(r.action, HU_REPLAY_ACTION_TEXT); /* v1 would have been a tapback */
+    HU_ASSERT_GE(r.reply_calls, 1);
+    hu_replay_turn_result_deinit(&f.alloc, &r);
+    rt_teardown(&f);
+}
+
 /* ── 3. a gate's env reaches the request; arms are deterministic ───── */
 
 #define RT_GATE "HU_MAX_TOKENS_RESOLVE"
@@ -414,6 +447,7 @@ void run_replay_turn_tests(void) {
     HU_RUN_TEST(replay_turn_never_calls_channel_send);
     HU_RUN_TEST(replay_turn_director_tapback_skips_the_reply_turn);
     HU_RUN_TEST(replay_turn_director_v2_shadow_queues_no_shadow_job);
+    HU_RUN_TEST(replay_turn_director_v2_live_uses_the_v2_decision);
     HU_RUN_TEST(replay_turn_gate_env_changes_reply_request);
     HU_RUN_TEST(replay_provider_pins_model_and_temperature);
     HU_RUN_TEST(replay_turn_length_policy_live_changes_reply_request);
