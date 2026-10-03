@@ -72,8 +72,9 @@ hu_error_t hu_local_vision_describe(hu_allocator_t *alloc, const char *path, siz
                                     char **out, size_t *out_len);
 
 /* Pure. The OCR helper's outcome: HU_OK on a clean exit 0; HU_ERR_TIMEOUT
- * only when it was killed (exit_code -1) at or near the budget; any other
- * signal death (a crash) or non-zero exit is HU_ERR_IO. */
+ * only when it was killed (exit_code -1) at or after the actual kill time,
+ * max(1, budget_ms / 1000) whole seconds less 250 ms slack; an earlier
+ * signal death (a crash) or a non-zero exit is HU_ERR_IO. */
 hu_error_t hu_local_vision_ocr_exit_error(bool success, int exit_code, long elapsed_ms,
                                           long budget_ms);
 
@@ -90,6 +91,8 @@ void hu_local_vision_set_test_hooks(hu_local_vision_caption_fn caption, hu_local
 const char *hu_local_vision_test_last_log(void);
 /* Block until the background shadow job (if any) has finished. */
 void hu_local_vision_test_wait_shadow(void);
+/* Shadow threads started since the last hu_local_vision_set_test_hooks. */
+int hu_local_vision_test_shadow_spawned(void);
 #endif
 
 #endif /* HU_CONTEXT_LOCAL_VISION_H */

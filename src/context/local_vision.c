@@ -15,6 +15,7 @@
 #include "human/core/process_util.h"
 #include "human/core/string.h"
 #include "human/core/time.h"
+#include <dirent.h>
 #include <fcntl.h>
 #include <pthread.h>
 #include <stdatomic.h>
@@ -22,6 +23,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 #define LV_CAPTION_CAP 280 /* bytes of caption kept */
@@ -281,9 +283,12 @@ hu_error_t hu_local_vision_ocr_exit_error(bool success, int exit_code, long elap
     if (success && exit_code == 0)
         return HU_OK;
     /* exit_code -1 is any signal death. The timeout path SIGKILLs at the
-     * budget (whole seconds, floored), so only a death near it is a timeout;
+     * budget in whole seconds (floored, at least 1), so only a death at or
+     * after that kill time is a timeout;
      * an early one is the helper crashing. */
-    if (exit_code == -1 && elapsed_ms >= budget_ms - 1000)
+    long secs = budget_ms / 1000;
+    long kill_ms = (secs < 1 ? 1 : secs) * 1000; /* the runner kills at whole seconds */
+    if (exit_code == -1 && elapsed_ms >= kill_ms - 250)
         return HU_ERR_TIMEOUT;
     return HU_ERR_IO;
 }
@@ -325,6 +330,7 @@ static hu_error_t lv_ocr_exec(hu_allocator_t *alloc, const char *path, long time
 }
 
 #if defined(HU_IS_TEST) && HU_IS_TEST
+static void lv_test_reset_spawned(void);
 static hu_local_vision_caption_fn g_caption_hook;
 static hu_local_vision_ocr_fn g_ocr_hook;
 static char g_last_log[256];
@@ -333,6 +339,7 @@ void hu_local_vision_set_test_hooks(hu_local_vision_caption_fn caption,
                                     hu_local_vision_ocr_fn ocr) {
     g_caption_hook = caption;
     g_ocr_hook = ocr;
+    lv_test_reset_spawned();
     g_last_log[0] = '\0';
 }
 
@@ -538,11 +545,41 @@ static void lv_log(hu_gate_mode_t mode, const lv_stats_t *st, int64_t ms, const 
 #define LV_SAMPLE_READ_CAP (512u * 1024u)
 #define LV_SAMPLE_FILE     "local_vision_shadow.jsonl"
 
+#define LV_SAMPLE_STALE_SECS 300
+
+/* Remove <state>/local_vision_shadow.jsonl.tmp-* left by a write that died
+ * before its rename. Only ones older than LV_SAMPLE_STALE_SECS: a younger one
+ * may be another process's write in flight. */
+static void lv_sample_sweep_stale(void) {
+    static const char pfx[] = LV_SAMPLE_FILE ".tmp-";
+    char dir[1024];
+    if (hu_paths_state_dir(dir, sizeof(dir)) <= 0)
+        return;
+    DIR *d = opendir(dir);
+    if (!d)
+        return;
+    time_t now = time(NULL);
+    struct dirent *de;
+    while ((de = readdir(d)) != NULL) {
+        if (strncmp(de->d_name, pfx, sizeof(pfx) - 1) != 0)
+            continue;
+        char p[1400];
+        struct stat st;
+        if (snprintf(p, sizeof(p), "%s/%s", dir, de->d_name) >= (int)sizeof(p) ||
+            lstat(p, &st) != 0 || !S_ISREG(st.st_mode))
+            continue;
+        if (now - st.st_mtime > LV_SAMPLE_STALE_SECS)
+            unlink(p);
+    }
+    closedir(d);
+}
+
 /* The promotion read (docs/guides/local-vision.md) needs the captions the log
  * must never carry. They go to <state>/local_vision_shadow.jsonl, mode 0600,
  * the latest LV_SAMPLE_KEEP rows: {ts, path, caption, ocr, description,
  * disagree, latency_ms}. No sender: the daemon never passes one in. Rewritten
- * through a temp file + rename, so a crash leaves the old file whole. */
+ * through a mkstemp (O_EXCL, 0600) temp file + rename, so a crash leaves the
+ * old file whole; stale temps are swept on the next write. */
 static void lv_sample_append(hu_allocator_t *a, const char *path, const lv_stats_t *st,
                              const char *desc, size_t dl, int64_t ms) {
 #if defined(HU_IS_TEST) && HU_IS_TEST
@@ -552,8 +589,9 @@ static void lv_sample_append(hu_allocator_t *a, const char *path, const lv_stats
 #endif
     char fp[1024], tmp[1100];
     int n = hu_paths_state(fp, sizeof(fp), "%s", LV_SAMPLE_FILE);
-    if (n <= 0 || snprintf(tmp, sizeof(tmp), "%s.tmp-%d", fp, (int)getpid()) >= (int)sizeof(tmp))
+    if (n <= 0 || snprintf(tmp, sizeof(tmp), "%s.tmp-XXXXXX", fp) >= (int)sizeof(tmp))
         return;
+    lv_sample_sweep_stale();
     hu_json_buf_t row;
     if (hu_json_buf_init(&row, a) != HU_OK)
         return;
@@ -612,7 +650,7 @@ static void lv_sample_append(hu_allocator_t *a, const char *path, const lv_stats
             k = j;
         }
     }
-    int fd = e ? -1 : open(tmp, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0600);
+    int fd = e ? -1 : mkstemp(tmp); /* O_CREAT|O_EXCL, 0600, unique name */
     bool ok = fd >= 0 && fchmod(fd, 0600) == 0;
     if (ok && keep > 0)
         ok = write(fd, old + old_n - keep, keep) == (ssize_t)keep;
@@ -640,6 +678,15 @@ static atomic_bool g_shadow_busy;
 #if defined(HU_IS_TEST) && HU_IS_TEST
 static pthread_t g_shadow_tid;
 static bool g_shadow_joinable;
+static atomic_int g_shadow_spawned;
+
+static void lv_test_reset_spawned(void) {
+    atomic_store(&g_shadow_spawned, 0);
+}
+
+int hu_local_vision_test_shadow_spawned(void) {
+    return atomic_load(&g_shadow_spawned);
+}
 
 void hu_local_vision_test_wait_shadow(void) {
     if (g_shadow_joinable) {
@@ -709,6 +756,7 @@ static void lv_shadow_spawn(const char *path, size_t path_len) {
 #if defined(HU_IS_TEST) && HU_IS_TEST
         g_shadow_tid = tid;
         g_shadow_joinable = true;
+        atomic_fetch_add(&g_shadow_spawned, 1);
 #endif
         return;
     }

@@ -25,6 +25,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -366,8 +367,12 @@ static void shadow_skips_while_one_is_running(void) {
     (void)hu_daemon_local_photo(PHOTO, "[Photo]", &len, buf, sizeof(buf));
     len = 7;
     HU_ASSERT_STR_EQ(hu_daemon_local_photo(PHOTO, "[Photo]", &len, buf, sizeof(buf)), PLACEHOLDER);
+    /* the second photo is turned away while the first still holds the slot */
+    HU_ASSERT_NOT_NULL(strstr(hu_local_vision_test_last_log(), "result=busy"));
+    HU_ASSERT_EQ(hu_local_vision_test_shadow_spawned(), 1);
     hu_local_vision_test_wait_shadow();
     HU_ASSERT_EQ(g_caption_calls, 1);
+    HU_ASSERT_EQ(g_ocr_calls, 1);
     lv_done();
 }
 
@@ -438,6 +443,43 @@ static void shadow_sample_store_keeps_latest_50(void) {
     lv_done();
 }
 
+/* The rewrite goes through an O_EXCL temp file; stale temps from a crashed
+ * write are swept, a fresh one (a write in flight) is left alone, and a
+ * sample file that somehow became 0644 ends 0600. */
+static void shadow_sample_store_sweeps_stale_temps_and_stays_0600(void) {
+    lv_reset("shadow");
+    char sp[320], stale[360], fresh[360];
+    snprintf(sp, sizeof(sp), "%s/local_vision_shadow.jsonl", g_state_dir);
+    snprintf(stale, sizeof(stale), "%s.tmp-crashed", sp);
+    snprintf(fresh, sizeof(fresh), "%s.tmp-inflight", sp);
+    FILE *f = fopen(sp, "w");
+    HU_ASSERT_NOT_NULL(f);
+    fputs("{\"ts\":1}\n", f);
+    fclose(f);
+    HU_ASSERT_EQ(chmod(sp, 0644), 0);
+    HU_ASSERT_NOT_NULL((f = fopen(stale, "w")));
+    fclose(f);
+    HU_ASSERT_NOT_NULL((f = fopen(fresh, "w")));
+    fclose(f);
+    struct timeval old_t[2] = {{.tv_sec = time(NULL) - 3600}, {.tv_sec = time(NULL) - 3600}};
+    HU_ASSERT_EQ(utimes(stale, old_t), 0);
+    struct stat st;
+    HU_ASSERT_EQ(stat(stale, &st), 0); /* pre: present */
+
+    char buf[4096];
+    size_t len = 7;
+    (void)hu_daemon_local_photo(PHOTO, "[Photo]", &len, buf, sizeof(buf));
+    hu_local_vision_test_wait_shadow();
+
+    HU_ASSERT_TRUE(stat(stale, &st) != 0); /* swept */
+    HU_ASSERT_EQ(stat(fresh, &st), 0);     /* someone else's in-flight write */
+    HU_ASSERT_TRUE(lv_read_samples(buf, sizeof(buf), &st) > 0);
+    HU_ASSERT_EQ((int)(st.st_mode & 0777), 0600);
+    HU_ASSERT_EQ(lv_count_lines(buf), (size_t)2); /* the old row kept, one appended */
+    unlink(fresh);
+    lv_done();
+}
+
 /* LIVE writes no sample: the store exists only to license promotion. */
 static void live_writes_no_sample(void) {
     lv_reset("live");
@@ -456,6 +498,11 @@ static void ocr_exit_maps_crash_and_timeout_apart(void) {
     HU_ASSERT_EQ((int)hu_local_vision_ocr_exit_error(false, -1, 40, 8000), (int)HU_ERR_IO);
     HU_ASSERT_EQ((int)hu_local_vision_ocr_exit_error(false, -1, 8010, 8000), (int)HU_ERR_TIMEOUT);
     HU_ASSERT_EQ((int)hu_local_vision_ocr_exit_error(false, -1, 7900, 8000), (int)HU_ERR_TIMEOUT);
+    /* sub-second budget: the kill lands at the 1 s floor, so 600 ms is a crash */
+    HU_ASSERT_EQ((int)hu_local_vision_ocr_exit_error(false, -1, 600, 500), (int)HU_ERR_IO);
+    HU_ASSERT_EQ((int)hu_local_vision_ocr_exit_error(false, -1, 1005, 500), (int)HU_ERR_TIMEOUT);
+    /* fractional budget: 2500 ms kills at 2 s */
+    HU_ASSERT_EQ((int)hu_local_vision_ocr_exit_error(false, -1, 2000, 2500), (int)HU_ERR_TIMEOUT);
 }
 
 /* ── OFF is byte-identical to today ─────────────────────────────────────── */
@@ -568,6 +615,7 @@ void run_local_vision_tests(void) {
     HU_RUN_TEST(shadow_log_line_is_aggregate_only);
     HU_RUN_TEST(shadow_writes_private_sample_for_owner_review);
     HU_RUN_TEST(shadow_sample_store_keeps_latest_50);
+    HU_RUN_TEST(shadow_sample_store_sweeps_stale_temps_and_stays_0600);
     HU_RUN_TEST(live_writes_no_sample);
     HU_RUN_TEST(ocr_exit_maps_crash_and_timeout_apart);
     HU_RUN_TEST(off_is_byte_identical_to_placeholder);
