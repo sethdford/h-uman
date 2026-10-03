@@ -142,6 +142,10 @@ bool hu_agent_internal_is_transport_error(hu_error_t err) {
     return err == HU_ERR_IO || err == HU_ERR_TIMEOUT || err == HU_ERR_PROVIDER_UNAVAILABLE;
 }
 
+bool hu_agent_error_is_transport(hu_error_t err) {
+    return hu_agent_internal_is_transport_error(err);
+}
+
 void hu_agent_internal_apply_turn_request_overrides(const hu_agent_t *agent,
                                                     hu_chat_request_t *req) {
     /* See agent_internal.h for contract. Currently a single contract:

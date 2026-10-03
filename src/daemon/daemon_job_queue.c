@@ -28,6 +28,7 @@ void hu_daemon_job_queue_reset_for_test(void) {
 #ifdef HU_ENABLE_SQLITE
 
 #include "human/core/time.h"
+#include "human/daemon/job_hold.h"
 
 static const char *jobq_mode_name(hu_gate_mode_t mode) {
     return mode == HU_GATE_LIVE ? "live" : mode == HU_GATE_SHADOW ? "shadow" : "off";
@@ -44,7 +45,29 @@ static hu_error_t jobq_recover(sqlite3 *db, int64_t now_s) {
     return err;
 }
 
+/* HU_JOB_HOLD needs the jobs table to go LIVE; without a started queue it
+ * can only shadow. Unset/off adds no log line, so OFF/OFF stays as before. */
+static void jobq_configure_hold(sqlite3 *db, hu_observer_t *obs) {
+    hu_gate_mode_t want = hu_gate_mode_from_env(HU_JOB_HOLD_ENV, HU_GATE_OFF);
+    hu_gate_mode_t mode = want == HU_GATE_LIVE && !g_jobq.started ? HU_GATE_SHADOW : want;
+    hu_daemon_job_hold_configure(mode, mode == HU_GATE_LIVE ? db : NULL);
+    if (want == HU_GATE_LIVE && mode != HU_GATE_LIVE)
+        hu_log_warn("jobq", obs,
+                    "[jobq] HU_JOB_HOLD=live needs the job queue (HU_JOB_QUEUE=shadow|live and a "
+                    "clean start); running the hold path as shadow");
+    else if (mode != HU_GATE_OFF)
+        hu_log_info("jobq", obs, "[jobq] inbound hold HU_JOB_HOLD=%s", jobq_mode_name(mode));
+}
+
+static hu_error_t jobq_start(sqlite3 *db, hu_observer_t *obs);
+
 hu_error_t hu_daemon_job_queue_start(sqlite3 *db, hu_observer_t *obs) {
+    hu_error_t err = jobq_start(db, obs);
+    jobq_configure_hold(db, obs);
+    return err;
+}
+
+static hu_error_t jobq_start(sqlite3 *db, hu_observer_t *obs) {
     hu_gate_mode_t mode = hu_daemon_job_queue_mode();
     g_jobq.mode = mode;
     g_jobq.started = false;

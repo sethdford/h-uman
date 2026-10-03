@@ -857,6 +857,13 @@ void hu_agent_m3_record_chat_outcome(hu_agent_t *agent, const char *prompt, size
  * Borrowed pointers inside that struct must outlive the agent. Pass NULL to disable TTS. */
 void hu_agent_set_voice_config(hu_agent_t *agent, hu_voice_config_t *voice_cfg);
 
+/* True when a turn error means the model was never reached or never answered
+ * (HU_ERR_IO, HU_ERR_TIMEOUT, HU_ERR_PROVIDER_UNAVAILABLE), as opposed to an
+ * answer that was unusable. The same classification the tool loop uses to
+ * stop retrying a dead provider; public so the daemon can decide whether a
+ * failed turn's messages are worth holding (include/human/daemon/job_hold.h). */
+bool hu_agent_error_is_transport(hu_error_t err);
+
 /* Run one conversation turn: send to provider, process tool calls, iterate. */
 hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, char **response_out,
                          size_t *response_len_out);

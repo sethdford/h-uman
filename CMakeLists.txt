@@ -1294,6 +1294,8 @@ set(HU_CORE_SOURCES
     src/daemon/daemon_outbound_bus.c
     src/daemon/daemon_send_provenance.c
     src/daemon/daemon_job_queue.c
+    src/daemon/daemon_job_hold.c
+    src/daemon/daemon_job_release.c
     src/daemon/daemon_send_failure.c
     src/daemon/owner_notify.c
     src/daemon/daemon_reply_delay.c
@@ -3688,6 +3690,7 @@ set(HU_TEST_SOURCES
     tests/test_daemon_config_reload.c
     tests/test_daemon_identity_graph.c
     tests/test_daemon_job_queue.c
+    tests/test_daemon_job_hold.c
     tests/test_daemon_name_catch.c
     tests/test_daemon_thread_context.c
     tests/test_daemon_reply_fallback.c

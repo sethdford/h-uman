@@ -2387,7 +2387,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
             hu_channel_loop_msg_t msgs[16];
             memset(msgs, 0, sizeof(msgs));
             size_t count = 0;
-            hu_error_t poll_err = ch->poll_fn(ch->channel_ctx, alloc, msgs, 16, &count);
+            hu_error_t poll_err = hu_daemon_jobs_poll(ch, alloc, agent, config, msgs, 16, &count);
             ch->last_poll_ms = tick_now;
             time_t poll_receive_time = 0;
             if (count > 0) {
@@ -6777,10 +6777,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         hu_log_info("human", agent ? agent->observer : NULL,
                                     "response hex[0..%zu]: %s", dump_n, hex);
                     }
+                    /* Logs the failure; HU_JOB_HOLD may hold the batch while the model is down. */
                     if (err != HU_OK)
-                        hu_log_error("human", agent ? agent->observer : NULL,
-                                     "agent turn failed for %s: %s", HU_LOG_WHO(batch_key, key_len),
-                                     hu_error_string(err));
+                        hu_daemon_jobs_on_turn_error(agent, config, ch, msgs, batch_start,
+                                                     batch_end, err);
 
                     /* W14 counterfactual rehearsal — enqueue at most once
                      * per hour for the active contact after a successful
