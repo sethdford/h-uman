@@ -411,6 +411,11 @@ static void test_cron_directed_send_allowed_for_consenting_contact(void) {
     hu_channel_t chan = ug_channel();
     hu_service_channel_t chans[1] = {{.channel = &chan}};
     HU_ASSERT_EQ(ug_sent_rows(db, UG_X, "unprompted_cron"), 0);
+    /* "proactive:" jobs also sit behind HU_PROACTIVE_CHECKINS (#615, default
+     * off); this test is about the unprompted stack, so open that gate. */
+    const char *prev_ci = getenv("HU_PROACTIVE_CHECKINS");
+    char *saved_ci = prev_ci ? strdup(prev_ci) : NULL;
+    setenv("HU_PROACTIVE_CHECKINS", "live", 1);
     HU_ASSERT_EQ(hu_service_run_agent_cron_at(&alloc, &agent, chans, 1, (time_t)ug_local_noon(0)),
                  HU_OK);
     HU_ASSERT_EQ(g_ug.sends, 1);
@@ -422,6 +427,12 @@ static void test_cron_directed_send_allowed_for_consenting_contact(void) {
         hu_service_run_agent_cron_at(&alloc, &agent, chans, 1, (time_t)ug_local_noon(0) + 3600),
         HU_OK);
     HU_ASSERT_EQ(g_ug.sends, 1);
+    if (saved_ci) {
+        setenv("HU_PROACTIVE_CHECKINS", saved_ci, 1);
+        free(saved_ci);
+    } else {
+        unsetenv("HU_PROACTIVE_CHECKINS");
+    }
     hu_cron_destroy(sched, &alloc);
     mem.vtable->deinit(mem.ctx);
 }
