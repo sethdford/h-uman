@@ -1310,7 +1310,7 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
     size_t plan_ctx_len = 0;
     char *plan_ctx = hu_turn_active_plan(agent, &plan_ctx_len);
 #ifndef HU_IS_TEST
-    if (msg_len > 200 && agent->tools_count >= 5 && agent->provider.vtable &&
+    if (msg_len > 200 && agent->tools_count >= 5 && !agent->spoken_turn && agent->provider.vtable &&
         agent->provider.vtable->chat) {
         const char *tool_names[32];
         size_t tn_count = 0;
