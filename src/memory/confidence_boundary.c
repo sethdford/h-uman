@@ -41,7 +41,9 @@ static void copy_contact(char *out, size_t cap, const char *src, size_t len) {
         len = 0;
     if (len >= cap)
         len = cap - 1;
-    if (len)
+    /* src re-tested here: after inlining a NULL-src call GCC's fortified
+     * memcpy can't see the len=0 above and fails -Werror=nonnull. */
+    if (src && len)
         memcpy(out, src, len);
     out[len] = '\0';
 }
