@@ -6780,7 +6780,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     /* Logs the failure; HU_JOB_HOLD may hold the batch while the model is down. */
                     if (err != HU_OK)
                         hu_daemon_jobs_on_turn_error(agent, config, ch, msgs, batch_start,
-                                                     batch_end, err);
+                                                     batch_end, batch_key, key_len, err);
 
                     /* W14 counterfactual rehearsal — enqueue at most once
                      * per hour for the active contact after a successful

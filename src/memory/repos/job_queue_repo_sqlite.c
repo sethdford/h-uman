@@ -373,6 +373,25 @@ hu_error_t hu_job_queue_repo_expire_older_than(sqlite3 *db, const char *kind, in
     return HU_OK;
 }
 
+hu_error_t hu_job_queue_repo_count_due(sqlite3 *db, const char *kind, int64_t now, int64_t *out_n) {
+    if (!db || !out_n || !jq_kind_is_valid(kind))
+        return HU_ERR_INVALID_ARGUMENT;
+    *out_n = 0;
+    sqlite3_stmt *st = NULL;
+    if (sqlite3_prepare_v2(db,
+                           "SELECT COUNT(*) FROM jobs WHERE state='pending' AND kind=?1 AND "
+                           "due_at <= ?2;",
+                           -1, &st, NULL) != SQLITE_OK)
+        return HU_ERR_MEMORY_STORE;
+    sqlite3_bind_text(st, 1, kind, -1, SQLITE_STATIC);
+    sqlite3_bind_int64(st, 2, now);
+    int rc = sqlite3_step(st);
+    if (rc == SQLITE_ROW)
+        *out_n = sqlite3_column_int64(st, 0);
+    sqlite3_finalize(st);
+    return rc == SQLITE_ROW ? HU_OK : HU_ERR_MEMORY_STORE;
+}
+
 hu_error_t hu_job_queue_repo_counts(sqlite3 *db, hu_job_queue_counts_t *out) {
     if (!db || !out)
         return HU_ERR_INVALID_ARGUMENT;

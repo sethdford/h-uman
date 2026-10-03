@@ -63,6 +63,11 @@ void hu_http_response_free(hu_allocator_t *alloc, hu_http_response_t *resp);
 #if defined(HU_IS_TEST) && HU_IS_TEST
 /* Test builds only: the extra-header block of this thread's last mock POST. */
 const char *hu_http_test_last_extra_headers(void);
+/* Test builds only: mock GETs on this thread, and the caps the last one
+ * would have run under (hu_http_effective_*). */
+unsigned hu_http_test_get_count(void);
+long hu_http_test_last_get_timeout_secs(void);
+long hu_http_test_last_get_connect_timeout_secs(void);
 #endif
 
 typedef size_t (*hu_http_stream_cb)(const char *chunk, size_t chunk_len, void *userdata);
@@ -75,6 +80,11 @@ hu_error_t hu_http_post_json_stream(hu_allocator_t *alloc, const char *url, cons
 hu_error_t hu_http_get(hu_allocator_t *alloc, const char *url,
                        const char *auth_header, /* e.g. "Bearer sk-xxx", or NULL */
                        hu_http_response_t *out);
+
+/* GET with explicit transport caps. opts may be NULL (= defaults). Returns
+ * HU_ERR_TIMEOUT when the cap expires before the response arrives. */
+hu_error_t hu_http_get_opts(hu_allocator_t *alloc, const char *url, const char *auth_header,
+                            const hu_http_request_opts_t *opts, hu_http_response_t *out);
 
 /* GET that follows up to max_redirects HTTPS→HTTPS redirects (301/302/307/308).
  * hu_http_get never follows: an API that answers 3xx is a misconfiguration
