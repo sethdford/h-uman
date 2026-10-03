@@ -40,4 +40,11 @@ const char *hu_compatible_test_last_headers(void);
 hu_error_t hu_compatible_create(hu_allocator_t *alloc, const char *api_key, size_t api_key_len,
                                 const char *base_url, size_t base_url_len, hu_provider_t *out);
 
+/* Called with each failed chat result. When a request carrying images or video failed
+ * with HU_ERR_NOT_SUPPORTED (the server is text-only), the provider stops claiming
+ * vision for the rest of the process and logs that once. Other results are ignored;
+ * non-compatible providers are ignored. */
+void hu_compatible_record_modality_error(hu_provider_t *p, hu_error_t err,
+                                         const hu_chat_request_t *request);
+
 #endif

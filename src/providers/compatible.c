@@ -11,6 +11,7 @@
 #include "human/providers/provider_http.h"
 #include "human/util/harmony_filter.h"
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -72,7 +73,12 @@ typedef struct hu_compatible_ctx {
     size_t api_key_len;
     char *base_url;
     size_t base_url_len;
+    /* Set once the server rejects an image as unsupported (a text-only model):
+     * supports_vision then answers false so callers stop sending images. */
+    atomic_bool no_vision;
 } hu_compatible_ctx_t;
+
+static const hu_provider_vtable_t compatible_vtable;
 
 static hu_error_t compatible_chat(void *ctx, hu_allocator_t *alloc,
                                   const hu_chat_request_t *request, const char *model,
@@ -494,8 +500,11 @@ static hu_error_t compatible_chat(void *ctx, hu_allocator_t *alloc,
                                           &http_opts, &parsed);
     pthread_mutex_unlock(&g_compatible_chat_lock);
     alloc->free(alloc->ctx, body, body_len);
-    if (err != HU_OK)
+    if (err != HU_OK) {
+        hu_compatible_record_modality_error(
+            &(hu_provider_t){.ctx = cc, .vtable = &compatible_vtable}, err, request);
         return err;
+    }
 
     memset(out, 0, sizeof(*out));
     hu_json_value_t *choices = hu_json_object_get(parsed, "choices");
@@ -966,8 +975,21 @@ static bool compatible_supports_streaming(void *ctx) {
 }
 
 static bool compatible_supports_vision(void *ctx) {
-    (void)ctx;
-    return true;
+    const hu_compatible_ctx_t *cc = (const hu_compatible_ctx_t *)ctx;
+    return !(cc && atomic_load(&cc->no_vision));
+}
+
+static bool request_has_media(const hu_chat_request_t *req) {
+    for (size_t i = 0; req && i < req->messages_count; i++) {
+        const hu_chat_message_t *m = &req->messages[i];
+        for (size_t j = 0; m->content_parts && j < m->content_parts_count; j++) {
+            hu_content_part_tag_t t = m->content_parts[j].tag;
+            if (t == HU_CONTENT_PART_IMAGE_URL || t == HU_CONTENT_PART_IMAGE_BASE64 ||
+                t == HU_CONTENT_PART_VIDEO_URL)
+                return true;
+        }
+    }
+    return false;
 }
 
 static hu_error_t compatible_stream_chat(void *ctx, hu_allocator_t *alloc,
@@ -1466,4 +1488,17 @@ hu_error_t hu_compatible_create(hu_allocator_t *alloc, const char *api_key, size
     out->ctx = cc;
     out->vtable = &compatible_vtable;
     return HU_OK;
+}
+
+void hu_compatible_record_modality_error(hu_provider_t *p, hu_error_t err,
+                                         const hu_chat_request_t *request) {
+    if (!p || p->vtable != &compatible_vtable || !p->ctx)
+        return;
+    if (err != HU_ERR_NOT_SUPPORTED || !request_has_media(request))
+        return;
+    hu_compatible_ctx_t *cc = (hu_compatible_ctx_t *)p->ctx;
+    if (!atomic_exchange(&cc->no_vision, true))
+        hu_log_info("provider", NULL,
+                    "%.*s serves a text-only model; image descriptions are off for this run",
+                    (int)cc->base_url_len, cc->base_url ? cc->base_url : "");
 }
