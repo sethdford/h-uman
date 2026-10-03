@@ -26,6 +26,27 @@ static void assert_transcribe_json_text(hu_allocator_t *alloc, const char *json,
     hu_json_free(alloc, root);
 }
 
+/* Replies are written like texts; the voice must not read "lol" or emoji aloud. */
+static void voice_stream_speakable_drops_texting_forms(void) {
+    char out[256];
+    const char *reply = "haha yeah that was wild lol \xF0\x9F\x98\x82 lmk when you're free";
+    size_t n = hu_voice_stream_speakable(reply, strlen(reply), out, sizeof(out));
+    HU_ASSERT_TRUE(n > 0);
+    HU_ASSERT_EQ(n, strlen(out));
+    HU_ASSERT_NULL(strstr(out, "lol"));
+    HU_ASSERT_NULL(strstr(out, "haha"));
+    HU_ASSERT_NULL(strstr(out, "\xF0\x9F\x98\x82"));
+    HU_ASSERT_STR_CONTAINS(out, "that was wild");
+    HU_ASSERT_STR_CONTAINS(out, "let me know");
+}
+
+static void voice_stream_speakable_skips_a_chunk_with_nothing_to_say(void) {
+    char out[64];
+    HU_ASSERT_EQ(hu_voice_stream_speakable("lol", 3, out, sizeof(out)), 0u);
+    HU_ASSERT_EQ(hu_voice_stream_speakable(NULL, 0, out, sizeof(out)), 0u);
+    HU_ASSERT_EQ(out[0], '\0');
+}
+
 static void test_gateway_voice_transcribe_cartesia_provider(void) {
     hu_allocator_t backing = hu_system_allocator();
     hu_config_t cfg;
@@ -560,6 +581,8 @@ static void test_gateway_voice_clone_null_alloc_returns_error(void) {
 void run_gateway_voice_tests(void) {
 #ifdef HU_GATEWAY_POSIX
     HU_TEST_SUITE("Gateway voice");
+    HU_RUN_TEST(voice_stream_speakable_drops_texting_forms);
+    HU_RUN_TEST(voice_stream_speakable_skips_a_chunk_with_nothing_to_say);
     HU_RUN_TEST(test_gateway_voice_transcribe_cartesia_provider);
     HU_RUN_TEST(test_gateway_voice_transcribe_default_gemini);
     HU_RUN_TEST(test_gateway_voice_session_start_returns_pcm_meta);
