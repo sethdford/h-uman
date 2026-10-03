@@ -304,15 +304,23 @@ static void vs_free_slot(vs_slot_t *sl, hu_allocator_t *alloc) {
     memset(sl, 0, sizeof(*sl));
 }
 
-static void vs_drain_tts_to_conn(vs_slot_t *sl) {
+/* How long to wait for more TTS audio. Cartesia sends "done" for a context only after it
+ * is flushed, so while the reply is still being generated (context open) only forward
+ * audio that is already arriving; waiting for "done" there stalled every spoken turn
+ * until the receive timed out. After the flush, wait for "done" so the tail is sent. */
+#define VS_TTS_OPEN_WAIT_MS   40
+#define VS_TTS_CLOSED_WAIT_MS 30000
+
+static void vs_drain_tts_to_conn(vs_slot_t *sl, bool context_flushed) {
     if (!sl || !sl->tts || !s_proto || !s_proto->ws || !sl->conn || !sl->conn->active)
         return;
     hu_allocator_t *a = s_proto->alloc;
+    int wait_ms = context_flushed ? VS_TTS_CLOSED_WAIT_MS : VS_TTS_OPEN_WAIT_MS;
     for (;;) {
         void *pcm = NULL;
         size_t n = 0;
         bool done = false;
-        hu_error_t err = hu_cartesia_stream_recv_next(sl->tts, a, &pcm, &n, &done);
+        hu_error_t err = hu_cartesia_stream_recv_next_wait(sl->tts, a, wait_ms, &pcm, &n, &done);
         if (err != HU_OK)
             break;
         if (pcm && n > 0)
@@ -326,7 +334,7 @@ static void vs_drain_tts_to_conn(vs_slot_t *sl) {
 
 static void vs_finish_agent_turn(vs_slot_t *sl, hu_allocator_t *a) {
     (void)hu_cartesia_stream_flush_context(sl->tts, a, sl->tts_context);
-    vs_drain_tts_to_conn(sl);
+    vs_drain_tts_to_conn(sl, true);
     hu_control_send_event_to_conn(s_proto, sl->conn, "voice.audio.done", "{}");
     sl->tts_armed = false;
     if (s_active_tts_slot == sl)
@@ -424,7 +432,7 @@ static bool vs_bus_cb(hu_bus_event_type_t type, const hu_bus_event_t *ev, void *
             }
             if (hu_cartesia_stream_send_generation(sl->tts, a, sl->tts_context, tts_text, true) ==
                 HU_OK)
-                vs_drain_tts_to_conn(sl);
+                vs_drain_tts_to_conn(sl, false);
         } else if (action == HU_TURN_ACTION_YIELD_FLOOR) {
             vs_finish_agent_turn(sl, a);
         }

@@ -46,8 +46,19 @@ hu_error_t hu_cartesia_stream_cancel_context(hu_cartesia_stream_t *s, hu_allocat
 /**
  * Receive the next server message. On type "chunk", decodes base64 PCM f32le into *pcm_out.
  * *recv_done is true when type is "done" or "error" (caller should stop draining).
+ * Waits up to 30 s for a message.
  */
 hu_error_t hu_cartesia_stream_recv_next(hu_cartesia_stream_t *s, hu_allocator_t *alloc,
                                         void **pcm_out, size_t *pcm_len, bool *recv_done);
+
+/**
+ * As hu_cartesia_stream_recv_next, waiting at most timeout_ms; returns HU_ERR_TIMEOUT when
+ * nothing arrived. Cartesia sends "done" for a context only after it is flushed
+ * (continue=false), so while a context is still open, wait briefly for audio that is
+ * already on its way instead of waiting for "done".
+ */
+hu_error_t hu_cartesia_stream_recv_next_wait(hu_cartesia_stream_t *s, hu_allocator_t *alloc,
+                                             int timeout_ms, void **pcm_out, size_t *pcm_len,
+                                             bool *recv_done);
 
 #endif /* HU_CARTESIA_STREAM_H */
