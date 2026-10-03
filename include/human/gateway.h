@@ -72,6 +72,15 @@ void hu_gateway_config_from_cfg(const struct hu_config_gateway *cfg_gw, hu_gatew
 /* Run the gateway server (HTTP + WebSocket + static files). Blocks until stopped.
  * POSIX only: uses socket/bind/listen/accept + poll for multiplexing.
  * In tests, does NOT bind to a port if HU_GATEWAY_TEST_MODE is defined. */
+/* Ignore SIGPIPE for the whole process. A gateway writes to sockets whose peer may
+ * have gone (a client quitting mid-reply); without this, macOS kills the process.
+ * hu_gateway_run calls it; the service-loop daemon already did the same. */
+void hu_gateway_harden_signals(void);
+
+/* Mark one socket so a write to a closed peer returns EPIPE instead of raising
+ * SIGPIPE (SO_NOSIGPIPE; a no-op where MSG_NOSIGNAL covers it). */
+void hu_gateway_socket_no_sigpipe(int fd);
+
 hu_error_t hu_gateway_run(hu_allocator_t *alloc, const char *host, uint16_t port,
                           const hu_gateway_config_t *config);
 

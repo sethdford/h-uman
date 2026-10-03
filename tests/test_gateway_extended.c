@@ -616,6 +616,51 @@ static void test_event_bridge_publish_no_crash(void) {
 
 /* ── WS Server Extended Tests ───────────────────────────────────────── */
 
+#if defined(HU_GATEWAY_POSIX)
+#include <sys/socket.h>
+#include <unistd.h>
+
+static int s_close_on_msg_calls;
+
+static void close_on_message(hu_ws_conn_t *conn, const char *data, size_t len, void *ctx) {
+    (void)data;
+    (void)len;
+    s_close_on_msg_calls++;
+    hu_ws_server_close_conn((hu_ws_server_t *)ctx, conn);
+}
+
+/* A handler that closes the connection (a send failed: the client left mid-turn)
+ * must end processing. Two frames are buffered so the loop has more to do. */
+static void ws_server_process_stops_after_handler_closes_conn(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_ws_server_t ws;
+    hu_ws_server_init(&ws, &alloc, close_on_message, NULL, NULL);
+    ws.cb_ctx = &ws;
+    int sv[2];
+    HU_ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
+    hu_ws_conn_t *c = &ws.conns[0];
+    memset(c, 0, sizeof(*c));
+    c->fd = sv[0];
+    c->active = true;
+    c->recv_buf = c->inline_buf;
+    c->recv_cap = HU_WS_SERVER_RECV_BUF;
+    ws.conn_count = 1;
+    /* masked text frame "hi" (zero mask), twice */
+    static const unsigned char frame[] = {0x81, 0x82, 0, 0, 0, 0, 'h', 'i'};
+    memcpy(c->recv_buf, frame, sizeof(frame));
+    memcpy(c->recv_buf + sizeof(frame), frame, sizeof(frame));
+    c->recv_len = 2 * sizeof(frame);
+    s_close_on_msg_calls = 0;
+
+    HU_ASSERT_EQ(hu_ws_server_process(&ws, c), HU_ERR_IO);
+    HU_ASSERT_EQ(s_close_on_msg_calls, 1);
+    HU_ASSERT_FALSE(c->active);
+    HU_ASSERT_EQ(c->recv_len, 0u);
+    close(sv[1]);
+    hu_ws_server_deinit(&ws);
+}
+#endif
+
 static void test_ws_server_process_null(void) {
     hu_error_t err = hu_ws_server_process(NULL, NULL);
     HU_ASSERT_EQ(err, HU_ERR_INVALID_ARGUMENT);
@@ -1892,6 +1937,9 @@ void run_gateway_extended_tests(void) {
 
     HU_TEST_SUITE("WS Server Extended");
     HU_RUN_TEST(test_ws_server_process_null);
+#if defined(HU_GATEWAY_POSIX)
+    HU_RUN_TEST(ws_server_process_stops_after_handler_closes_conn);
+#endif
     HU_RUN_TEST(test_ws_server_read_and_process_null);
     HU_RUN_TEST(test_ws_server_close_conn_inactive);
     HU_RUN_TEST(test_ws_server_is_upgrade_short);

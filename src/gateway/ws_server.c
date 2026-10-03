@@ -660,6 +660,12 @@ hu_error_t hu_ws_server_process(hu_ws_server_t *srv, hu_ws_conn_t *conn) {
         case HU_WS_OP_BINARY:
             if (srv->on_message)
                 srv->on_message(conn, payload, plen, srv->cb_ctx);
+            /* The handler can close this connection (a send failing because the client
+             * left mid-turn). Closing resets recv_len to 0 and recv_buf to the inline
+             * buffer, so continuing would compute recv_len - total as a huge size and
+             * memmove out of bounds: the voice gateway died with SIGBUS doing this. */
+            if (!conn->active)
+                return HU_ERR_IO;
             break;
         case HU_WS_OP_PING: {
 #ifdef HU_GATEWAY_POSIX
