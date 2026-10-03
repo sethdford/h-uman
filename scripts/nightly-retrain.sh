@@ -472,6 +472,38 @@ stop_serving() {
     return 0
 }
 
+# ── Local vision server (HU_LOCAL_VISION, a functions pair so
+#    scripts/test_nightly_retrain_stop_vision.sh can drive it hermetically) ──
+#
+# ai.human.vision-server (Gemma 4 E2B, ~4.3 GB) is optional: installed only by
+# scripts/install-local-vision.sh. When it is installed AND loaded, boot it out
+# for the training window like mlx-server and bootstrap it back afterwards.
+# Never blocks training: a failed bootout is a warning (4.3 GB is ~3% of RAM),
+# and a server this script did not stop is never started by the trap.
+VISION_LABEL="gui/$(id -u)/ai.human.vision-server"
+VISION_PLIST="$HOME/Library/LaunchAgents/ai.human.vision-server.plist"
+vision_stopped=0
+stop_vision() {
+    [[ -f "$VISION_PLIST" ]] || return 0
+    launchctl print "$VISION_LABEL" >/dev/null 2>&1 || return 0
+    if launchctl bootout "$VISION_LABEL" >>"$LOG" 2>&1; then
+        vision_stopped=1
+        log "vision-server booted out for training"
+    else
+        log "WARNING: launchctl bootout $VISION_LABEL failed — training beside it"
+    fi
+    return 0
+}
+restore_vision() {
+    [[ "$vision_stopped" == "1" ]] || return 0
+    vision_stopped=0
+    if launchctl bootstrap "gui/$(id -u)" "$VISION_PLIST" >>"$LOG" 2>&1; then
+        log "vision-server restored"
+    else
+        log "WARNING: vision-server bootstrap failed — run: launchctl bootstrap gui/$(id -u) $VISION_PLIST"
+    fi
+}
+
 # Testability hook: `HU_RETRAIN_STAGE_TEST=1 bash -c 'source scripts/nightly-retrain.sh; run_mlxtune_candidate_stage'`
 # (or the equivalent from a test harness) defines log()/run_mlxtune_candidate_stage()/stop_serving()
 # above and stops here — the window check, mlx-server bootout, and real
@@ -610,9 +642,10 @@ restore_serving() {
         log "WARNING: mlx-server did not report healthy within ~120s"
     fi
 }
-trap restore_serving EXIT INT TERM
+trap 'restore_serving; restore_vision' EXIT INT TERM
 
-# The EXIT trap above only restores what stop_serving reports as stopped.
+# The EXIT trap above only restores what stop_serving / stop_vision report as stopped.
+stop_vision
 stop_serving || exit 1
 
 # MLX training must use the PINNED 3.12 venv, the same interpreter human-serve.sh

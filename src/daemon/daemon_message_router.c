@@ -29,6 +29,7 @@
 #include "human/channels/imessage_reply.h"
 #include "human/config.h"
 #include "human/context/conversation.h"
+#include "human/context/local_vision.h"
 #include "human/context/vision.h"
 #include "human/core/local_only_guard.h"
 #include "human/core/log.h"
@@ -708,7 +709,11 @@ hu_error_t hu_daemon_describe_image(hu_allocator_t *alloc, hu_agent_t *agent,
         return HU_ERR_INVALID_ARGUMENT;
     /* local_only: no image bytes leave the process — the cloud is off-limits
      * and the local server is text-only (422s). The caller substitutes a
-     * placeholder the model can react to. */
+     * placeholder the model can react to. HU_LOCAL_VISION deliberately does
+     * NOT run here: the per-message path (hu_daemon_local_photo) describes
+     * each photo once, into the user turn. This step-6 latest-attachment call
+     * would re-describe it on every later turn, uncached, into system-side
+     * context (#617 review). */
     if (hu_local_only_enforced())
         return HU_ERR_NOT_SUPPORTED;
     const char *vp = NULL, *vm = NULL;
@@ -779,6 +784,27 @@ const char *hu_daemon_photo_placeholder(const char *text, size_t *len, char *buf
             return text;
     }
     return append_note(text, len, buf, cap, o, note, sizeof(note));
+}
+
+const char *hu_daemon_local_photo(const char *path, const char *text, size_t *len, char *buf,
+                                  size_t cap) {
+    hu_allocator_t a = hu_system_allocator();
+    char *desc = NULL;
+    size_t dl = 0;
+    if (!path || !text || !len || !buf || text == buf ||
+        hu_local_vision_describe(&a, path, strlen(path), &desc, &dl) != HU_OK || !desc)
+        return hu_daemon_photo_placeholder(text, len, buf, cap);
+    char note[1024];
+    int n = snprintf(note, sizeof(note), "[They sent a photo: %.*s]", (int)dl, desc);
+    a.free(a.ctx, desc, dl + 1);
+    size_t o = 0;
+    bool had = false;
+    if (!(*len == 7 && memcmp(text, "[Photo]", 7) == 0)) /* keep the caption */
+        o = strip_attachment_char(text, *len, buf, cap, &had);
+    if (n <= 0 || (size_t)n >= sizeof(note) || o == (size_t)-1)
+        return hu_daemon_photo_placeholder(text, len, buf, cap);
+    const char *r = append_note(text, len, buf, cap, o, note, (size_t)n + 1);
+    return r == text ? hu_daemon_photo_placeholder(text, len, buf, cap) : r;
 }
 
 bool hu_daemon_tool_traffic(const struct hu_persona *p, const char *key, size_t key_len,

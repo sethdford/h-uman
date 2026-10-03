@@ -884,6 +884,7 @@ set(HU_CORE_SOURCES
     src/context/event_extract.c
     src/context/temporal_events.c
     src/context/vision.c
+    src/context/local_vision.c
     src/context/intelligence.c
     src/intelligence/trust.c
     src/feeds/processor.c
@@ -3881,6 +3882,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_externalization.c
     tests/test_conversation.c
     tests/test_vision.c
+    tests/test_local_vision.c
     tests/test_ab_response.c
     tests/test_event_extract.c
     tests/test_stm.c
