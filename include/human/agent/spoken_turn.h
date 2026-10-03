@@ -37,6 +37,11 @@ void hu_spoken_turn_memory_caps(bool voice, size_t *max_entries, size_t *max_cha
 
 size_t hu_spoken_turn_example_cap(bool voice);
 
+/* Whether the turn should scan open browser apps (PWA tabs) for context. That scan
+ * spawns a process per app and took ~0.8 s of a spoken turn; a voice reply is one or
+ * two sentences and cannot use it, so spoken turns skip it. */
+bool hu_spoken_turn_wants_app_context(bool voice);
+
 /* Saved agent state for one turn; hu_spoken_turn_restore puts it back. */
 typedef struct hu_spoken_turn_saved {
     bool lean_prompt;

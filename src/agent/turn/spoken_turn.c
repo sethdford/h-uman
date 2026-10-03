@@ -18,6 +18,10 @@ size_t hu_spoken_turn_example_cap(bool voice) {
     return voice ? HU_SPOKEN_TURN_EXAMPLES : HU_TEXT_EXAMPLES;
 }
 
+bool hu_spoken_turn_wants_app_context(bool voice) {
+    return !voice;
+}
+
 void hu_spoken_turn_begin(struct hu_agent *agent, hu_gate_mode_t mode,
                           hu_spoken_turn_saved_t *saved) {
     if (!agent || !saved)

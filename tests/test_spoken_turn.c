@@ -139,6 +139,11 @@ static void spoken_turn_lean_head_has_fewer_examples_and_spoken_directive(void) 
     hu_persona_deinit(&alloc, &p);
 }
 
+static void spoken_turn_skips_open_app_context_text_keeps_it(void) {
+    HU_ASSERT_TRUE(hu_spoken_turn_wants_app_context(false));
+    HU_ASSERT_FALSE(hu_spoken_turn_wants_app_context(true));
+}
+
 /* 2026-10-03, live voice on Gemini 3.5 Flash: the adaptive token budget gave spoken
  * turns thinkingBudget 1024-2048 against max_tokens 300 (replies cut mid-sentence,
  * first word delayed) and temperature 0.3 on short messages (stiff). A spoken turn
@@ -210,6 +215,7 @@ void run_spoken_turn_tests(void) {
     HU_RUN_TEST(spoken_turn_end_restores_a_lean_prompt_that_was_already_on);
     HU_RUN_TEST(spoken_turn_begin_off_and_shadow_leave_agent_alone);
     HU_RUN_TEST(spoken_turn_lean_head_has_fewer_examples_and_spoken_directive);
+    HU_RUN_TEST(spoken_turn_skips_open_app_context_text_keeps_it);
     HU_RUN_TEST_ENV_GUARDED(spoken_turn_request_has_no_thinking_on_an_analytical_message,
                             s_spoken_req_scratch);
     HU_RUN_TEST_ENV_GUARDED(spoken_turn_request_is_not_cold_on_a_short_message,
