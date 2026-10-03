@@ -115,6 +115,11 @@ final class VoiceModeController: ObservableObject {
     private let vadBox = VADBox()
     private var turns = TurnTaker()
     private var hearing = false
+    /// Speech that began while a reply was audible is the reply's own echo (clean playback
+    /// bypasses the echo canceller) unless it was loud enough to barge in.
+    private var speechStartedDuringReply = false
+    private var echoTailUntil = Date.distantPast
+    private var bargedIn = false
     private lazy var orb = VoiceHUDPanel(controller: self)
 
     func toggle() {
@@ -199,7 +204,10 @@ final class VoiceModeController: ObservableObject {
         }
 
         audio.onDrained = { [weak self] in
-            Task { @MainActor in self?.session?.playbackFinished() }
+            Task { @MainActor in
+                self?.echoTailUntil = Date().addingTimeInterval(0.5)
+                self?.session?.playbackFinished()
+            }
         }
         let vadBox = self.vadBox
         audio.onFrame = { [weak self] frame in
@@ -275,11 +283,20 @@ final class VoiceModeController: ObservableObject {
             switch event {
             case .speechStarted:
                 hearing = true
+                bargedIn = false
+                speechStartedDuringReply = session.state == .speaking || Date() < echoTailUntil
                 if session.state == .listening { phase = .hearing }
             case .sustained:
-                perform(turns.speechSustained(assistant: session.state))
+                let actions = turns.speechSustained(assistant: session.state)
+                if actions.contains(.bargeIn) { bargedIn = true }
+                perform(actions)
             case .utterance(let samples):
                 hearing = false
+                if speechStartedDuringReply && !bargedIn {
+                    Self.log.notice("voice: dropped an utterance that began during the reply (echo)")
+                    if session.state == .listening { phase = .listening }
+                    continue
+                }
                 perform(turns.utterance(samples))
             case .discarded:
                 hearing = false

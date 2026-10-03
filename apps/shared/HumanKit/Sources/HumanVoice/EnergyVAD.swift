@@ -5,7 +5,8 @@ import Foundation
 /// Feed fixed-size frames of mono float samples; it reports when speech starts
 /// and hands back the whole utterance (with a little pre-roll) once speech has
 /// been followed by enough silence. Defaults match the web dashboard's tuned
-/// detector (RMS 0.018, 1.4 s of silence, at least 0.7 s of capture).
+/// detector (RMS 0.018, 1.4 s of silence), with at least 0.4 s of speech so short
+/// answers ("yes", "stop") count.
 ///
 /// While the assistant is talking, raise `threshold` (see `bargeInThreshold`) so
 /// residual echo that survives the OS echo canceller does not count as speech.
@@ -23,7 +24,7 @@ public struct EnergyVAD: Sendable {
 
         public init(sampleRate: Int = PCMCodec.uplinkSampleRate, threshold: Float = 0.018,
                     bargeInThreshold: Float = 0.06, silenceToEndMs: Int = 1_400,
-                    minSpeechMs: Int = 700, preRollMs: Int = 300, maxUtteranceMs: Int = 30_000,
+                    minSpeechMs: Int = 400, preRollMs: Int = 300, maxUtteranceMs: Int = 30_000,
                     sustainMs: Int = 250) {
             self.sampleRate = sampleRate
             self.threshold = threshold

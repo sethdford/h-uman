@@ -21,6 +21,11 @@ final class AudioIO: @unchecked Sendable {
 
     private let engine = AVAudioEngine()
     private let player = AVAudioPlayerNode()
+    /// Replies play here, outside voice processing: routed through the voice-processing
+    /// engine they sound like a phone call. The cost is that the echo canceller no longer
+    /// sees them, so the controller gates the mic while a reply plays.
+    private let playbackEngine = AVAudioEngine()
+    let cleanPlayback = !ProcessInfo.processInfo.arguments.contains("--voice-vp-playback")
     private let queue = DispatchQueue(label: "ai.human.voice.capture")
     private let captureFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32,
                                               sampleRate: Double(PCMCodec.uplinkSampleRate),
@@ -53,8 +58,9 @@ final class AudioIO: @unchecked Sendable {
                 .init(enableAdvancedDucking: true, duckingLevel: .min)
         }
 
-        engine.attach(player)
-        engine.connect(player, to: engine.mainMixerNode, format: playbackFormat)
+        let out = cleanPlayback ? playbackEngine : engine
+        out.attach(player)
+        out.connect(player, to: out.mainMixerNode, format: playbackFormat)
 
         let inFormat = input.outputFormat(forBus: 0)
         audioLog.notice("mic format: \(inFormat.sampleRate) Hz, \(inFormat.channelCount) ch, interleaved=\(inFormat.isInterleaved), common=\(inFormat.commonFormat.rawValue)")
@@ -79,14 +85,19 @@ final class AudioIO: @unchecked Sendable {
         }
         engine.prepare()
         try engine.start()
+        if cleanPlayback {
+            playbackEngine.prepare()
+            try playbackEngine.start()
+        }
         player.play()
-        audioLog.notice("audio engine started (voice processing \(useVP ? "on" : "off", privacy: .public))")
+        audioLog.notice("audio engine started (voice processing \(useVP ? "on" : "off", privacy: .public), playback \(self.cleanPlayback ? "clean" : "through voice processing", privacy: .public))")
     }
 
     func stop() {
         engine.inputNode.removeTap(onBus: 0)
         player.stop()
         engine.stop()
+        if cleanPlayback { playbackEngine.stop() }
         try? engine.inputNode.setVoiceProcessingEnabled(false)
         lock.withLock { generation += 1; scheduled = 0; replyDone = false }
         queue.async { self.pending.removeAll() }
