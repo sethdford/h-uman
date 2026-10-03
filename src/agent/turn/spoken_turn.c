@@ -14,6 +14,10 @@ void hu_spoken_turn_memory_caps(bool voice, size_t *max_entries, size_t *max_cha
         *max_chars = voice ? HU_SPOKEN_TURN_MEMORY_CHARS : HU_TEXT_MEMORY_CHARS;
 }
 
+bool hu_spoken_turn_wants_semantic_recall(bool voice) {
+    return !voice;
+}
+
 size_t hu_spoken_turn_example_cap(bool voice) {
     return voice ? HU_SPOKEN_TURN_EXAMPLES : HU_TEXT_EXAMPLES;
 }

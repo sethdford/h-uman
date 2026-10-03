@@ -6,6 +6,8 @@
 #include "human/agent.h"
 #include "human/agent/spoken_turn.h"
 #include "human/core/allocator.h"
+#include "human/memory.h"
+#include "human/memory/retrieval.h"
 #include "human/persona.h"
 #include "test_env_guard.h"
 #include "test_framework.h"
@@ -202,6 +204,82 @@ static void spoken_turn_request_is_not_cold_on_a_short_message(void) {
     free(voice);
 }
 
+#ifdef HU_ENABLE_SQLITE
+/* Semantic recall embeds the query over the network (~0.5 s on a live voice turn)
+ * before the model is asked. A spoken turn uses keyword recall: the retrieval engine
+ * is not consulted, while the same message as a text turn still consults it. */
+typedef struct {
+    int calls;
+} counting_engine_t;
+
+static hu_error_t counting_retrieve(void *ctx, hu_allocator_t *alloc, const char *query,
+                                    size_t query_len, const hu_retrieval_options_t *opts,
+                                    hu_retrieval_result_t *out) {
+    (void)alloc;
+    (void)query;
+    (void)query_len;
+    (void)opts;
+    ((counting_engine_t *)ctx)->calls++;
+    memset(out, 0, sizeof(*out));
+    return HU_OK;
+}
+
+static void counting_deinit(void *ctx, hu_allocator_t *alloc) {
+    (void)ctx;
+    (void)alloc;
+}
+
+static const hu_retrieval_vtable_t k_counting_vtable = {.retrieve = counting_retrieve,
+                                                        .deinit = counting_deinit};
+
+static int engine_calls_for_turn(const char *msg, bool spoken) {
+    hu_allocator_t alloc = hu_system_allocator();
+    char dir[256];
+    if (!hu_test_mkdtemp("/tmp/hu_spoken_recall_", dir, sizeof(dir)))
+        return -1;
+    snprintf(s_spoken_req_scratch, sizeof(s_spoken_req_scratch), "%s", dir);
+    setenv("HOME", dir, 1);
+    setenv("HU_STATE_DIR", dir, 1);
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    if (!mem.vtable)
+        return -1;
+    hu_memory_category_t cat = {.tag = HU_MEMORY_CATEGORY_CORE};
+    const char *key = "fav_color", *val = "favorite color: teal";
+    (void)mem.vtable->store(mem.ctx, key, strlen(key), val, strlen(val), &cat, NULL, 0);
+    counting_engine_t counter = {0};
+    hu_retrieval_engine_t engine = {.ctx = &counter, .vtable = &k_counting_vtable};
+    trp_t trp;
+    trp_init(&trp, NULL, 0, "ok.");
+    hu_agent_t agent;
+    int calls = -1;
+    if (hu_agent_from_config(&agent, &alloc, trp_provider(&trp), NULL, 0, &mem, NULL, NULL, NULL,
+                             "voice-model", 11, "gateway", 7, 0.7, dir, strlen(dir), 5, 50, false,
+                             1, NULL, 0, NULL, 0, NULL) == HU_OK) {
+        hu_agent_set_retrieval_engine(&agent, &engine);
+        hu_spoken_turn_saved_t saved;
+        hu_spoken_turn_begin(&agent, spoken ? HU_GATE_LIVE : HU_GATE_OFF, &saved);
+        char *r = NULL;
+        size_t rlen = 0;
+        if (hu_agent_turn(&agent, msg, strlen(msg), &r, &rlen) == HU_OK)
+            calls = counter.calls;
+        if (r)
+            alloc.free(alloc.ctx, r, rlen + 1);
+        hu_spoken_turn_end(&agent, &saved);
+        hu_agent_set_retrieval_engine(&agent, NULL);
+        hu_agent_deinit(&agent);
+    }
+    trp_deinit(&trp);
+    mem.vtable->deinit(mem.ctx);
+    return calls;
+}
+
+static void spoken_turn_skips_semantic_recall_text_turn_keeps_it(void) {
+    const char *msg = "what did i tell you about my favorite color last week";
+    HU_ASSERT_TRUE(engine_calls_for_turn(msg, false) > 0);
+    HU_ASSERT_EQ(engine_calls_for_turn(msg, true), 0);
+}
+#endif
+
 void run_spoken_turn_tests(void) {
     HU_TEST_SUITE("spoken_turn");
     HU_RUN_TEST(spoken_turn_caps_shrink_memory_and_examples);
@@ -214,4 +292,8 @@ void run_spoken_turn_tests(void) {
                             s_spoken_req_scratch);
     HU_RUN_TEST_ENV_GUARDED(spoken_turn_request_is_not_cold_on_a_short_message,
                             s_spoken_req_scratch);
+#ifdef HU_ENABLE_SQLITE
+    HU_RUN_TEST_ENV_GUARDED(spoken_turn_skips_semantic_recall_text_turn_keeps_it,
+                            s_spoken_req_scratch);
+#endif
 }

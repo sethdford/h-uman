@@ -35,6 +35,11 @@ hu_gate_mode_t hu_spoken_turn_mode(void);
 
 void hu_spoken_turn_memory_caps(bool voice, size_t *max_entries, size_t *max_chars);
 
+/* Whether the turn may use semantic (embedding) recall. The query embedding is a network
+ * call to the embedder (~0.5 s measured on a live voice turn), paid before the model is
+ * even asked; spoken turns use the store's keyword recall instead. */
+bool hu_spoken_turn_wants_semantic_recall(bool voice);
+
 size_t hu_spoken_turn_example_cap(bool voice);
 
 /* Saved agent state for one turn; hu_spoken_turn_restore puts it back. */
