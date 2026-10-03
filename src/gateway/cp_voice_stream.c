@@ -10,6 +10,7 @@
 #include "human/multimodal.h"
 #include "human/platform.h"
 #include "human/tts/cartesia_stream.h"
+#include "human/tts/speech_text.h"
 #include "human/tts/transcript_prep.h"
 #include "human/voice.h"
 #include "human/voice/audio_emotion.h"
@@ -340,6 +341,25 @@ static void vs_finish_agent_turn(vs_slot_t *sl, hu_allocator_t *a) {
         s_active_tts_slot = NULL;
 }
 
+size_t hu_voice_stream_speakable(const char *chunk, size_t chunk_len, char *out, size_t cap) {
+    if (!out || cap == 0)
+        return 0;
+    out[0] = '\0';
+    if (!chunk || chunk_len == 0)
+        return 0;
+    char stripped[HU_BUS_MSG_LEN];
+    hu_turn_signal_result_t sig;
+    hu_turn_signal_extract(chunk, chunk_len, &sig);
+    if (sig.had_token) {
+        size_t slen = hu_turn_signal_strip(chunk, chunk_len, stripped, sizeof(stripped));
+        if (slen == 0)
+            return 0;
+        chunk = stripped;
+        chunk_len = slen;
+    }
+    return hu_speech_cleanup(chunk, chunk_len, out, cap, NULL);
+}
+
 static bool vs_bus_cb(hu_bus_event_type_t type, const hu_bus_event_t *ev, void *user_ctx) {
     (void)user_ctx;
     if (!s_proto || !s_active_tts_slot || !s_active_tts_slot->tts_armed || !s_active_tts_slot->tts)
@@ -378,15 +398,11 @@ static bool vs_bus_cb(hu_bus_event_type_t type, const hu_bus_event_t *ev, void *
         hu_duplex_agent_chunk(&sl->duplex, now, fsm_signal, &action);
 
         if (action == HU_TURN_ACTION_FLUSH_AUDIO) {
-            char stripped[HU_BUS_MSG_LEN];
-            const char *tts_text = tok;
-            if (sig.had_token) {
-                size_t slen = hu_turn_signal_strip(tok, tok_len, stripped, sizeof(stripped));
-                if (slen > 0)
-                    tts_text = stripped;
-                else
-                    return true;
-            }
+            /* The reply is written like a text message; speak it like a person would. */
+            char spoken[HU_BUS_MSG_LEN];
+            if (hu_voice_stream_speakable(tok, tok_len, spoken, sizeof(spoken)) == 0)
+                return true;
+            const char *tts_text = spoken;
             /* Emotion-aware TTS: detect emotion and apply voice controls to Cartesia */
             {
                 hu_voice_emotion_t emo = HU_VOICE_EMOTION_NEUTRAL;

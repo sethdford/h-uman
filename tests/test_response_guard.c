@@ -2640,6 +2640,22 @@ static void g10_rejects_option_enumeration(void) {
     g10_expect_reject("*Option 3:* ha too cute. mine does that all the time");
 }
 
+/* 2026-10-03 voice: Gemini 3.5 emitted "Draft 1*: wait, i thought you were too
+ * wiped" and the label was spoken aloud. Same candidate-enumeration class as
+ * "Option 3:", with markdown emphasis between the number and the colon. */
+static void g10_rejects_draft_label_enumeration(void) {
+    g10_expect_reject("Draft 1*: wait, i thought you were too wiped");
+    g10_expect_reject("*Draft 2:* honestly just order pizza");
+    g10_expect_reject("Candidate 1: sure, sounds good");
+    g10_expect_reject("Alternative 2 : maybe tomorrow then");
+}
+
+static void g10_passes_ordinary_numbered_words(void) {
+    g10_expect_pass("i finished draft 1 of the essay: it's rough");
+    g10_expect_pass("ios version 18: so buggy");
+    g10_expect_pass("my other option: pizza");
+}
+
 static void g10_rejects_truncated_rules_reference(void) {
     /* L210340 — rules-section reference, truncated mid-quote. */
     g10_expect_reject("The \"Absolute Rules\" section says: \"Text like");
@@ -2909,6 +2925,8 @@ void run_response_guard_tests(void) {
     HU_RUN_TEST(g10_rejects_malformed_channel_marker_with_alternatives);
     HU_RUN_TEST(g10_rejects_absolute_rules_quoting);
     HU_RUN_TEST(g10_rejects_option_enumeration);
+    HU_RUN_TEST(g10_rejects_draft_label_enumeration);
+    HU_RUN_TEST(g10_passes_ordinary_numbered_words);
     HU_RUN_TEST(g10_rejects_truncated_rules_reference);
     HU_RUN_TEST(g10_rejects_style_audit_meta);
     HU_RUN_TEST(g10_rejects_critique_echo_variants);

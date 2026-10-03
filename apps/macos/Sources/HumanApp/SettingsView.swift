@@ -12,6 +12,8 @@ struct SettingsView: View {
     @State private var binaryPath: String = ""
     @State private var appeared = false
     @State private var advancedExpanded = false
+    @AppStorage(VoiceSettings.gatewayURLKey) private var voiceGatewayURL = VoiceSettings.defaultGatewayURL
+    @AppStorage(VoiceSettings.voiceIdKey) private var voiceId = VoiceSettings.defaultVoiceId
 
     private var tokens: (text: Color, textMuted: Color, accent: Color, bgSurface: Color, border: Color, surfaceContainer: Color, success: Color, error: Color) {
         if colorScheme == .dark {
@@ -80,6 +82,22 @@ struct SettingsView: View {
                 Text("Advanced")
                     .font(.custom("Avenir-Medium", size: HUTokens.textSm))
                     .foregroundStyle(tokens.text)
+            }
+
+            Section {
+                TextField("Voice gateway", text: $voiceGatewayURL)
+                    .font(.custom("Avenir-Book", size: HUTokens.textSm))
+                    .accessibilityLabel("Voice gateway URL")
+                TextField("Cartesia voice ID", text: $voiceId)
+                    .font(.custom("Avenir-Book", size: HUTokens.textSm))
+                    .accessibilityLabel("Cartesia voice ID")
+                Text("Takes effect the next time Voice Mode is turned on.")
+                    .font(.custom("Avenir-Book", size: HUTokens.textXs))
+                    .foregroundStyle(tokens.textMuted)
+            } header: {
+                Text("Voice Mode")
+                    .font(.custom("Avenir-Medium", size: HUTokens.textSm))
+                    .foregroundStyle(tokens.textMuted)
             }
 
             Section {
