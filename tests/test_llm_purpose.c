@@ -36,10 +36,10 @@ static void lp_headers(hu_llm_purpose_t p, char *buf, size_t cap) {
 
 static void reply_purposes_send_no_priority_header(void) {
     lp_reset();
-    const hu_llm_purpose_t fg[] = {HU_LLM_PURPOSE_UNTAGGED,        HU_LLM_PURPOSE_REPLY,
-                                   HU_LLM_PURPOSE_GUARD_RETRY,     HU_LLM_PURPOSE_PLANNER,
-                                   HU_LLM_PURPOSE_EXTRACT,         HU_LLM_PURPOSE_JUDGE,
-                                   HU_LLM_PURPOSE_COMMITMENT_CHECK};
+    const hu_llm_purpose_t fg[] = {
+        HU_LLM_PURPOSE_UNTAGGED,         HU_LLM_PURPOSE_REPLY,           HU_LLM_PURPOSE_GUARD_RETRY,
+        HU_LLM_PURPOSE_PLANNER,          HU_LLM_PURPOSE_EXTRACT,         HU_LLM_PURPOSE_JUDGE,
+        HU_LLM_PURPOSE_COMMITMENT_CHECK, HU_LLM_PURPOSE_MODERATION_CHECK};
     for (size_t i = 0; i < sizeof(fg) / sizeof(fg[0]); i++) {
         char h[128];
         lp_headers(fg[i], h, sizeof(h));

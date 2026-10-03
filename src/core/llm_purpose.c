@@ -18,6 +18,7 @@ static const char *const k_names[HU_LLM_PURPOSE__COUNT] = {
     [HU_LLM_PURPOSE_JUDGE] = "judge",
     [HU_LLM_PURPOSE_BACKGROUND] = "background",
     [HU_LLM_PURPOSE_COMMITMENT_CHECK] = "commitment_check",
+    [HU_LLM_PURPOSE_MODERATION_CHECK] = "moderation_check",
 };
 
 const char *hu_llm_purpose_name(hu_llm_purpose_t purpose) {

@@ -1500,6 +1500,7 @@ list(APPEND HU_CORE_SOURCES
     src/security/escalate.c
     src/security/normalize.c
     src/security/moderation.c
+    src/security/moderation_context.c
     src/security/self_harm.c
     src/security/companion_safety.c
     src/tools/code_sandbox.c
@@ -4434,6 +4435,7 @@ list(APPEND HU_TEST_SOURCES
     tests/test_otel.c
     tests/test_cot_audit.c
     tests/test_moderation.c
+    tests/test_moderation_context.c
     tests/test_self_harm.c
     tests/test_companion_safety.c
     tests/test_code_sandbox.c
