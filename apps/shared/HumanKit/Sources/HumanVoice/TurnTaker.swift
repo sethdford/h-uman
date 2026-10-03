@@ -49,6 +49,12 @@ public struct TurnTaker: Sendable {
         return [.submit(samples)]
     }
 
+    /// A turn the user didn't speak (Lester's greeting) is now in flight: utterances
+    /// spoken during it are held for after it, like during any other turn.
+    public mutating func assistantTurnStarted() {
+        inFlight = true
+    }
+
     /// The in-flight turn's response arrived (or it failed).
     public mutating func turnFinished() -> [Action] {
         guard let next = held else {

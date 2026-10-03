@@ -44,6 +44,7 @@ final class SampleBox: @unchecked Sendable {
     private var _samples: [Float] = []
     func append(_ s: [Float]) { lock.lock(); _samples += s; lock.unlock() }
     var samples: [Float] { lock.lock(); defer { lock.unlock() }; return _samples }
+    func reset() { lock.lock(); _samples = []; lock.unlock() }
 }
 
 @MainActor
@@ -151,6 +152,35 @@ final class VoiceSessionTests: XCTestCase {
         await settle()
         XCTAssertEqual(heard, ["how was your day"])
         XCTAssertEqual(said, ["pretty good"])
+    }
+
+    func testGreetAsksTheGatewayAndPlaysTheReply() async throws {
+        let t = FakeTransport()
+        let box = SampleBox()
+        let s = VoiceSession(transport: t) { box.append($0) }
+        var states: [VoiceSession.State] = []
+        s.onStateChange = { states.append($0) }
+        try await s.start()
+        t.script = { tr, method in
+            if method == "voice.session.greet" { tr.pushAudio([0.2, 0.3]) }
+            return FakeTransport.ok()
+        }
+        await s.greet()
+        await settle()
+        XCTAssertEqual(t.methods(), ["voice.session.start", "voice.session.greet"])
+        XCTAssertEqual(box.samples, [0.2, 0.3])
+        XCTAssertTrue(states.contains(.thinking))
+        XCTAssertEqual(s.state, .speaking)
+    }
+
+    func testGreetBeforeStartReportsNotStarted() async {
+        let t = FakeTransport()
+        let s = VoiceSession(transport: t) { _ in }
+        var err: Error?
+        s.onError = { err = $0 }
+        await s.greet()
+        XCTAssertEqual(err as? VoiceSessionError, .notStarted)
+        XCTAssertTrue(t.calls.isEmpty)
     }
 
     func testSubmitBeforeStartReportsNotStarted() async {

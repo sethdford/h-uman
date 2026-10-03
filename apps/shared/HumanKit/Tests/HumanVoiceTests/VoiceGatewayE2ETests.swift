@@ -42,6 +42,23 @@ final class VoiceGatewayE2ETests: XCTestCase {
         session.onError = { errors.append($0) }
 
         try await session.start()
+        if env["HU_VOICE_E2E_GREET"] == "1" {
+            let g0 = Date()
+            await session.greet()
+            for _ in 0..<50 { await Task.yield() }
+            let gAudio = Double(audio.samples.count) / Double(PCMCodec.downlinkSampleRate)
+            print(String(format: "[voice-e2e] greeting=%@ | greeting_audio=%.2fs first_audio=%@ turn=%.2fs",
+                         said, gAudio,
+                         firstAudio.time.map { String(format: "%.2fs", $0.timeIntervalSince(g0)) } ?? "none",
+                         Date().timeIntervalSince(g0)))
+            XCTAssertFalse(said.isEmpty, "no greeting text")
+            XCTAssertGreaterThan(gAudio, 0.3, "greeting audio too short or missing")
+            audio.reset(); firstAudio.reset(); said = ""
+        }
+        if let idle = env["HU_VOICE_E2E_IDLE_SECS"].flatMap(Double.init), idle > 0 {
+            // Leave the session idle first, as a user would between turns.
+            try await Task.sleep(nanoseconds: UInt64(idle * 1_000_000_000))
+        }
         let sent = Date()
         await session.submit(utterance: utterance)
         let total = Date().timeIntervalSince(sent)
@@ -102,5 +119,6 @@ private final class FirstTime: @unchecked Sendable {
     private let lock = NSLock()
     private var _time: Date?
     func mark() { lock.withLock { if _time == nil { _time = Date() } } }
+    func reset() { lock.withLock { _time = nil } }
     var time: Date? { lock.withLock { _time } }
 }

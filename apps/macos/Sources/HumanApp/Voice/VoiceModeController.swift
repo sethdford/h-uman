@@ -120,6 +120,7 @@ final class VoiceModeController: ObservableObject {
     private var speechStartedDuringReply = false
     private var echoTailUntil = Date.distantPast
     private var bargedIn = false
+    private var greeted = false
     private lazy var orb = VoiceHUDPanel(controller: self)
 
     func toggle() {
@@ -185,6 +186,7 @@ final class VoiceModeController: ObservableObject {
         vadBox.reset()
         vadBox.assistantSpeaking = false
         hearing = false
+        greeted = false
         level = 0
         phase = .off
         orb.hide()
@@ -231,7 +233,16 @@ final class VoiceModeController: ObservableObject {
                     try await session.start()
                 } catch {
                     phase = .failed("The voice gateway refused the session (\(error)).")
+                    return
                 }
+                // Lester opens the first session; reconnects pick up where we were.
+                guard !greeted, self.session === session else { return }
+                greeted = true
+                turns.assistantTurnStarted()
+                audio?.beginReply()
+                await session.greet()
+                guard self.session === session else { return }
+                perform(turns.turnFinished())
             }
         case .connecting:
             phase = .connecting

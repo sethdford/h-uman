@@ -35,6 +35,13 @@ final class TurnTakerTests: XCTestCase {
         XCTAssertEqual(t.speechSustained(assistant: .idle), [])
     }
 
+    func testSpeechDuringTheGreetingIsHeldUntilItEnds() {
+        var t = TurnTaker()
+        t.assistantTurnStarted()
+        XCTAssertEqual(t.utterance([0.4]), [])
+        XCTAssertEqual(t.turnFinished(), [.submit([0.4])])
+    }
+
     func testResetDropsHeldSpeech() {
         var t = TurnTaker()
         _ = t.utterance([0.1])

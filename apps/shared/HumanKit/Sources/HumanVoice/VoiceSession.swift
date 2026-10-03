@@ -148,6 +148,28 @@ public final class VoiceSession {
         if state == .thinking { state = .listening }
     }
 
+    /// Lester opens the conversation: the gateway runs a greeting turn and its reply
+    /// streams to `audioSink` like any other. Returns when the turn is done.
+    public func greet() async {
+        guard state != .idle else {
+            onError?(VoiceSessionError.notStarted)
+            return
+        }
+        gate.set(true)
+        replyAudioSeen = false
+        state = .thinking
+        do {
+            let res = try await transport.request(method: "voice.session.greet", params: nil,
+                                                  timeout: turnTimeout)
+            if !res.ok {
+                onError?(VoiceSessionError.turnRejected(Self.errorText(res)))
+            }
+        } catch {
+            onError?(error)
+        }
+        if state == .thinking { state = .listening }
+    }
+
     /// The user started talking over the reply: stop it here and tell the gateway.
     /// Frames still in flight for this turn are dropped.
     public func bargeIn() {
