@@ -289,3 +289,63 @@ candidate's number.
 - **Template drift.** The manifest records a hash of the chat template.
   `test_template_matches_mlx_server_render` fails if the server's rendering
   diverges from the training rows.
+
+## Adapter retention (disk-fill fix, 2026-10-03)
+
+`~/.human/training-data/adapters/` accumulates nightly output with nothing to
+prune it: ~2.1 GB/night of `seth-glm-air-mlxtune-<mode>-<stamp>-<stamp>`
+candidates from the mlx-tune candidate stage, and ~0.5 GB/night of
+`seth-m3-outcomes-<stamp>[-glm]` staged adapters from the M3 outcome trainer.
+This filled the disk to 100%. Owner-approved policy: **keep the newest 2
+candidate adapters of each kind** (a "kind" is the name with its timestamp(s)
+stripped — `seth-m3-outcomes` and `seth-m3-outcomes-glm` are separate kinds,
+as is each `mlxtune` mode); never touch an unrecognized name; never prune
+blind.
+
+### The two mechanisms
+
+1. **`scripts/nightly-retrain.sh`'s `free_gb_check`** (precheck, before
+   training stops `:8741`): refuses to run when free space on `/` is below
+   `HU_RETRAIN_MIN_FREE_GB` (default **50**, raised from 20 on 2026-10-03).
+   Logs `skipped: disk (<free> GB free on /, need <need>)` and exits 0 — a
+   training run that cannot save its own output must never start.
+2. **`scripts/retrain/prune_adapters.py`** (after every run, success or
+   failure, still inside the dark window): classifies every nightly-family
+   dir under the adapters dir, protects the adapter currently named by
+   `~/.human/config.json`'s `personalization.lora_adapter_path`, anything
+   referenced by an `ai.human*.plist`, and anything in `registry.json`, keeps
+   the newest 2 of every other kind, and deletes the rest.
+
+### Env vars
+
+| Var | Default | Meaning |
+|---|---|---|
+| `HU_RETRAIN_MIN_FREE_GB` | 50 | Floor for the pre-training disk precheck. |
+| `HU_ADAPTER_PRUNE` | `shadow` | `off` (no-op) \| `shadow` (log only, deletes nothing) \| `live` (deletes). |
+
+### How to flip shadow → live
+
+1. Let the nightly job run at least once with the default `shadow` mode (or
+   run it by hand: `python3 scripts/retrain/prune_adapters.py --adapters-dir
+   ~/.human/training-data/adapters`).
+2. Read the `[adapter_prune shadow] would delete …` lines in
+   `~/.human/logs/nightly-retrain.log`. Confirm every name is one you expect
+   (a real nightly candidate, not something hand-placed) and that the served
+   adapter and anything in `registry.json` are correctly absent from that
+   list.
+3. Set `HU_ADAPTER_PRUNE=live` in the environment the launchd job runs with
+   (edit `~/Library/LaunchAgents/ai.human.nightly-retrain.plist`'s
+   `EnvironmentVariables`, then `launchctl bootout`/`bootstrap` to reload it).
+4. `human doctor`'s `adapter_disk` check warns when free space drops below 50
+   GB (errors below 10 GB) or nightly candidates exceed 20 GB total, and
+   names `HU_ADAPTER_PRUNE=live` as the fix — treat a FAIL there as the signal
+   to flip, not a surprise.
+
+### Rollback
+
+Set `HU_ADAPTER_PRUNE=off` (or delete the env var override to fall back to
+the `shadow` default) in the plist's `EnvironmentVariables` and reload the
+job. Pruning only ever removes directories already excluded from `kept` —
+the served adapter, every `registry.json` entry and every plist-referenced
+adapter are structurally un-deletable regardless of mode, so there is no
+state to restore beyond turning the mode back down.

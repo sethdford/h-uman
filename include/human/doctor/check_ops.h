@@ -113,4 +113,31 @@ typedef struct hu_doctor_contact_optout_ctx {
 } hu_doctor_contact_optout_ctx_t;
 extern const hu_doctor_check_t hu_doctor_check_contact_optout;
 
+/* ── adapter_disk: is the nightly retrain about to fill the disk? ────
+ * 2026-10-03: ~/.human/training-data/adapters/ accumulates ~2.1 GB/night of
+ * seth-glm-air-mlxtune-* candidates and ~0.5 GB/night of seth-m3-outcomes-*
+ * staged adapters; nothing pruned them and the disk hit 100%. scripts/
+ * retrain/prune_adapters.py now prunes (default HU_ADAPTER_PRUNE=shadow),
+ * but a doctor that cannot see the disk filling back up between runs is not
+ * a doctor. All fields 0/-1 resolve to the production default. */
+typedef struct hu_doctor_adapter_disk_ctx {
+    const char *adapters_dir;  /* NULL → hu_paths_state("training-data/adapters") */
+    int64_t free_bytes;        /* -1 → statvfs(adapters_dir) */
+    int64_t candidate_bytes;   /* -1 → sum of the seth-m3-outcomes- and seth-glm-air-mlxtune-
+                                * family dir sizes directly under adapters_dir */
+    int64_t warn_free_gb;      /* 0 → 50 */
+    int64_t error_free_gb;     /* 0 → 10 */
+    int64_t candidate_warn_gb; /* 0 → 20 */
+} hu_doctor_adapter_disk_ctx_t;
+extern const hu_doctor_check_t hu_doctor_check_adapter_disk;
+/* Pure predicate (security-predicate-extraction style): true when the check
+ * must FAIL given these already-measured quantities. Exposed for tests so
+ * the threshold logic is pinned without touching a real filesystem. */
+bool hu_doctor_adapter_disk_should_fail(int64_t free_gb, int64_t candidate_gb, int64_t warn_free_gb,
+                                        int64_t error_free_gb, int64_t candidate_warn_gb);
+/* Recursive size in bytes of every regular file under `path` (bounded depth,
+ * symlinks never followed). 0 for a missing/unreadable path. Exposed so the
+ * pruner's and the doctor's "how big is this directory" agree in tests. */
+int64_t hu_doctor_dir_size_bytes(const char *path);
+
 #endif /* HU_DOCTOR_CHECK_OPS_H */

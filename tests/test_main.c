@@ -306,6 +306,7 @@ void run_doctor_prompt_budget_tests(void);
 void run_doctor_eval_freshness_tests(void);
 void run_doctor_serving_stability_tests(void);
 void run_doctor_log_hygiene_tests(void);
+void run_doctor_adapter_disk_tests(void);
 void run_doctor_imessage_cursor_tests(void);
 void run_doctor_blind_ab_gate_tests(void);
 void run_outbound_sanitize_tests(void);
@@ -1449,6 +1450,7 @@ int main(int argc, char **argv) {
     run_doctor_eval_freshness_tests();
     run_doctor_serving_stability_tests();
     run_doctor_log_hygiene_tests();
+    run_doctor_adapter_disk_tests();
     run_doctor_imessage_cursor_tests();
     run_doctor_blind_ab_gate_tests();
     run_outbound_sanitize_tests();
