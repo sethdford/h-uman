@@ -1156,27 +1156,39 @@ static bool g10_ci_match(char a, char b) {
 /* D2 — candidate-reply enumeration: "option" + digits + ':'. The colon is
  * required so conversational uses ("the second option sounds better",
  * "go with option 3.") never trip — substring-classifier-pitfalls. */
+/* D2 — candidate-reply enumeration: a label word, a number, then a colon
+ * ("Option 3:", "Draft 1*:", "*Draft 2:*"). Markdown emphasis may sit between
+ * the number and the colon. The label must start a word so "redraft" does not
+ * count, and the colon must follow the number, so "draft 1 of the essay:" and
+ * "my other option: pizza" stay sendable. "version" is deliberately absent:
+ * "ios version 18: so buggy" is ordinary texting. */
 static bool hu_guard_has_option_enumeration(const char *s, size_t len) {
-    static const char kw[] = "option";
-    const size_t kw_len = sizeof(kw) - 1;
-    for (size_t i = 0; i + kw_len < len; i++) {
-        size_t k = 0;
-        while (k < kw_len && g10_ci_match(s[i + k], kw[k]))
-            k++;
-        if (k != kw_len)
-            continue;
-        size_t j = i + kw_len;
-        while (j < len && s[j] == ' ')
-            j++;
-        size_t digits_start = j;
-        while (j < len && s[j] >= '0' && s[j] <= '9')
-            j++;
-        if (j == digits_start)
-            continue;
-        while (j < len && s[j] == ' ')
-            j++;
-        if (j < len && s[j] == ':')
-            return true;
+    static const char *const kws[] = {"option", "draft", "candidate", "alternative"};
+    for (size_t w = 0; w < sizeof(kws) / sizeof(kws[0]); w++) {
+        const char *kw = kws[w];
+        const size_t kw_len = strlen(kw);
+        for (size_t i = 0; i + kw_len < len; i++) {
+            if (i > 0 &&
+                ((s[i - 1] >= 'a' && s[i - 1] <= 'z') || (s[i - 1] >= 'A' && s[i - 1] <= 'Z')))
+                continue;
+            size_t k = 0;
+            while (k < kw_len && g10_ci_match(s[i + k], kw[k]))
+                k++;
+            if (k != kw_len)
+                continue;
+            size_t j = i + kw_len;
+            while (j < len && s[j] == ' ')
+                j++;
+            size_t digits_start = j;
+            while (j < len && s[j] >= '0' && s[j] <= '9')
+                j++;
+            if (j == digits_start)
+                continue;
+            while (j < len && (s[j] == ' ' || s[j] == '*' || s[j] == '_'))
+                j++;
+            if (j < len && s[j] == ':')
+                return true;
+        }
     }
     return false;
 }

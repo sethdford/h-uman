@@ -1,6 +1,7 @@
 import AVFoundation
 import HumanClient
 import HumanVoice
+import OSLog
 import SwiftUI
 
 /// Settings for voice mode, stored in the app's user defaults.
@@ -61,7 +62,11 @@ final class VoiceModeController: ObservableObject {
         case failed(String)
     }
 
-    @Published private(set) var phase: Phase = .off
+    @Published private(set) var phase: Phase = .off {
+        didSet {
+            if phase != oldValue { Self.log.notice("voice phase: \(String(describing: self.phase), privacy: .public)") }
+        }
+    }
     /// Smoothed microphone level, 0...1, for the orb.
     @Published private(set) var level: CGFloat = 0
     @Published private(set) var heard = ""
@@ -72,13 +77,50 @@ final class VoiceModeController: ObservableObject {
 
     var isOn: Bool { phase != .off }
 
+    /// The HUD's view of the current state.
+    var hudState: VoiceHUDState {
+        if muted { return VoiceHUDState(mode: .muted, title: "Muted", detail: "Tap the mic to listen again") }
+        switch phase {
+        case .off, .connecting:
+            return VoiceHUDState(mode: .connecting, title: "Connecting…", detail: "Reaching your voice gateway")
+        case .listening:
+            return VoiceHUDState(mode: .listening, level: level, title: "Listening", detail: said)
+        case .hearing:
+            return VoiceHUDState(mode: .hearing, level: level, title: "Listening", detail: "")
+        case .thinking:
+            return VoiceHUDState(mode: .thinking, title: "Thinking", detail: heard)
+        case .speaking:
+            return VoiceHUDState(mode: .speaking, level: replyLevel, title: "Speaking", detail: said)
+        case .failed(let why):
+            return VoiceHUDState(mode: .failed, title: "Voice mode stopped", detail: why)
+        }
+    }
+
+    /// Smoothed level of the reply audio, for the orb while speaking.
+    @Published private(set) var replyLevel: CGFloat = 0
+
+    /// `log show --predicate 'subsystem == "ai.human.macos"' --info` shows these.
+    static let log = Logger(subsystem: "ai.human.macos", category: "voice")
+
+    init() {
+        let args = ProcessInfo.processInfo.arguments
+        if args.contains("--voice-mode") || UserDefaults.standard.bool(forKey: "voice.autoStart") {
+            Task { @MainActor [weak self] in await self?.start() }
+        }
+    }
+
     private var connection: HumanConnection?
     private var session: VoiceSession?
     private var audio: AudioIO?
     private let vadBox = VADBox()
     private var turns = TurnTaker()
     private var hearing = false
-    private lazy var orb = OrbPanel(controller: self)
+    /// Speech that began while a reply was audible is the reply's own echo (clean playback
+    /// bypasses the echo canceller) unless it was loud enough to barge in.
+    private var speechStartedDuringReply = false
+    private var echoTailUntil = Date.distantPast
+    private var bargedIn = false
+    private lazy var orb = VoiceHUDPanel(controller: self)
 
     func toggle() {
         if isOn { stop() } else { Task { await start() } }
@@ -92,6 +134,7 @@ final class VoiceModeController: ObservableObject {
             return
         }
 
+        Self.log.notice("voice mode starting")
         let urlString = VoiceSettings.string(VoiceSettings.gatewayURLKey, VoiceSettings.defaultGatewayURL)
         guard let url = URL(string: urlString) else {
             phase = .failed("Voice gateway URL is not valid: \(urlString)")
@@ -105,8 +148,13 @@ final class VoiceModeController: ObservableObject {
             transport: connection,
             voiceId: VoiceSettings.string(VoiceSettings.voiceIdKey, VoiceSettings.defaultVoiceId),
             modelId: VoiceSettings.string(VoiceSettings.modelIdKey, VoiceSettings.defaultModelId)
-        ) { [audio] samples in
+        ) { [audio, weak self] samples in
             audio.enqueue(samples)
+            let rms = CGFloat(EnergyVAD.rms(samples))
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.replyLevel = self.replyLevel * 0.6 + min(1, rms / 0.12) * 0.4
+            }
         }
         wire(session: session, audio: audio, connection: connection)
 
@@ -152,11 +200,14 @@ final class VoiceModeController: ObservableObject {
         session.onAssistantText = { [weak self] text in self?.said = text }
         session.onReplyAudioDone = { [weak audio] in audio?.markReplyDone() }
         session.onError = { error in
-            NSLog("[voice] turn error: %@", String(describing: error))
+            VoiceModeController.log.error("voice turn error: \(String(describing: error), privacy: .public)")
         }
 
         audio.onDrained = { [weak self] in
-            Task { @MainActor in self?.session?.playbackFinished() }
+            Task { @MainActor in
+                self?.echoTailUntil = Date().addingTimeInterval(0.5)
+                self?.session?.playbackFinished()
+            }
         }
         let vadBox = self.vadBox
         audio.onFrame = { [weak self] frame in
@@ -171,6 +222,7 @@ final class VoiceModeController: ObservableObject {
     }
 
     private func connectionChanged(_ state: HumanConnection.ConnectionState) {
+        Self.log.notice("voice gateway connection: \(String(describing: state), privacy: .public)")
         guard isOn, let session else { return }
         switch state {
         case .connected:
@@ -203,8 +255,25 @@ final class VoiceModeController: ObservableObject {
         }
     }
 
+    // Capture diagnostics, logged every ~3 s so a silent microphone is visible.
+    private var diagFrames = 0
+    private var diagPeak: Float = 0
+    private var diagEvents = 0
+
     private func captured(_ events: [EnergyVAD.Event], rms: Float) {
         guard isOn else { return }
+        diagFrames += 1
+        diagPeak = max(diagPeak, rms)
+        diagEvents += events.count
+        if diagFrames >= 150 {
+            Self.log.notice("voice capture: frames=\(self.diagFrames) peak_rms=\(self.diagPeak, format: .fixed(precision: 4)) vad_events=\(self.diagEvents) phase=\(String(describing: self.phase), privacy: .public) muted=\(self.muted)")
+            diagFrames = 0
+            diagPeak = 0
+            diagEvents = 0
+        }
+        for event in events {
+            Self.log.notice("voice vad: \(String(describing: event).prefix(40), privacy: .public)")
+        }
         // Map RMS (speech is roughly 0.02...0.2) onto 0...1 and smooth it.
         let target = CGFloat(min(1, max(0, (rms - 0.005) / 0.15)))
         level = level * 0.7 + target * 0.3
@@ -214,10 +283,20 @@ final class VoiceModeController: ObservableObject {
             switch event {
             case .speechStarted:
                 hearing = true
-                perform(turns.speechStarted(assistant: session.state))
+                bargedIn = false
+                speechStartedDuringReply = session.state == .speaking || Date() < echoTailUntil
                 if session.state == .listening { phase = .hearing }
+            case .sustained:
+                let actions = turns.speechSustained(assistant: session.state)
+                if actions.contains(.bargeIn) { bargedIn = true }
+                perform(actions)
             case .utterance(let samples):
                 hearing = false
+                if speechStartedDuringReply && !bargedIn {
+                    Self.log.notice("voice: dropped an utterance that began during the reply (echo)")
+                    if session.state == .listening { phase = .listening }
+                    continue
+                }
                 perform(turns.utterance(samples))
             case .discarded:
                 hearing = false

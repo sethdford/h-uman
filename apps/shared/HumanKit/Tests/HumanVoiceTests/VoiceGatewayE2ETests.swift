@@ -53,6 +53,12 @@ final class VoiceGatewayE2ETests: XCTestCase {
                      heard, said, replySeconds,
                      ttfa.map { String(format: "%.2fs", $0) } ?? "none", total))
 
+        if let save = env["HU_VOICE_E2E_SAVE"] {
+            // The reply exactly as the gateway streamed it (Cartesia PCM), for listening.
+            let wav = PCMCodec.wav(samples: PCMCodec.int16(from: audio.samples),
+                                   sampleRate: PCMCodec.downlinkSampleRate)
+            try wav.write(to: URL(fileURLWithPath: save))
+        }
         XCTAssertTrue(errors.isEmpty, "turn errors: \(errors)")
         XCTAssertFalse(heard.isEmpty, "gateway produced no transcript")
         XCTAssertFalse(said.isEmpty, "gateway produced no reply text")

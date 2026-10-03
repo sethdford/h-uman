@@ -61,16 +61,39 @@ final class EnergyVADTests: XCTestCase {
         let events = run(&vad, ms(400, tone(0.001)) + ms(1_000, tone(0.2)) + ms(1_500, tone(0.001)))
         XCTAssertEqual(events.first, .speechStarted)
         guard case .utterance(let samples)? = events.last else { return XCTFail("no utterance: \(events)") }
-        XCTAssertEqual(events.count, 2)
+        XCTAssertEqual(events, [.speechStarted, .sustained, events.last!])
         // 300 ms pre-roll + 1 s speech + 1.4 s trailing silence, give or take a frame.
         XCTAssertGreaterThanOrEqual(samples.count, 16_000 * 27 / 10 - frame)
         XCTAssertLessThanOrEqual(samples.count, 16_000 * 27 / 10 + 2 * frame)
+    }
+
+    /// Real speech has quiet gaps between syllables; a sentence must not be discarded
+    /// just because fewer than minSpeechMs of its frames were above the threshold.
+    func testSpeechWithGapsBetweenSyllablesIsAnUtterance() {
+        var vad = EnergyVAD()
+        var frames = ms(300, tone(0.001))
+        for _ in 0..<8 { frames += ms(60, tone(0.2)) + ms(140, tone(0.001)) } // 1.6 s, 0.48 s loud
+        frames += ms(1_500, tone(0.001))
+        let events = run(&vad, frames)
+        XCTAssertEqual(events.first, .speechStarted)
+        guard case .utterance? = events.last else { return XCTFail("discarded a sentence: \(events)") }
     }
 
     func testShortBlipIsDiscarded() {
         var vad = EnergyVAD()
         let events = run(&vad, ms(200, tone(0.2)) + ms(1_500, tone(0.001)))
         XCTAssertEqual(events, [.speechStarted, .discarded])
+    }
+
+    /// `.sustained` (the barge-in signal) fires once speech has lasted sustainMs, and
+    /// never for a blip shorter than that.
+    func testSustainedFiresOnceForSpeechButNotForABlip() {
+        var vad = EnergyVAD()
+        let speech = run(&vad, ms(1_000, tone(0.2)) + ms(1_500, tone(0.001)))
+        XCTAssertEqual(speech.filter { $0 == .sustained }.count, 1)
+        XCTAssertEqual(speech.first, .speechStarted)
+        var vad2 = EnergyVAD()
+        XCTAssertFalse(run(&vad2, ms(160, tone(0.2)) + ms(1_500, tone(0.001))).contains(.sustained))
     }
 
     func testAssistantSpeakingRaisesTheThreshold() {
