@@ -1,6 +1,10 @@
+#include "human/agent.h"
+#include "human/channel.h"
+#include "human/cron.h"
 #include "human/daemon.h"
 #include "human/daemon_cron.h"
 #include "test_framework.h"
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
@@ -157,6 +161,147 @@ static void test_cron_tick_runs_without_crash(void) {
     hu_daemon_cron_tick(&alloc);
 }
 
+/* ── proactive check-ins ──────────────────────────────────────────────────────
+ * 2026-10-02: the persona stores a contact's proactive channel with the handle
+ * already in it ("imessage:<handle>"); registration appended contact_id again, so
+ * every daily check-in targeted "imessage:<handle>:<handle>" and never sent. */
+
+static void checkin_target_uses_channel_that_already_names_the_handle(void) {
+    char buf[64];
+    int n = hu_proactive_checkin_target(buf, sizeof(buf), "imessage:+15550001111", "+15550001111");
+    HU_ASSERT_TRUE(n > 0);
+    HU_ASSERT_STR_EQ(buf, "imessage:+15550001111");
+}
+
+static void checkin_target_appends_contact_to_a_bare_channel(void) {
+    char buf[64];
+    HU_ASSERT_TRUE(hu_proactive_checkin_target(buf, sizeof(buf), "imessage", "+15550001111") > 0);
+    HU_ASSERT_STR_EQ(buf, "imessage:+15550001111");
+}
+
+static void checkin_target_rejects_bad_input_and_truncation(void) {
+    char buf[8];
+    HU_ASSERT_EQ(hu_proactive_checkin_target(buf, sizeof(buf), NULL, "x"), -1);
+    HU_ASSERT_EQ(buf[0], '\0');
+    HU_ASSERT_EQ(hu_proactive_checkin_target(buf, sizeof(buf), "imessage", NULL), -1);
+    HU_ASSERT_EQ(hu_proactive_checkin_target(buf, sizeof(buf), "imessage", "+15550001111"), -1);
+    HU_ASSERT_EQ(buf[0], '\0');
+    HU_ASSERT_EQ(hu_proactive_checkin_target(NULL, 8, "imessage", "x"), -1);
+}
+
+static void checkin_job_name_predicate(void) {
+    HU_ASSERT_TRUE(hu_cron_job_is_proactive_checkin("proactive:Mom"));
+    HU_ASSERT_FALSE(hu_cron_job_is_proactive_checkin("research-agent"));
+    HU_ASSERT_FALSE(hu_cron_job_is_proactive_checkin("proactiveX"));
+    HU_ASSERT_FALSE(hu_cron_job_is_proactive_checkin(NULL));
+}
+
+static void checkin_mode_reads_env_default_off(void) {
+    const char *prev = getenv("HU_PROACTIVE_CHECKINS");
+    char *saved = prev ? strdup(prev) : NULL;
+    unsetenv("HU_PROACTIVE_CHECKINS");
+    HU_ASSERT_EQ((int)hu_proactive_checkin_mode(), (int)HU_GATE_OFF);
+    setenv("HU_PROACTIVE_CHECKINS", "shadow", 1);
+    HU_ASSERT_EQ((int)hu_proactive_checkin_mode(), (int)HU_GATE_SHADOW);
+    setenv("HU_PROACTIVE_CHECKINS", "live", 1);
+    HU_ASSERT_EQ((int)hu_proactive_checkin_mode(), (int)HU_GATE_LIVE);
+    if (saved) {
+        setenv("HU_PROACTIVE_CHECKINS", saved, 1);
+        free(saved);
+    } else {
+        unsetenv("HU_PROACTIVE_CHECKINS");
+    }
+}
+
+/* The runner end to end: an every-minute check-in job and a mock iMessage channel
+ * that records sends. Under HU_IS_TEST the agent turn returns canned text. */
+typedef struct cron_mock_channel {
+    size_t sends;
+    char last_target[64];
+} cron_mock_channel_t;
+
+static hu_error_t cron_mock_send(void *ctx, const char *target, size_t target_len,
+                                 const char *message, size_t message_len, const char *const *media,
+                                 size_t media_count) {
+    (void)message;
+    (void)message_len;
+    (void)media;
+    (void)media_count;
+    cron_mock_channel_t *m = (cron_mock_channel_t *)ctx;
+    m->sends++;
+    size_t n = target_len < sizeof(m->last_target) - 1 ? target_len : sizeof(m->last_target) - 1;
+    memcpy(m->last_target, target, n);
+    m->last_target[n] = '\0';
+    return HU_OK;
+}
+
+static const char *cron_mock_name(void *ctx) {
+    (void)ctx;
+    return "imessage";
+}
+
+static const hu_channel_vtable_t cron_mock_vtable = {.send = cron_mock_send,
+                                                     .name = cron_mock_name};
+
+static size_t run_checkin_under(const char *mode, char *target_out, size_t target_cap) {
+    const char *prev = getenv("HU_PROACTIVE_CHECKINS");
+    char *saved = prev ? strdup(prev) : NULL;
+    if (mode)
+        setenv("HU_PROACTIVE_CHECKINS", mode, 1);
+    else
+        unsetenv("HU_PROACTIVE_CHECKINS");
+
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_cron_scheduler_t *sched = hu_cron_create(&alloc, 8, true);
+    HU_ASSERT_NOT_NULL(sched);
+    char target[64];
+    HU_ASSERT_TRUE(hu_proactive_checkin_target(target, sizeof(target), "imessage:+15550001111",
+                                               "+15550001111") > 0);
+    uint64_t id = 0;
+    HU_ASSERT_EQ(hu_cron_add_agent_job(sched, &alloc, "* * * * *", "check in", target,
+                                       "proactive:Test", &id),
+                 HU_OK);
+
+    hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    agent.alloc = &alloc;
+    agent.scheduler = sched;
+    cron_mock_channel_t mock;
+    memset(&mock, 0, sizeof(mock));
+    hu_channel_t ch = {.ctx = &mock, .vtable = &cron_mock_vtable};
+    hu_service_channel_t svc;
+    memset(&svc, 0, sizeof(svc));
+    svc.channel = &ch;
+
+    HU_ASSERT_EQ(hu_service_run_agent_cron(&alloc, &agent, &svc, 1), HU_OK);
+    if (target_out && target_cap)
+        snprintf(target_out, target_cap, "%s", mock.last_target);
+    hu_cron_destroy(sched, &alloc);
+
+    if (saved) {
+        setenv("HU_PROACTIVE_CHECKINS", saved, 1);
+        free(saved);
+    } else {
+        unsetenv("HU_PROACTIVE_CHECKINS");
+    }
+    return mock.sends;
+}
+
+static void checkin_runner_off_sends_nothing(void) {
+    HU_ASSERT_EQ(run_checkin_under(NULL, NULL, 0), 0u);
+    HU_ASSERT_EQ(run_checkin_under("off", NULL, 0), 0u);
+}
+
+static void checkin_runner_shadow_writes_but_sends_nothing(void) {
+    HU_ASSERT_EQ(run_checkin_under("shadow", NULL, 0), 0u);
+}
+
+static void checkin_runner_live_sends_to_the_single_handle(void) {
+    char target[64] = {0};
+    HU_ASSERT_EQ(run_checkin_under("live", target, sizeof(target)), 1u);
+    HU_ASSERT_STR_EQ(target, "+15550001111");
+}
+
 void run_daemon_cron_tests(void) {
     HU_TEST_SUITE("daemon_cron");
 
@@ -190,4 +335,14 @@ void run_daemon_cron_tests(void) {
     /* cron tick */
     HU_RUN_TEST(test_cron_tick_null_alloc);
     HU_RUN_TEST(test_cron_tick_runs_without_crash);
+
+    /* proactive check-ins */
+    HU_RUN_TEST(checkin_target_uses_channel_that_already_names_the_handle);
+    HU_RUN_TEST(checkin_target_appends_contact_to_a_bare_channel);
+    HU_RUN_TEST(checkin_target_rejects_bad_input_and_truncation);
+    HU_RUN_TEST(checkin_job_name_predicate);
+    HU_RUN_TEST(checkin_mode_reads_env_default_off);
+    HU_RUN_TEST(checkin_runner_off_sends_nothing);
+    HU_RUN_TEST(checkin_runner_shadow_writes_but_sends_nothing);
+    HU_RUN_TEST(checkin_runner_live_sends_to_the_single_handle);
 }
