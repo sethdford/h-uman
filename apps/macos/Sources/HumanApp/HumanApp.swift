@@ -8,6 +8,7 @@ private let springMotion9 = Animation.spring(response: 0.35, dampingFraction: 0.
 @main
 struct HumanApp: App {
     @StateObject private var status = StatusViewModel()
+    @StateObject private var voice = VoiceModeController()
 
     var body: some Scene {
         WindowGroup("h-uman Dashboard") {
@@ -107,6 +108,10 @@ struct HumanApp: App {
                 }
                 .keyboardShortcut("d")
                 .accessibilityLabel("Bring h-uman dashboard to front")
+                Toggle("Voice Mode", isOn: Binding(get: { voice.isOn }, set: { _ in voice.toggle() }))
+                    .keyboardShortcut("v")
+                    .accessibilityLabel("Voice mode: talk to h-uman hands-free")
+                Divider()
                 Button("Start Service") {
                     withAnimation(springMotion9) {
                         status.startService()
@@ -139,7 +144,7 @@ struct HumanApp: App {
             .font(.custom("Avenir-Book", size: HUTokens.textBase))
             .frame(minWidth: 200)
         } label: {
-            Image(systemName: "antenna.radiowaves.left.and.right")
+            Image(systemName: voice.isOn ? "waveform.circle.fill" : "antenna.radiowaves.left.and.right")
                 .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(status.statusColor)
                 .animation(springMotion9, value: "\(status.isServiceRunning)-\(status.isGatewayConnected)")
